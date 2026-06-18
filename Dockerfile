@@ -29,6 +29,7 @@ LABEL org.opencontainers.image.title="KeyWars" \
       org.opencontainers.image.source="https://github.com/adrianweidig/KeyWars" \
       org.opencontainers.image.licenses="MIT"
 WORKDIR /app
+# hadolint ignore=DL3008
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates libldap2 libsasl2-2 \
     && rm -rf /var/lib/apt/lists/* \
