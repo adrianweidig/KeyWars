@@ -42,8 +42,8 @@ export function attachTypingApps() {
         return;
       }
 
-      const typed = Array.from(input.value.normalize("NFC"));
-      const expected = Array.from(session.text.normalize("NFC"));
+      const typed = splitGraphemes(input.value);
+      const expected = splitGraphemes(session.text);
       target.replaceChildren(...expected.map((char, index) => {
         const span = document.createElement("span");
         span.textContent = char;
@@ -112,7 +112,14 @@ export function attachTypingApps() {
       }
     };
 
-    const splitGraphemes = (value) => Array.from(value.normalize("NFC"));
+    const splitGraphemes = (value) => {
+      const normalized = String(value || "").normalize("NFC");
+      if (window.Intl && Intl.Segmenter) {
+        return Array.from(new Intl.Segmenter("de", { granularity: "grapheme" }).segment(normalized), segment => segment.segment);
+      }
+
+      return Array.from(normalized);
+    };
 
     const collectFinalErrors = () => {
       if (!session) {

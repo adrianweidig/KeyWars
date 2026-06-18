@@ -51,20 +51,7 @@ jobs:
           dockerfile: Dockerfile
 
       - name: Repository hygiene
-        shell: bash
-        run: |
-          test -f LICENSE
-          test -f SECURITY.md
-          test -f CONTRIBUTING.md
-          test -f CODE_OF_CONDUCT.md
-          test -f .github/CODEOWNERS
-          test -f .github/dependabot.yml
-          test -f .editorconfig
-          artifacts="$(find . -path ./.git -prune -o -type f \
-            \( -name '*.7z' -o -name '*.tar' -o -name '*.tar.gz' -o -name '*.db' -o -name '*.log' \) \
-            -print -quit)"
-          if [ -n "$artifacts" ]; then
-            echo "$artifacts"
-            echo "Generated or local artifact files must not be committed."
-            exit 1
-          fi
+        run: python scripts/check_repository_hygiene.py
+
+      - name: Implementation status
+        run: python scripts/check_implementation_status.py

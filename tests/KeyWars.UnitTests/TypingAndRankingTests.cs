@@ -56,6 +56,18 @@ public sealed class TypingAndRankingTests
     }
 
     [Fact]
+    public void TimeModeTreatsPartialTypedInputAsCompletedSprint()
+    {
+        var engine = new TypingEngine(TimeProvider.System);
+
+        var metrics = engine.Analyze("Schlüssel und Straße", "Schlüssel", TimeSpan.FromSeconds(15), 0, 0, timeMode: true);
+
+        Assert.True(metrics.Completed);
+        Assert.Equal(TypingEngine.SplitGraphemes("Schlüssel").Count, metrics.CorrectCharacters);
+        Assert.Equal(100, metrics.Accuracy);
+    }
+
+    [Fact]
     public void ClassicRankingWorksForMoreThanTwoPeople()
     {
         var ids = Enumerable.Range(0, 5).Select(_ => Guid.CreateVersion7()).ToArray();

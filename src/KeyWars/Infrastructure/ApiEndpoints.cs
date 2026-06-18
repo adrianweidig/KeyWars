@@ -2,6 +2,7 @@ using KeyWars.Auth;
 using KeyWars.Data;
 using KeyWars.Services;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace KeyWars.Infrastructure;
 
@@ -9,7 +10,9 @@ public static class ApiEndpoints
 {
     public static void MapKeyWarsApi(this IEndpointRouteBuilder endpoints)
     {
-        var api = endpoints.MapGroup("/api").RequireAuthorization();
+        var api = endpoints.MapGroup("/api")
+            .RequireAuthorization()
+            .RequireRateLimiting("keywars-api");
         api.AddEndpointFilter(async (context, next) =>
         {
             var request = context.HttpContext.Request;

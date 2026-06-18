@@ -6,4 +6,9 @@ Persistente Daten liegen ausschließlich unter `/data`: SQLite-Datenbank, WAL/SH
 
 Das Challenge-Modell verwendet `Challenge`, `ChallengeParticipant`, `ChallengeRound` und `ChallengeRoundResult`. Es gibt kein Creator/Opponent-Sonderfeld und keine Zwei-Personen-Annahme.
 
-Die Live-Arena nutzt `LiveRoomManager` mit konfigurierbaren Kapazitätsgrenzen und begrenzten Channels für Fortschrittskommandos. Fortschritt wird im Speicher verarbeitet; SQLite erhält nur zusammengefasste Ergebnisse.
+Die Live-Arena nutzt `LiveRoomManager` mit konfigurierbaren Kapazitätsgrenzen,
+einer serverseitigen Raumphase und einem synchronisierten Countdown. Fortschritt
+wird im Speicher verarbeitet; SQLite erhält nur zusammengefasste Ergebnisse.
+Eine begrenzte Command-Queue mit Progress-Deltas ist als KW-015 geplant und
+darf bis zur Implementierung nicht als produktiver Ist-Zustand beschrieben
+werden.

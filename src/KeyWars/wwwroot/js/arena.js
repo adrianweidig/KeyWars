@@ -1,8 +1,7 @@
-const recordSeparator = "\u001e";
-
 export function attachArenaPages() {
   document.querySelectorAll("[data-arena-room]").forEach((root) => {
     const roomId = root.dataset.roomId;
+    const currentProfileId = root.dataset.currentProfileId;
     const target = root.querySelector("[data-arena-target]");
     const input = root.querySelector("[data-arena-input]");
     const participants = root.querySelector("[data-arena-participants]");
@@ -12,12 +11,13 @@ export function attachArenaPages() {
     const startForm = document.querySelector("[data-arena-start-form]");
     const finishForm = root.querySelector("[data-arena-finish-form]");
     const finishButton = root.querySelector("[data-arena-finish]");
-    const connection = new JsonHubConnection("/hubs/arena");
+    const connection = new SignalRConnection("/hubs/arena");
 
     let snapshot = null;
     let sequence = 0;
     let progressTimer = 0;
     let timerFrame = 0;
+    let startRefreshTimer = 0;
     let backspaces = 0;
     let focusLosses = 0;
     let finishedLocally = false;
@@ -29,6 +29,11 @@ export function attachArenaPages() {
 
       const typed = splitGraphemes(input.value);
       const expected = splitGraphemes(snapshot.targetText || "");
+      if (expected.length === 0) {
+        target.replaceChildren(textSpan("Der Text wird zum Start freigegeben.", "muted"));
+        return;
+      }
+
       target.replaceChildren(...expected.map((char, index) => {
         const span = document.createElement("span");
         span.textContent = char;
@@ -63,18 +68,29 @@ export function attachArenaPages() {
         return;
       }
 
-      const running = snapshot.started && !snapshot.finished;
-      const finished = snapshot.finished;
+      const running = snapshot.phase === "Running";
       if (state) {
-        state.textContent = finished ? "Ergebnisse" : running ? "Rennen läuft" : "Lobby";
+        state.textContent = phaseLabel(snapshot.phase);
       }
 
       if (input) {
-        input.disabled = !running || finishedLocally;
+        input.disabled = !running || finishedLocally || !snapshot.targetText;
       }
 
       if (finishButton) {
         finishButton.disabled = !running || finishedLocally;
+      }
+
+      const current = snapshot.participants?.find((participant) => participant.profileId === currentProfileId);
+      const readyButton = readyForm?.querySelector("button");
+      if (readyButton) {
+        readyButton.textContent = current?.ready ? "Nicht bereit" : "Bereit";
+        readyButton.disabled = !snapshot || snapshot.phase !== "Lobby";
+      }
+
+      const startButton = startForm?.querySelector("button");
+      if (startButton) {
+        startButton.disabled = !snapshot || snapshot.phase !== "Lobby";
       }
 
       renderTimer();
@@ -92,9 +108,31 @@ export function attachArenaPages() {
         return;
       }
 
+      if (snapshot.phase === "Countdown" && snapshot.raceStartsAt) {
+        const raceStartsAt = new Date(snapshot.raceStartsAt).getTime();
+        const serverNow = new Date(snapshot.serverNow).getTime();
+        const offset = serverNow - Date.now();
+        const tick = () => {
+          const remaining = Math.max(0, raceStartsAt - (Date.now() + offset));
+          value.textContent = remaining <= 0 ? "LOS" : Math.ceil(remaining / 1000).toString();
+          label.textContent = "Start";
+          if (remaining <= 0) {
+            window.clearTimeout(startRefreshTimer);
+            startRefreshTimer = window.setTimeout(() => {
+              connection.invoke("JoinRoom", [roomId]).then(applySnapshot).catch(showConnectionError);
+            }, 80);
+            return;
+          }
+
+          timerFrame = requestAnimationFrame(tick);
+        };
+        tick();
+        return;
+      }
+
       if (!snapshot.startedAt) {
         value.textContent = "00:00.0";
-        label.textContent = "Bereit";
+        label.textContent = phaseLabel(snapshot.phase);
         return;
       }
 
@@ -121,7 +159,7 @@ export function attachArenaPages() {
     };
 
     const submitProgress = () => {
-      if (!snapshot || !snapshot.started || snapshot.finished || finishedLocally) {
+      if (!snapshot || snapshot.phase !== "Running" || snapshot.finished || finishedLocally) {
         return;
       }
 
@@ -155,7 +193,8 @@ export function attachArenaPages() {
     readyForm?.addEventListener("submit", async (event) => {
       event.preventDefault();
       try {
-        applySnapshot(await connection.invoke("SetReady", [roomId, true]));
+        const current = snapshot?.participants?.find((participant) => participant.profileId === currentProfileId);
+        applySnapshot(await connection.invoke("SetReady", [roomId, current?.ready !== true]));
       } catch (error) {
         showConnectionError(error);
       }
@@ -186,7 +225,7 @@ export function attachArenaPages() {
     input?.addEventListener("input", () => {
       renderTarget();
       submitProgress();
-      if (snapshot && splitGraphemes(input.value).length >= snapshot.targetCharacterCount) {
+      if (snapshot && snapshot.phase === "Running" && isExactInput(input.value, snapshot.targetText)) {
         finish();
       }
     });
@@ -207,19 +246,32 @@ export function attachArenaPages() {
   });
 }
 
-class JsonHubConnection {
+class SignalRConnection {
   constructor(path) {
-    this.path = path;
-    this.socket = null;
-    this.invocationId = 0;
-    this.handlers = new Map();
-    this.pending = new Map();
+    if (!window.signalR) {
+      throw new Error("Der lokale SignalR-Client wurde nicht geladen.");
+    }
+
     this.reconnectHandlers = [];
-    this.stopped = false;
+    this.connection = new window.signalR.HubConnectionBuilder()
+      .withUrl(path)
+      .withAutomaticReconnect([0, 1000, 2500, 5000, 10000])
+      .configureLogging(window.signalR.LogLevel.Warning)
+      .build();
+    this.connection.serverTimeoutInMilliseconds = 30000;
+    this.connection.keepAliveIntervalInMilliseconds = 10000;
+    this.connection.onreconnected(() => {
+      this.reconnectHandlers.forEach((handler) => handler());
+    });
+    this.connection.onclose((error) => {
+      if (error) {
+        showConnectionError(error);
+      }
+    });
   }
 
   on(target, handler) {
-    this.handlers.set(target, handler);
+    this.connection.on(target, handler);
   }
 
   onReconnect(handler) {
@@ -227,97 +279,20 @@ class JsonHubConnection {
   }
 
   async start() {
-    this.stopped = false;
-    const negotiate = await fetch(`${this.path}/negotiate?negotiateVersion=1`, {
-      method: "POST",
-      credentials: "same-origin"
-    });
-    if (!negotiate.ok) {
-      throw new Error("Arena-Verbindung konnte nicht vorbereitet werden.");
-    }
-
-    const payload = await negotiate.json();
-    const token = encodeURIComponent(payload.connectionToken || payload.connectionId);
-    const scheme = window.location.protocol === "https:" ? "wss" : "ws";
-    const socket = new WebSocket(`${scheme}://${window.location.host}${this.path}?id=${token}`);
-    this.socket = socket;
-
-    await new Promise((resolve, reject) => {
-      const timeout = window.setTimeout(() => reject(new Error("Arena-Verbindung hat nicht geantwortet.")), 5000);
-      socket.addEventListener("open", () => {
-        socket.send(`${JSON.stringify({ protocol: "json", version: 1 })}${recordSeparator}`);
-      });
-      socket.addEventListener("message", (event) => {
-        const frames = splitFrames(event.data);
-        if (frames.some((frame) => !frame || frame === "{}")) {
-          window.clearTimeout(timeout);
-          resolve();
-        }
-
-        this.handleFrames(frames.filter((frame) => frame && frame !== "{}"));
-      });
-      socket.addEventListener("error", () => reject(new Error("Arena-Verbindung fehlgeschlagen.")), { once: true });
-      socket.addEventListener("close", () => this.reconnect());
-    });
-  }
-
-  invoke(target, args) {
-    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
-      return Promise.reject(new Error("Arena-Verbindung ist nicht aktiv."));
-    }
-
-    const invocationId = String(++this.invocationId);
-    const message = { type: 1, invocationId, target, arguments: args };
-    this.socket.send(`${JSON.stringify(message)}${recordSeparator}`);
-    return new Promise((resolve, reject) => {
-      this.pending.set(invocationId, { resolve, reject });
-      window.setTimeout(() => {
-        if (this.pending.delete(invocationId)) {
-          reject(new Error("Arena-Anfrage hat zu lange gedauert."));
-        }
-      }, 8000);
-    });
-  }
-
-  handleFrames(frames) {
-    frames.forEach((frame) => {
-      const message = JSON.parse(frame);
-      if (message.type === 1) {
-        const handler = this.handlers.get(message.target);
-        if (handler) {
-          handler(...(message.arguments || []));
-        }
-      } else if (message.type === 3) {
-        const pending = this.pending.get(message.invocationId);
-        if (!pending) {
-          return;
-        }
-
-        this.pending.delete(message.invocationId);
-        if (message.error) {
-          pending.reject(new Error(message.error));
-        } else {
-          pending.resolve(message.result);
-        }
-      }
-    });
-  }
-
-  reconnect() {
-    if (this.stopped) {
+    if (this.connection.state !== window.signalR.HubConnectionState.Disconnected) {
       return;
     }
 
-    window.setTimeout(() => {
-      this.start()
-        .then(() => Promise.all(this.reconnectHandlers.map((handler) => handler())))
-        .catch(() => this.reconnect());
-    }, 1200);
+    await this.connection.start();
   }
-}
 
-function splitFrames(payload) {
-  return String(payload).split(recordSeparator).filter((frame) => frame.length > 0);
+  invoke(target, args) {
+    if (this.connection.state !== window.signalR.HubConnectionState.Connected) {
+      return Promise.reject(new Error("Arena-Verbindung ist nicht aktiv."));
+    }
+
+    return this.connection.invoke(target, ...(args || []));
+  }
 }
 
 function tableCell(content) {
@@ -345,10 +320,25 @@ function statusLabel(status) {
     Ready: "Bereit",
     Running: "Läuft",
     Finished: "Fertig",
+    LeftBeforeStart: "Vor dem Start verlassen",
     Dnf: "Nicht beendet",
     Disconnected: "Verbindung getrennt",
-    Declined: "Abgelehnt"
+    Declined: "Abgelehnt",
+    Cancelled: "Abgebrochen",
+    AbortedByServer: "Durch Serverabbruch beendet"
   }[status] || status;
+}
+
+function phaseLabel(phase) {
+  return {
+    Lobby: "Lobby",
+    Countdown: "Countdown",
+    Running: "Rennen läuft",
+    RoundResults: "Rundenergebnis",
+    SeriesResults: "Ergebnisse",
+    Closed: "Geschlossen",
+    Aborted: "Abgebrochen"
+  }[phase] || "Arena";
 }
 
 function formatDuration(milliseconds) {
@@ -360,7 +350,27 @@ function formatDuration(milliseconds) {
 }
 
 function splitGraphemes(value) {
-  return Array.from(String(value || "").normalize("NFC"));
+  const normalized = String(value || "").normalize("NFC");
+  if (window.Intl && typeof window.Intl.Segmenter === "function") {
+    const segmenter = new window.Intl.Segmenter("de", { granularity: "grapheme" });
+    return Array.from(segmenter.segment(normalized), (segment) => segment.segment);
+  }
+
+  return Array.from(normalized);
+}
+
+function isExactInput(input, target) {
+  const inputElements = splitGraphemes(input);
+  const targetElements = splitGraphemes(target);
+  return inputElements.length === targetElements.length &&
+    inputElements.every((element, index) => element === targetElements[index]);
+}
+
+function textSpan(text, className) {
+  const span = document.createElement("span");
+  span.textContent = text;
+  span.className = className;
+  return span;
 }
 
 function camelize(value) {

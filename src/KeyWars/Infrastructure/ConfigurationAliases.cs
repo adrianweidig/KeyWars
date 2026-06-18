@@ -51,6 +51,7 @@ public static class ConfigurationAliases
         SetInt(section, "MAX_CONCURRENT_ROOMS", value => options.MaxConcurrentRooms = value);
         SetInt(section, "MAX_CONNECTIONS_PER_USER", value => options.MaxConnectionsPerUser = value);
         SetInt(section, "PROGRESS_BROADCAST_HZ", value => options.ProgressBroadcastHz = value);
+        SetInt(section, "COUNTDOWN_SECONDS", value => options.CountdownSeconds = value);
         SetInt(section, "RECONNECT_GRACE_SECONDS", value => options.ReconnectGraceSeconds = value);
         SetInt(section, "ROOM_COMMAND_QUEUE_CAPACITY", value => options.RoomCommandQueueCapacity = value);
         SetInt(section, "COMPLETED_ROOM_RETENTION_MINUTES", value => options.CompletedRoomRetentionMinutes = value);

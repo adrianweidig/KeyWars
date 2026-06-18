@@ -6,10 +6,12 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace KeyWars.Pages;
 
 [AllowAnonymous]
+[EnableRateLimiting("keywars-login")]
 public sealed class AnmeldenModel(ILdapAuthenticator authenticator, ProfileProvisioner provisioner) : PageModel
 {
     [BindProperty]

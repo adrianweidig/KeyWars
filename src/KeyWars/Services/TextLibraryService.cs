@@ -3,6 +3,7 @@ using KeyWars.Data;
 using KeyWars.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using System.Text;
 
 namespace KeyWars.Services;
 
@@ -130,8 +131,20 @@ public sealed class TextLibraryService(
             throw new InvalidOperationException("Nur .txt-Dateien sind erlaubt.");
         }
 
-        using var reader = new StreamReader(upload.OpenReadStream());
-        var body = await reader.ReadToEndAsync(cancellationToken);
+        string body;
+        try
+        {
+            using var reader = new StreamReader(
+                upload.OpenReadStream(),
+                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true),
+                detectEncodingFromByteOrderMarks: true);
+            body = await reader.ReadToEndAsync(cancellationToken);
+        }
+        catch (DecoderFallbackException ex)
+        {
+            throw new InvalidOperationException("Die Datei muss als gültiges UTF-8 gespeichert sein.", ex);
+        }
+
         var title = Path.GetFileNameWithoutExtension(upload.FileName);
         return await CreateAsync(profile.Id, title, body, visibility, cancellationToken);
     }

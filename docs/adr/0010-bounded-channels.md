@@ -1,4 +1,4 @@
-# ADR 0010: Begrenzte Channels
+# ADR 0010: Geplante begrenzte Channels
 
 ## Kontext
 
@@ -6,8 +6,13 @@ Viele Fortschrittsmeldungen dürfen nicht unbeschränkt Speicher aufbauen.
 
 ## Entscheidung
 
-Fortschrittskommandos laufen über begrenzte Channels.
+Fortschrittskommandos sollen ueber begrenzte Channels laufen. Der aktuelle
+Produktionspfad verarbeitet Progressmeldungen noch direkt im `LiveRoomManager`.
+Die Channel-Architektur ist deshalb ein verbindlicher Zielzustand fuer KW-015,
+aber kein bereits abgeschlossener Ist-Zustand.
 
 ## Konsequenzen
 
-Überlast erzeugt kontrollierten Verlust nichtkritischer Progress-Deltas, nicht Datenbanklast.
+Bis KW-015 abgeschlossen ist, duerfen Dokumentation und UI keine belastbare
+Backpressure-Garantie behaupten. Nach Umsetzung soll Ueberlast kontrollierten
+Verlust nichtkritischer Progress-Deltas erzeugen, nicht Datenbanklast.

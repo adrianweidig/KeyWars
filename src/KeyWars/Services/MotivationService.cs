@@ -18,7 +18,6 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
         var profile = await db.UserProfiles.SingleAsync(item => item.Id == profileId, cancellationToken);
         var today = DateOnly.FromDateTime(timeProvider.GetLocalNow().DateTime);
         profile.ExperiencePoints += CalculateXp(attempt);
-        profile.Level = Math.Max(1, profile.ExperiencePoints / 250 + 1);
         profile.CurrentStreakDays = CalculateStreak(profile.LastActivityDate, today, profile.CurrentStreakDays);
         profile.LastActivityDate = today;
         profile.SeasonPoints += Math.Max(1, (int)Math.Round(attempt.Wpm / 10));
@@ -26,13 +25,22 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
 
         await EnsureDailyMissionsAsync(profileId, today, cancellationToken);
         var missions = await db.Missions.Where(item => item.UserProfileId == profileId && item.MissionDate == today).ToListAsync(cancellationToken);
+        var missionXp = 0;
         foreach (var mission in missions)
         {
+            var wasCompleted = mission.Completed;
             mission.CurrentValue += mission.Title.Contains("Genauigkeit", StringComparison.OrdinalIgnoreCase)
                 ? attempt.Accuracy >= 95 ? 1 : 0
                 : 1;
             mission.Completed = mission.CurrentValue >= mission.TargetValue;
+            if (!wasCompleted && mission.Completed)
+            {
+                missionXp += mission.XpReward;
+            }
         }
+
+        profile.ExperiencePoints += missionXp;
+        profile.Level = Math.Max(1, profile.ExperiencePoints / 250 + 1);
 
         await UnlockAchievementAsync(profileId, "erster-versuch", "Erster gültiger Versuch", "Du hast deinen ersten gültigen KeyWars-Versuch abgeschlossen.", cancellationToken);
         if (attempt.Accuracy >= 98)

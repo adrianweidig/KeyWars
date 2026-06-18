@@ -2,20 +2,30 @@
 @model KeyWars.Pages.Arena.RaumModel
 @{
     ViewData["Title"] = Model.Snapshot.Title;
+    var currentParticipant = Model.Snapshot.Participants.FirstOrDefault(item => item.ProfileId == Model.CurrentProfileId);
+    var isHost = Model.Snapshot.CreatorProfileId == Model.CurrentProfileId;
+    var inLobby = Model.Snapshot.Phase == LiveRoomPhase.Lobby;
+    var readyButtonText = currentParticipant?.Ready == true ? "Nicht bereit" : "Bereit";
 }
 
 <section class="page-header">
     <div>
         <h1>@Model.Snapshot.Title</h1>
-        <p class="lead">Code @Model.Snapshot.Code · @DisplayNames.For(Model.Snapshot.Mode) · @Model.Snapshot.Participants.Count Personen</p>
+        <p class="lead">Code @Model.Snapshot.Code · @DisplayNames.For(Model.Snapshot.Mode) · Runde @Model.Snapshot.CurrentRound von @Model.Snapshot.RoundCount · @Model.Snapshot.Participants.Count @(Model.Snapshot.Participants.Count == 1 ? "Person" : "Personen")</p>
     </div>
     <div class="action-row">
-        <form method="post" asp-page-handler="Ready" data-arena-ready-form>
-            <button type="submit" class="secondary">Bereit</button>
-        </form>
-        <form method="post" asp-page-handler="Start" data-arena-start-form>
-            <button type="submit">Starten</button>
-        </form>
+        @if (inLobby)
+        {
+            <form method="post" asp-page-handler="Ready" data-arena-ready-form data-ready="@((currentParticipant?.Ready == true).ToString().ToLowerInvariant())">
+                <button type="submit" class="secondary">@readyButtonText</button>
+            </form>
+        }
+        @if (isHost && inLobby)
+        {
+            <form method="post" asp-page-handler="Start" data-arena-start-form>
+                <button type="submit">Starten</button>
+            </form>
+        }
     </div>
 </section>
 
@@ -24,18 +34,27 @@
 <section class="dashboard-grid" data-arena-room data-room-id="@Model.Snapshot.RoomId" data-current-profile-id="@Model.CurrentProfileId">
     <div class="card">
         <h2>Rennen</h2>
-        <p class="muted" data-arena-state>@(Model.Snapshot.Started ? "Rennen läuft" : "Lobby")</p>
-        <div class="typing-target" data-arena-target>@Model.Snapshot.TargetText</div>
+        <p class="muted" data-arena-state>@DisplayNames.For(Model.Snapshot.Phase)</p>
+        <div class="typing-target" data-arena-target>
+            @if (string.IsNullOrEmpty(Model.Snapshot.TargetText))
+            {
+                <span class="muted">Der Text wird zum Start freigegeben.</span>
+            }
+            else
+            {
+                @Model.Snapshot.TargetText
+            }
+        </div>
         <div class="typing-timer" data-arena-timer>
             <strong>00:00.0</strong>
-            <span>@(Model.Snapshot.Started ? "vergangen" : "Bereit")</span>
+            <span>@DisplayNames.For(Model.Snapshot.Phase)</span>
         </div>
         <form method="post" asp-page-handler="Finish" class="form-grid form-grid-spaced" data-arena-finish-form>
             <label>
                 Eingabe
                 <textarea asp-for="Input" class="typing-input" data-arena-input autocapitalize="off" autocomplete="off" spellcheck="false"></textarea>
             </label>
-            <button type="submit" data-arena-finish>Zieleinlauf speichern</button>
+            <button type="submit" class="visually-hidden" data-arena-finish tabindex="-1">Runde abschließen</button>
         </form>
     </div>
     <aside class="card">

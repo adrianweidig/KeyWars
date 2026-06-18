@@ -7,6 +7,7 @@ public sealed class LiveOptions
     public int MaxConcurrentRooms { get; set; } = 200;
     public int MaxConnectionsPerUser { get; set; } = 3;
     public int ProgressBroadcastHz { get; set; } = 10;
+    public int CountdownSeconds { get; set; } = 3;
     public int ReconnectGraceSeconds { get; set; } = 30;
     public int RoomCommandQueueCapacity { get; set; } = 4096;
     public int CompletedRoomRetentionMinutes { get; set; } = 60;

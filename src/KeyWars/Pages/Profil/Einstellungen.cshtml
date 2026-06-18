@@ -19,7 +19,12 @@
         </label>
         <label>
             Bevorzugter Modus
-            <select asp-for="Input.PreferredMode" asp-items="Html.GetEnumSelectList<TrainingMode>()"></select>
+            <select asp-for="Input.PreferredMode">
+                @foreach (var mode in Enum.GetValues<TrainingMode>())
+                {
+                    <option value="@mode" selected="@(mode == Model.Input.PreferredMode)">@DisplayNames.For(mode)</option>
+                }
+            </select>
         </label>
         <label class="checkbox-label">
             <input type="checkbox" asp-for="Input.LeaderboardVisible" />

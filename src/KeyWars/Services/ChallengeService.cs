@@ -62,6 +62,7 @@ public sealed class ChallengeService(
 
     public async Task<IReadOnlyList<Challenge>> ListForProfileAsync(Guid profileId, CancellationToken cancellationToken = default)
     {
+        await ExpireDueChallengesAsync(cancellationToken);
         var ids = await db.ChallengeParticipants
             .Where(item => item.UserProfileId == profileId)
             .Select(item => item.ChallengeId)
@@ -77,6 +78,7 @@ public sealed class ChallengeService(
 
     public async Task JoinAsync(Guid challengeId, Guid profileId, CancellationToken cancellationToken = default)
     {
+        await RequireActiveChallengeAsync(challengeId, cancellationToken);
         var participant = await db.ChallengeParticipants.SingleAsync(item => item.ChallengeId == challengeId && item.UserProfileId == profileId, cancellationToken);
         if (participant.Status == ParticipantStatus.Invited)
         {
@@ -88,6 +90,7 @@ public sealed class ChallengeService(
 
     public async Task DeclineAsync(Guid challengeId, Guid profileId, CancellationToken cancellationToken = default)
     {
+        await RequireActiveChallengeAsync(challengeId, cancellationToken);
         var participant = await db.ChallengeParticipants.SingleAsync(item => item.ChallengeId == challengeId && item.UserProfileId == profileId, cancellationToken);
         if (participant.Status is ParticipantStatus.Invited or ParticipantStatus.Joined)
         {
@@ -99,19 +102,25 @@ public sealed class ChallengeService(
 
     public async Task FinishRoundAsync(Guid challengeId, Guid profileId, TypingAttempt attempt, CancellationToken cancellationToken = default)
     {
-        var challenge = await db.Challenges.SingleAsync(item => item.Id == challengeId, cancellationToken);
-        if (challenge.Status is ChallengeStatus.Finished or ChallengeStatus.Cancelled or ChallengeStatus.Expired)
+        var challenge = await RequireActiveChallengeAsync(challengeId, cancellationToken);
+        var participant = await db.ChallengeParticipants.SingleAsync(item => item.ChallengeId == challengeId && item.UserProfileId == profileId, cancellationToken);
+        if (participant.Status == ParticipantStatus.Invited)
         {
-            throw new InvalidOperationException("Diese Herausforderung ist nicht mehr aktiv.");
+            throw new InvalidOperationException("Die Herausforderung muss vor dem Abschluss angenommen werden.");
         }
 
-        var participant = await db.ChallengeParticipants.SingleAsync(item => item.ChallengeId == challengeId && item.UserProfileId == profileId, cancellationToken);
         if (participant.Status is ParticipantStatus.Finished or ParticipantStatus.Dnf or ParticipantStatus.Declined)
         {
             return;
         }
 
-        if (attempt.TrainingTextId != challenge.TrainingTextId || attempt.UserProfileId != profileId)
+        if (attempt.TrainingTextId != challenge.TrainingTextId ||
+            attempt.UserProfileId != profileId ||
+            attempt.Mode != TrainingMode.Text ||
+            !attempt.Official ||
+            attempt.FinishedAt is null ||
+            attempt.StartedAt < challenge.CreatedAt ||
+            attempt.FinishedAt > challenge.ExpiresAt)
         {
             throw new InvalidOperationException("Der Versuch gehört nicht zu dieser Herausforderung.");
         }
@@ -125,6 +134,11 @@ public sealed class ChallengeService(
         }
 
         var round = await db.ChallengeRounds.SingleAsync(item => item.ChallengeId == challengeId && item.RoundNumber == 1, cancellationToken);
+        if (challenge.Status == ChallengeStatus.Open)
+        {
+            challenge.Status = ChallengeStatus.Running;
+        }
+
         participant.Status = attempt.Completed ? ParticipantStatus.Finished : ParticipantStatus.Dnf;
         participant.FinishedAt = timeProvider.GetUtcNow();
         db.ChallengeRoundResults.Add(new ChallengeRoundResult
@@ -146,7 +160,13 @@ public sealed class ChallengeService(
 
     public async Task TryCloseAsync(Guid challengeId, CancellationToken cancellationToken = default)
     {
+        await ExpireDueChallengesAsync(cancellationToken);
         var challenge = await db.Challenges.SingleAsync(item => item.Id == challengeId, cancellationToken);
+        if (challenge.Status is ChallengeStatus.Expired or ChallengeStatus.Cancelled or ChallengeStatus.Finished)
+        {
+            return;
+        }
+
         var participants = await db.ChallengeParticipants.Where(item => item.ChallengeId == challengeId).ToListAsync(cancellationToken);
         var terminal = participants.All(item => item.Status is ParticipantStatus.Finished or ParticipantStatus.Dnf or ParticipantStatus.Declined);
         if (!terminal)
@@ -191,6 +211,39 @@ public sealed class ChallengeService(
 
         challenge.Status = ChallengeStatus.Finished;
         challenge.FinishedAt = timeProvider.GetUtcNow();
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task<Challenge> RequireActiveChallengeAsync(Guid challengeId, CancellationToken cancellationToken)
+    {
+        await ExpireDueChallengesAsync(cancellationToken);
+        var challenge = await db.Challenges.SingleAsync(item => item.Id == challengeId, cancellationToken);
+        if (challenge.Status is ChallengeStatus.Finished or ChallengeStatus.Cancelled or ChallengeStatus.Expired)
+        {
+            throw new InvalidOperationException("Diese Herausforderung ist nicht mehr aktiv.");
+        }
+
+        return challenge;
+    }
+
+    private async Task ExpireDueChallengesAsync(CancellationToken cancellationToken)
+    {
+        var now = timeProvider.GetUtcNow();
+        var candidates = await db.Challenges.ToListAsync(cancellationToken);
+        var expired = candidates
+            .Where(item => item.Status is (ChallengeStatus.Open or ChallengeStatus.Running) && item.ExpiresAt <= now)
+            .ToList();
+        if (expired.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var challenge in expired)
+        {
+            challenge.Status = ChallengeStatus.Expired;
+            challenge.FinishedAt ??= now;
+        }
+
         await db.SaveChangesAsync(cancellationToken);
     }
 }

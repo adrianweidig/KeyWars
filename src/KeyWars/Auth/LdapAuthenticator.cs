@@ -1,5 +1,6 @@
 using System.DirectoryServices.Protocols;
 using System.Net;
+using System.Security.Cryptography.X509Certificates;
 using Microsoft.Extensions.Options;
 
 namespace KeyWars.Auth;
@@ -77,16 +78,22 @@ public sealed class LdapAuthenticator(IOptions<LdapOptions> options, ILogger<Lda
     {
         var port = url.Port > 0 ? url.Port : url.Scheme.Equals("ldaps", StringComparison.OrdinalIgnoreCase) ? 636 : 389;
         var identifier = new LdapDirectoryIdentifier(url.Host, port, fullyQualifiedDnsHostName: false, connectionless: false);
+        using var caCertificate = LoadCaCertificate(ldapOptions.CaCertificatePath);
         using var connection = new LdapConnection(identifier)
         {
             AuthType = AuthType.Basic,
             Credential = new NetworkCredential(bindName, password),
-            Timeout = TimeSpan.FromSeconds(ldapOptions.OperationTimeoutSeconds)
+            Timeout = TimeSpan.FromSeconds(ldapOptions.ConnectTimeoutSeconds)
         };
 
         connection.SessionOptions.ProtocolVersion = 3;
         connection.SessionOptions.SecureSocketLayer = url.Scheme.Equals("ldaps", StringComparison.OrdinalIgnoreCase);
         connection.SessionOptions.ReferralChasing = ReferralChasingOptions.None;
+        if (caCertificate is not null)
+        {
+            connection.SessionOptions.VerifyServerCertificate = (_, certificate) =>
+                VerifyServerCertificate(url.Host, certificate, caCertificate);
+        }
 
         if (url.Scheme.Equals("ldap", StringComparison.OrdinalIgnoreCase))
         {
@@ -233,5 +240,48 @@ public sealed class LdapAuthenticator(IOptions<LdapOptions> options, ILogger<Lda
         }
 
         return string.Join('-', parts);
+    }
+
+    private static X509Certificate2? LoadCaCertificate(string? path)
+    {
+        return string.IsNullOrWhiteSpace(path)
+            ? null
+            : X509CertificateLoader.LoadCertificateFromFile(path);
+    }
+
+    private static bool VerifyServerCertificate(string host, X509Certificate certificate, X509Certificate2 caCertificate)
+    {
+        using var serverCertificate = X509CertificateLoader.LoadCertificate(certificate.Export(X509ContentType.Cert));
+        using var chain = new X509Chain();
+        chain.ChainPolicy.CustomTrustStore.Add(caCertificate);
+        chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
+        chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
+        return chain.Build(serverCertificate) && CertificateMatchesHost(serverCertificate, host);
+    }
+
+    private static bool CertificateMatchesHost(X509Certificate2 certificate, string host)
+    {
+        var normalizedHost = host.Trim().TrimEnd('.');
+        var dnsName = certificate.GetNameInfo(X509NameType.DnsName, forIssuer: false);
+        var simpleName = certificate.GetNameInfo(X509NameType.SimpleName, forIssuer: false);
+        return HostMatchesPattern(dnsName, normalizedHost) || HostMatchesPattern(simpleName, normalizedHost);
+    }
+
+    private static bool HostMatchesPattern(string pattern, string host)
+    {
+        if (string.IsNullOrWhiteSpace(pattern) || string.IsNullOrWhiteSpace(host))
+        {
+            return false;
+        }
+
+        var normalizedPattern = pattern.Trim().TrimEnd('.');
+        if (normalizedPattern.StartsWith("*.", StringComparison.Ordinal))
+        {
+            var suffix = normalizedPattern[1..];
+            return host.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)
+                && host.Count(character => character == '.') == suffix.Count(character => character == '.');
+        }
+
+        return string.Equals(normalizedPattern, host, StringComparison.OrdinalIgnoreCase);
     }
 }

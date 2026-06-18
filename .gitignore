@@ -5,6 +5,7 @@ obj/
 .idea/
 .dotnet/
 .dotnet-install/
+node_modules/
 App_Data/
 TestResults/
 coverage/

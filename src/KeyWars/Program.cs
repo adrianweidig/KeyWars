@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using System.Text.Json.Serialization;
+using System.Threading.RateLimiting;
 using KeyWars.Auth;
 using KeyWars.Data;
 using KeyWars.Domain;
@@ -10,6 +11,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -65,7 +67,7 @@ builder.Services.AddSingleton<LiveRoomManager>();
 builder.Services.AddScoped<DatabaseInitializer>();
 
 var configuredAuthOptions = ConfigurationAliases.GetAuth(builder.Configuration);
-var developmentLogin = builder.Environment.IsDevelopment() || configuredAuthOptions.DevelopmentLogin;
+var developmentLogin = builder.Environment.IsDevelopment();
 if (developmentLogin)
 {
     builder.Services.AddScoped<ILdapAuthenticator, DevelopmentDirectoryAuthenticator>();
@@ -112,6 +114,34 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
     });
 
 builder.Services.AddAuthorization();
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("keywars-api", httpContext =>
+    {
+        var key = httpContext.User.FindFirstValue(KeyWarsClaims.ProfileId)
+            ?? httpContext.Connection.RemoteIpAddress?.ToString()
+            ?? "unknown";
+        return RateLimitPartition.GetFixedWindowLimiter(key, _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 180,
+            QueueLimit = 0,
+            Window = TimeSpan.FromMinutes(1),
+            AutoReplenishment = true
+        });
+    });
+    options.AddPolicy("keywars-login", httpContext =>
+    {
+        var key = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        return RateLimitPartition.GetFixedWindowLimiter(key, _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 10,
+            QueueLimit = 0,
+            Window = TimeSpan.FromMinutes(1),
+            AutoReplenishment = true
+        });
+    });
+});
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
@@ -203,6 +233,7 @@ app.UseMiddleware<SecurityHeadersMiddleware>();
 app.UseStaticFiles();
 app.UseRouting();
 app.UseAuthentication();
+app.UseRateLimiter();
 app.UseAuthorization();
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "ok" })).AllowAnonymous();

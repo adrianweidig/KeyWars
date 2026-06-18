@@ -128,6 +128,10 @@ In `Production` zählt nur die explizite LDAP-Konfiguration.
 
 - [Architektur](docs/architecture.md): Container, Prozessmodell, SQLite,
   SignalR und Datenfluss.
+- [Feature-Matrix](docs/features.md): Aktuell verfuegbare, teilweise
+  umgesetzte, geplante und blockierte Funktionen.
+- [Konfiguration](docs/configuration.md): Umgebungsvariablen,
+  Doppel-Unterstrich-Mapping und Verbraucher.
 - [LDAP-Anbindung](docs/ldap.md): LDAPS, StartTLS, Suchbasen und
   Zertifikatsoptionen.
 - [Live-Arena](docs/live-arena.md): Räume, Laufzeitmodell und Kapazitäten.

@@ -1,6 +1,7 @@
 .git
 .dotnet
 .dotnet-install
+node_modules
 .vs
 .vscode
 .idea

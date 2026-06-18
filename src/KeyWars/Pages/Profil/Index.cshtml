@@ -33,7 +33,7 @@
             @foreach (var attempt in Model.Attempts)
             {
                 <tr>
-                    <td>@attempt.Mode</td>
+                    <td>@DisplayNames.For(attempt.Mode)</td>
                     <td>@attempt.Wpm.ToString("0.0")</td>
                     <td>@attempt.Accuracy.ToString("0.0") %</td>
                 </tr>

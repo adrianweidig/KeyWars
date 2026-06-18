@@ -30,11 +30,18 @@ public sealed record LiveRoomSnapshot(
     LiveRoomMode Mode,
     LiveRoomVisibility Visibility,
     int RoundCount,
+    int CurrentRound,
+    int RoundVersion,
+    LiveRoomPhase Phase,
     bool Started,
     bool Finished,
     DateTimeOffset ServerNow,
+    DateTimeOffset PhaseChangedAt,
+    DateTimeOffset? CountdownStartsAt,
+    DateTimeOffset? RaceStartsAt,
     DateTimeOffset? StartedAt,
     DateTimeOffset? FinishedAt,
+    string? CloseReason,
     IReadOnlyList<LiveParticipantSnapshot> Participants);
 
 public sealed record CreateLiveRoomRequest(
@@ -81,6 +88,7 @@ public sealed class LiveRoomManager(
             }
 
             var maxParticipants = Math.Clamp(request.MaxParticipants, MinimumParticipants, options.Value.MaxParticipantsPerRoom);
+            var roundCount = ValidateRoundCount(request.RoundCount);
             var room = new LiveRoomState(
                 Guid.CreateVersion7(),
                 request.CreatorProfileId,
@@ -89,7 +97,7 @@ public sealed class LiveRoomManager(
                 TypingEngine.NormalizeText(request.Text),
                 request.Mode,
                 request.Visibility,
-                1,
+                roundCount,
                 maxParticipants,
                 now);
 
@@ -105,7 +113,7 @@ public sealed class LiveRoomManager(
         var now = timeProvider.GetUtcNow();
         CleanupExpiredRooms(now);
         return rooms.Values
-            .Where(room => room.Visibility == LiveRoomVisibility.InternalOpen && !room.Started && !room.Finished)
+            .Where(room => room.Visibility == LiveRoomVisibility.InternalOpen && room.Phase == LiveRoomPhase.Lobby)
             .Select(room => Snapshot(room, now))
             .OrderBy(room => room.Title)
             .ToList();
@@ -132,7 +140,8 @@ public sealed class LiveRoomManager(
         {
             var now = timeProvider.GetUtcNow();
             completed = ApplyDisconnectTimeouts(room, now);
-            if (room.Started || room.Finished)
+            AdvancePhase(room, now);
+            if (room.Phase != LiveRoomPhase.Lobby)
             {
                 throw new InvalidOperationException("Der Bereitschaftsstatus kann nur in der Lobby geändert werden.");
             }
@@ -157,12 +166,13 @@ public sealed class LiveRoomManager(
         {
             var now = timeProvider.GetUtcNow();
             completed = ApplyDisconnectTimeouts(room, now);
+            AdvancePhase(room, now);
             if (profileId != room.CreatorProfileId)
             {
                 throw new InvalidOperationException("Nur die Raumleitung darf das Rennen starten.");
             }
 
-            if (room.Started)
+            if (room.Phase is LiveRoomPhase.Countdown or LiveRoomPhase.Running or LiveRoomPhase.RoundResults or LiveRoomPhase.SeriesResults)
             {
                 snapshot = SnapshotUnlocked(room, now);
             }
@@ -173,11 +183,13 @@ public sealed class LiveRoomManager(
                     throw new InvalidOperationException("Der Start ist erst möglich, wenn mindestens zwei Personen bereit sind.");
                 }
 
-                room.Started = true;
-                room.StartedAt = now;
+                room.Phase = LiveRoomPhase.Countdown;
+                room.PhaseChangedAt = now;
+                room.CountdownStartsAt = now;
+                room.RaceStartsAt = now.AddSeconds(Math.Clamp(options.Value.CountdownSeconds, 1, 10));
+                room.RoundVersion++;
                 foreach (var participant in room.Participants.Values)
                 {
-                    participant.Status = ParticipantStatus.Running;
                     participant.Ready = true;
                     participant.DisconnectedAt = null;
                 }
@@ -199,8 +211,9 @@ public sealed class LiveRoomManager(
         {
             var now = timeProvider.GetUtcNow();
             completed = ApplyDisconnectTimeouts(room, now);
+            AdvancePhase(room, now);
             var participant = RequireParticipant(room, profileId);
-            if (!room.Started || room.Finished || participant.Status != ParticipantStatus.Running)
+            if (room.Phase != LiveRoomPhase.Running || participant.Status != ParticipantStatus.Running)
             {
                 snapshot = SnapshotUnlocked(room, now);
             }
@@ -212,7 +225,7 @@ public sealed class LiveRoomManager(
             {
                 var correctCharacters = CountCorrectPrefix(room.Text, input);
                 participant.Sequence = sequence;
-                participant.CorrectCharacters = Math.Max(participant.CorrectCharacters, correctCharacters);
+                participant.CorrectCharacters = correctCharacters;
                 participant.Wpm = CalculateWpm(participant.CorrectCharacters, room.StartedAt, now);
                 snapshot = SnapshotUnlocked(room, now);
             }
@@ -231,6 +244,7 @@ public sealed class LiveRoomManager(
         {
             var now = timeProvider.GetUtcNow();
             completed = ApplyDisconnectTimeouts(room, now);
+            AdvancePhase(room, now);
             var participant = RequireParticipant(room, profileId);
             if (participant.Status is ParticipantStatus.Finished or ParticipantStatus.Dnf)
             {
@@ -238,7 +252,7 @@ public sealed class LiveRoomManager(
             }
             else
             {
-                if (!room.Started || room.StartedAt is null)
+                if (room.Phase != LiveRoomPhase.Running || room.StartedAt is null)
                 {
                     throw new InvalidOperationException("Dieses Rennen wurde noch nicht gestartet.");
                 }
@@ -276,6 +290,7 @@ public sealed class LiveRoomManager(
         {
             var now = timeProvider.GetUtcNow();
             completed = ApplyDisconnectTimeouts(room, now);
+            AdvancePhase(room, now);
             var participant = RequireParticipant(room, profileId);
             if (participant.Status is ParticipantStatus.Joined or ParticipantStatus.Ready)
             {
@@ -305,6 +320,7 @@ public sealed class LiveRoomManager(
         {
             var now = timeProvider.GetUtcNow();
             completed = ApplyDisconnectTimeouts(room, now);
+            AdvancePhase(room, now);
             snapshot = SnapshotUnlocked(room, now);
         }
 
@@ -321,12 +337,13 @@ public sealed class LiveRoomManager(
         {
             var now = timeProvider.GetUtcNow();
             completed = ApplyDisconnectTimeouts(room, now);
+            AdvancePhase(room, now);
             if (room.Participants.TryGetValue(profileId, out var existing))
             {
                 existing.DisplayName = displayName;
                 if (existing.Status == ParticipantStatus.Disconnected)
                 {
-                    existing.Status = room.Started ? ParticipantStatus.Running : ParticipantStatus.Joined;
+                    existing.Status = room.Phase == LiveRoomPhase.Running ? ParticipantStatus.Running : ParticipantStatus.Joined;
                     existing.DisconnectedAt = null;
                 }
 
@@ -339,7 +356,7 @@ public sealed class LiveRoomManager(
                     throw new InvalidOperationException("Dieser Raum ist bereits beendet.");
                 }
 
-                if (room.Started)
+                if (room.Phase != LiveRoomPhase.Lobby)
                 {
                     throw new InvalidOperationException("Der Raum läuft bereits.");
                 }
@@ -398,7 +415,7 @@ public sealed class LiveRoomManager(
 
     private CompletedRoomRecord? TryCompleteRoom(LiveRoomState room, DateTimeOffset now)
     {
-        if (room.Finished || !room.Started)
+        if (room.Finished || room.Phase != LiveRoomPhase.Running)
         {
             return null;
         }
@@ -411,6 +428,10 @@ public sealed class LiveRoomManager(
 
         room.Finished = true;
         room.FinishedAt = now;
+        room.RoundEndsAt = now;
+        room.Phase = LiveRoomPhase.SeriesResults;
+        room.PhaseChangedAt = now;
+        room.RoundVersion++;
         if (room.PersistenceQueued)
         {
             return null;
@@ -432,8 +453,9 @@ public sealed class LiveRoomManager(
             lock (room.Gate)
             {
                 completed = ApplyDisconnectTimeouts(room, now);
+                AdvancePhase(room, now);
                 remove = room.Finished && room.FinishedAt is { } finishedAt && now - finishedAt >= completedRetention;
-                remove = remove || (!room.Started && now - room.CreatedAt >= lobbyRetention);
+                remove = remove || (room.Phase == LiveRoomPhase.Lobby && now - room.CreatedAt >= lobbyRetention);
             }
 
             QueuePersistence(completed);
@@ -483,6 +505,7 @@ public sealed class LiveRoomManager(
     {
         lock (room.Gate)
         {
+            AdvancePhase(room, now);
             return SnapshotUnlocked(room, now);
         }
     }
@@ -490,21 +513,29 @@ public sealed class LiveRoomManager(
     private static LiveRoomSnapshot SnapshotUnlocked(LiveRoomState room, DateTimeOffset now)
     {
         var targetCharacters = TypingEngine.SplitGraphemes(room.Text).Count;
+        var exposeTargetText = room.Phase is LiveRoomPhase.Running or LiveRoomPhase.RoundResults or LiveRoomPhase.SeriesResults or LiveRoomPhase.Closed;
         return new LiveRoomSnapshot(
             room.Id,
             room.CreatorProfileId,
             room.Code,
             room.Title,
-            room.Text,
+            exposeTargetText ? room.Text : "",
             targetCharacters,
             room.Mode,
             room.Visibility,
             room.RoundCount,
+            room.CurrentRound,
+            room.RoundVersion,
+            room.Phase,
             room.Started,
             room.Finished,
             now,
+            room.PhaseChangedAt,
+            room.CountdownStartsAt,
+            room.RaceStartsAt,
             room.StartedAt,
             room.FinishedAt,
+            room.CloseReason,
             room.Participants.Values
                 .OrderBy(item => item.Placement ?? int.MaxValue)
                 .ThenByDescending(item => item.CorrectCharacters)
@@ -521,6 +552,36 @@ public sealed class LiveRoomManager(
                     item.DurationMilliseconds,
                     item.Accuracy))
                 .ToList());
+    }
+
+    private static int ValidateRoundCount(int roundCount)
+    {
+        return roundCount is 1 or 3 or 5
+            ? roundCount
+            : throw new InvalidOperationException("Arena-Serien unterstützen aktuell 1, 3 oder 5 Runden.");
+    }
+
+    private static void AdvancePhase(LiveRoomState room, DateTimeOffset now)
+    {
+        if (room.Phase != LiveRoomPhase.Countdown || room.RaceStartsAt is null || now < room.RaceStartsAt.Value)
+        {
+            return;
+        }
+
+        room.Started = true;
+        room.StartedAt ??= room.RaceStartsAt;
+        room.Phase = LiveRoomPhase.Running;
+        room.PhaseChangedAt = room.RaceStartsAt.Value;
+        room.RoundVersion++;
+        foreach (var participant in room.Participants.Values)
+        {
+            if (participant.Status is ParticipantStatus.Ready or ParticipantStatus.Joined)
+            {
+                participant.Status = ParticipantStatus.Running;
+                participant.Ready = true;
+                participant.DisconnectedAt = null;
+            }
+        }
     }
 
     private static int CountCorrectPrefix(string target, string input)
@@ -677,6 +738,14 @@ internal sealed class LiveRoomState(
     public DateTimeOffset CreatedAt { get; } = createdAt;
     public object Gate { get; } = new();
     public Dictionary<Guid, LiveParticipantState> Participants { get; } = [];
+    public LiveRoomPhase Phase { get; set; } = LiveRoomPhase.Lobby;
+    public int CurrentRound { get; set; } = 1;
+    public int RoundVersion { get; set; } = 1;
+    public DateTimeOffset PhaseChangedAt { get; set; } = createdAt;
+    public DateTimeOffset? CountdownStartsAt { get; set; }
+    public DateTimeOffset? RaceStartsAt { get; set; }
+    public DateTimeOffset? RoundEndsAt { get; set; }
+    public string? CloseReason { get; set; }
     public bool Started { get; set; }
     public bool Finished { get; set; }
     public bool PersistenceQueued { get; set; }

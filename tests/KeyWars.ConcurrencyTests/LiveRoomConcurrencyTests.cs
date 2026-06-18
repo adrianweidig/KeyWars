@@ -33,7 +33,8 @@ public sealed class LiveRoomConcurrencyTests
     [Fact]
     public void StartIsIdempotentAfterFirstSuccessfulStart()
     {
-        var manager = CreateManager();
+        var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-06-18T12:00:00Z"));
+        var manager = CreateManager(timeProvider: time);
         var first = Guid.CreateVersion7();
         var second = Guid.CreateVersion7();
         var room = manager.CreateRoom(new CreateLiveRoomRequest(first, "A", "Raum", "Text", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 8));
@@ -44,15 +45,22 @@ public sealed class LiveRoomConcurrencyTests
         var started = manager.Start(room.RoomId, first);
         var secondStart = manager.Start(room.RoomId, first);
 
-        Assert.True(started.Started);
-        Assert.True(secondStart.Started);
+        Assert.Equal(LiveRoomPhase.Countdown, started.Phase);
+        Assert.False(started.Started);
+        Assert.Equal(started.RaceStartsAt, secondStart.RaceStartsAt);
         Assert.Equal(2, secondStart.Participants.Count);
+
+        time.Advance(TimeSpan.FromSeconds(3));
+        var running = manager.Snapshot(room.RoomId);
+        Assert.Equal(LiveRoomPhase.Running, running.Phase);
+        Assert.True(running.Started);
     }
 
     [Fact]
     public void DuplicateFinishDoesNotCreateNewPlacement()
     {
-        var manager = CreateManager();
+        var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-06-18T12:00:00Z"));
+        var manager = CreateManager(timeProvider: time);
         var first = Guid.CreateVersion7();
         var second = Guid.CreateVersion7();
         var room = manager.CreateRoom(new CreateLiveRoomRequest(first, "A", "Raum", "Text", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 8));
@@ -60,6 +68,7 @@ public sealed class LiveRoomConcurrencyTests
         manager.SetReady(room.RoomId, first, true);
         manager.SetReady(room.RoomId, second, true);
         manager.Start(room.RoomId, first);
+        time.Advance(TimeSpan.FromSeconds(3));
 
         manager.Finish(room.RoomId, first, "Text", 0, 0);
         var duplicate = manager.Finish(room.RoomId, first, "Text", 0, 0);
@@ -112,12 +121,74 @@ public sealed class LiveRoomConcurrencyTests
         manager.SetReady(room.RoomId, second, true);
 
         Assert.Throws<InvalidOperationException>(() => manager.Start(room.RoomId, second));
-        Assert.True(manager.Start(room.RoomId, first).Started);
+        Assert.Equal(LiveRoomPhase.Countdown, manager.Start(room.RoomId, first).Phase);
     }
 
-    private static LiveRoomManager CreateManager(LiveOptions? options = null) => new(
+    [Fact]
+    public void CreateRoomUsesRequestedRoundCount()
+    {
+        var manager = CreateManager();
+        var creator = Guid.CreateVersion7();
+
+        var room = manager.CreateRoom(new CreateLiveRoomRequest(creator, "A", "Raum", "Text", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 3, 8));
+
+        Assert.Equal(3, room.RoundCount);
+        Assert.Equal(1, room.CurrentRound);
+        Assert.Equal(LiveRoomPhase.Lobby, room.Phase);
+    }
+
+    [Fact]
+    public void ProgressBeforeRaceStartIsIgnored()
+    {
+        var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-06-18T12:00:00Z"));
+        var manager = CreateManager(new LiveOptions { CountdownSeconds = 3 }, time);
+        var first = Guid.CreateVersion7();
+        var second = Guid.CreateVersion7();
+        var room = manager.CreateRoom(new CreateLiveRoomRequest(first, "A", "Raum", "Text", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 8));
+        manager.Join(room.RoomId, second, "B");
+        manager.SetReady(room.RoomId, first, true);
+        manager.SetReady(room.RoomId, second, true);
+        manager.Start(room.RoomId, first);
+
+        var beforeStart = manager.SubmitProgress(room.RoomId, first, 1, "Text");
+
+        Assert.Equal(LiveRoomPhase.Countdown, beforeStart.Phase);
+        Assert.Equal(0, beforeStart.Participants.Single(item => item.ProfileId == first).CorrectCharacters);
+    }
+
+    [Fact]
+    public void BackspaceCanReduceProgressAfterRaceStart()
+    {
+        var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-06-18T12:00:00Z"));
+        var manager = CreateManager(new LiveOptions { CountdownSeconds = 1 }, time);
+        var first = Guid.CreateVersion7();
+        var second = Guid.CreateVersion7();
+        var room = manager.CreateRoom(new CreateLiveRoomRequest(first, "A", "Raum", "Text", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 8));
+        manager.Join(room.RoomId, second, "B");
+        manager.SetReady(room.RoomId, first, true);
+        manager.SetReady(room.RoomId, second, true);
+        manager.Start(room.RoomId, first);
+        time.Advance(TimeSpan.FromSeconds(1));
+
+        manager.SubmitProgress(room.RoomId, first, 1, "Tex");
+        var corrected = manager.SubmitProgress(room.RoomId, first, 2, "Te");
+
+        Assert.Equal(LiveRoomPhase.Running, corrected.Phase);
+        Assert.Equal(2, corrected.Participants.Single(item => item.ProfileId == first).CorrectCharacters);
+    }
+
+    private static LiveRoomManager CreateManager(LiveOptions? options = null, TimeProvider? timeProvider = null) => new(
         Options.Create(options ?? new LiveOptions()),
-        TimeProvider.System,
-        new TypingEngine(TimeProvider.System),
+        timeProvider ?? TimeProvider.System,
+        new TypingEngine(timeProvider ?? TimeProvider.System),
         NullLogger<LiveRoomManager>.Instance);
+
+    private sealed class ManualTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        private DateTimeOffset utcNow = utcNow;
+
+        public override DateTimeOffset GetUtcNow() => utcNow;
+
+        public void Advance(TimeSpan duration) => utcNow += duration;
+    }
 }

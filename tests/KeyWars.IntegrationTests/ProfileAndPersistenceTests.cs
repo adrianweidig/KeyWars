@@ -6,6 +6,9 @@ using KeyWars.Services;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace KeyWars.IntegrationTests;
 
@@ -102,6 +105,7 @@ public sealed class ProfileAndPersistenceTests
                 ["KEYWARS:LDAP:ALLOW_STARTTLS"] = "true",
                 ["KEYWARS:AUTH:COOKIE_LIFETIME_HOURS"] = "6",
                 ["KEYWARS:LIVE:MAX_PARTICIPANTS_PER_ROOM"] = "12",
+                ["KEYWARS:LIVE:COUNTDOWN_SECONDS"] = "4",
                 ["KEYWARS:CONTENT:MAX_UPLOAD_BYTES"] = "4096"
             })
             .Build();
@@ -120,6 +124,79 @@ public sealed class ProfileAndPersistenceTests
         Assert.True(ldap.AllowStartTls);
         Assert.Equal(6, auth.CookieLifetimeHours);
         Assert.Equal(12, live.MaxParticipantsPerRoom);
+        Assert.Equal(4, live.CountdownSeconds);
         Assert.Equal(4096, content.MaxUploadBytes);
+    }
+
+    [Fact]
+    public void StartupValidationBlocksDevelopmentLoginOutsideDevelopment()
+    {
+        var configuration = StartupConfiguration("Staging", new Dictionary<string, string?>
+        {
+            ["KEYWARS:AUTH:DEVELOPMENT_LOGIN"] = "true",
+            ["KEYWARS:LDAP:URLS"] = "ldaps://dc01.example.local:636",
+            ["KEYWARS:LDAP:BASE_DN"] = "DC=example,DC=local",
+            ["KEYWARS:LDAP:UPN_SUFFIX"] = "example.local"
+        });
+
+        Assert.Throws<InvalidOperationException>(() =>
+            StartupValidator.Validate(configuration, new TestEnvironment("Staging"), NullLogger.Instance));
+    }
+
+    [Fact]
+    public void StartupValidationAcceptsLdapsOutsideDevelopment()
+    {
+        var configuration = StartupConfiguration("Staging", new Dictionary<string, string?>
+        {
+            ["KEYWARS:LDAP:URLS"] = "ldaps://dc01.example.local:636",
+            ["KEYWARS:LDAP:BASE_DN"] = "DC=example,DC=local",
+            ["KEYWARS:LDAP:UPN_SUFFIX"] = "example.local"
+        });
+
+        StartupValidator.Validate(configuration, new TestEnvironment("Staging"), NullLogger.Instance);
+    }
+
+    [Fact]
+    public void StartupValidationRejectsMissingLdapCaCertificate()
+    {
+        var configuration = StartupConfiguration("Staging", new Dictionary<string, string?>
+        {
+            ["KEYWARS:LDAP:URLS"] = "ldaps://dc01.example.local:636",
+            ["KEYWARS:LDAP:BASE_DN"] = "DC=example,DC=local",
+            ["KEYWARS:LDAP:UPN_SUFFIX"] = "example.local",
+            ["KEYWARS:LDAP:CA_CERTIFICATE_PATH"] = Path.Combine(Path.GetTempPath(), $"missing-ca-{Guid.NewGuid():N}.pem")
+        });
+
+        Assert.Throws<InvalidOperationException>(() =>
+            StartupValidator.Validate(configuration, new TestEnvironment("Staging"), NullLogger.Instance));
+    }
+
+    [Fact]
+    public void StartupValidationRejectsInvalidLdapTimeout()
+    {
+        var configuration = StartupConfiguration("Staging", new Dictionary<string, string?>
+        {
+            ["KEYWARS:LDAP:URLS"] = "ldaps://dc01.example.local:636",
+            ["KEYWARS:LDAP:BASE_DN"] = "DC=example,DC=local",
+            ["KEYWARS:LDAP:UPN_SUFFIX"] = "example.local",
+            ["KEYWARS:LDAP:CONNECT_TIMEOUT_SECONDS"] = "0"
+        });
+
+        Assert.Throws<InvalidOperationException>(() =>
+            StartupValidator.Validate(configuration, new TestEnvironment("Staging"), NullLogger.Instance));
+    }
+
+    private static IConfiguration StartupConfiguration(string environment, Dictionary<string, string?> values)
+    {
+        values["KEYWARS:DATA:DIRECTORY"] = Path.Combine(Path.GetTempPath(), $"keywars-startup-{environment}-{Guid.NewGuid():N}");
+        return new ConfigurationBuilder().AddInMemoryCollection(values).Build();
+    }
+
+    private sealed class TestEnvironment(string environmentName) : IHostEnvironment
+    {
+        public string EnvironmentName { get; set; } = environmentName;
+        public string ApplicationName { get; set; } = "KeyWars.Tests";
+        public string ContentRootPath { get; set; } = Directory.GetCurrentDirectory();
+        public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
     }
 }

@@ -18,9 +18,16 @@ public sealed class RaumModel(CurrentUser currentUser, LiveRoomManager rooms) : 
         LiveRoomMode.Classic,
         LiveRoomVisibility.Code,
         1,
+        1,
+        1,
+        LiveRoomPhase.Lobby,
         false,
         false,
         DateTimeOffset.UtcNow,
+        DateTimeOffset.UtcNow,
+        null,
+        null,
+        null,
         null,
         null,
         []);
@@ -50,7 +57,9 @@ public sealed class RaumModel(CurrentUser currentUser, LiveRoomManager rooms) : 
     {
         var profile = await currentUser.RequireProfileAsync(User, cancellationToken);
         CurrentProfileId = profile.Id;
-        rooms.SetReady(id, profile.Id, true);
+        var snapshot = rooms.Snapshot(id);
+        var participant = snapshot.Participants.FirstOrDefault(item => item.ProfileId == profile.Id);
+        rooms.SetReady(id, profile.Id, participant?.Ready != true);
         return RedirectToPage(new { id });
     }
 

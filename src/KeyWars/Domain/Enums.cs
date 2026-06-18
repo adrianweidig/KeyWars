@@ -59,6 +59,17 @@ public enum ParticipantStatus
     AbortedByServer
 }
 
+public enum LiveRoomPhase
+{
+    Lobby,
+    Countdown,
+    Running,
+    RoundResults,
+    SeriesResults,
+    Closed,
+    Aborted
+}
+
 public enum LiveRoomVisibility
 {
     InvitationOnly,

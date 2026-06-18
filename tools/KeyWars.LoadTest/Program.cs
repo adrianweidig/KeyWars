@@ -15,12 +15,14 @@ Console.WriteLine($"Runtime: {Environment.Version}");
 
 foreach (var count in participantCounts)
 {
+    var time = new ManualTimeProvider(DateTimeOffset.UtcNow);
     var options = Options.Create(new LiveOptions
     {
         MaxParticipantsPerRoom = Math.Max(128, count),
-        RoomCommandQueueCapacity = Math.Max(4096, count * 128)
+        RoomCommandQueueCapacity = Math.Max(4096, count * 128),
+        CountdownSeconds = 1
     });
-    var manager = new LiveRoomManager(options, TimeProvider.System, new TypingEngine(TimeProvider.System), NullLogger<LiveRoomManager>.Instance);
+    var manager = new LiveRoomManager(options, time, new TypingEngine(time), NullLogger<LiveRoomManager>.Instance);
     var creator = Guid.CreateVersion7();
     var targetText = TypingEngine.BuildWordTest(100);
     var snapshot = manager.CreateRoom(new CreateLiveRoomRequest(creator, "Person 0", $"Lasttest {count}", targetText, LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, count));
@@ -36,6 +38,7 @@ foreach (var count in participantCounts)
     }
 
     manager.Start(snapshot.RoomId, creator);
+    time.Advance(TimeSpan.FromSeconds(1));
     var timings = new List<double>(count * 30);
     var stopwatch = Stopwatch.StartNew();
     await Parallel.ForEachAsync(manager.Snapshot(snapshot.RoomId).Participants, async (participant, _) =>
@@ -64,4 +67,13 @@ foreach (var count in participantCounts)
     var finished = final.Participants.Count(item => item.Status == ParticipantStatus.Finished);
 
     Console.WriteLine($"Teilnehmende={count}; Fertig={finished}; DauerMs={stopwatch.ElapsedMilliseconds}; ProgressP95Ms={p95:0.000}; Platzierungen={final.Participants.Count(item => item.Placement is not null)}");
+}
+
+internal sealed class ManualTimeProvider(DateTimeOffset utcNow) : TimeProvider
+{
+    private DateTimeOffset utcNow = utcNow;
+
+    public override DateTimeOffset GetUtcNow() => utcNow;
+
+    public void Advance(TimeSpan duration) => utcNow += duration;
 }

@@ -71,7 +71,9 @@ public sealed class TypingEngine(TimeProvider timeProvider)
         var cpm = correct / minutes;
         var penalty = (incorrect * 3d) + backspaces + (focusLosses * 2d);
         var consistency = Math.Clamp(100d - penalty / Math.Max(1, targetElements.Count) * 100d, 0d, 100d);
-        var completed = targetElements.Count == inputElements.Count && incorrect == 0;
+        var completed = timeMode
+            ? totalInput > 0 && correct > 0
+            : targetElements.Count == inputElements.Count && incorrect == 0;
 
         return new TypingMetrics(
             correct,
