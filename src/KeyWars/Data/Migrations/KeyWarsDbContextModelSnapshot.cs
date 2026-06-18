@@ -103,6 +103,62 @@ namespace KeyWars.Data.Migrations
                     b.ToTable("Challenges");
                 });
 
+            modelBuilder.Entity("KeyWars.Domain.ChallengeAttemptBinding", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("BindingToken")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ChallengeId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ChallengeRoundId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("Consumed")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset?>("ConsumedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Mode")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TextSnapshotHash")
+                        .IsRequired()
+                        .HasMaxLength(96)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("TypingAttemptId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("UserProfileId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ChallengeId");
+
+                    b.HasIndex("TypingAttemptId")
+                        .IsUnique();
+
+                    b.HasIndex("UserProfileId");
+
+                    b.HasIndex("ChallengeRoundId", "UserProfileId")
+                        .IsUnique();
+
+                    b.ToTable("ChallengeAttemptBindings");
+                });
+
             modelBuilder.Entity("KeyWars.Domain.ChallengeParticipant", b =>
                 {
                     b.Property<Guid>("ChallengeId")
@@ -810,6 +866,33 @@ namespace KeyWars.Data.Migrations
                     b.HasOne("KeyWars.Domain.TrainingText", null)
                         .WithMany()
                         .HasForeignKey("TrainingTextId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("KeyWars.Domain.ChallengeAttemptBinding", b =>
+                {
+                    b.HasOne("KeyWars.Domain.Challenge", null)
+                        .WithMany()
+                        .HasForeignKey("ChallengeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("KeyWars.Domain.ChallengeRound", null)
+                        .WithMany()
+                        .HasForeignKey("ChallengeRoundId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("KeyWars.Domain.TypingAttempt", null)
+                        .WithMany()
+                        .HasForeignKey("TypingAttemptId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("KeyWars.Domain.UserProfile", null)
+                        .WithMany()
+                        .HasForeignKey("UserProfileId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

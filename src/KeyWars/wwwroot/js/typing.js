@@ -349,7 +349,8 @@ export function attachTypingApps() {
       startButton.disabled = true;
       startButton.textContent = "Lädt";
 
-      const response = await fetch("/api/spielen/start", {
+      const startEndpoint = challengeId ? `/api/herausforderungen/${challengeId}/start` : "/api/spielen/start";
+      const response = await fetch(startEndpoint, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(request())

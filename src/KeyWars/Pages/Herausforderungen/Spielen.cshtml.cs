@@ -16,7 +16,7 @@ public sealed class SpielenModel(CurrentUser currentUser, KeyWarsDbContext db, C
     public async Task<IActionResult> OnGetAsync(Guid id, CancellationToken cancellationToken)
     {
         var profile = await currentUser.RequireProfileAsync(User, cancellationToken);
-        await challenges.JoinAsync(id, profile.Id, cancellationToken);
+        await challenges.RequirePlayableAsync(id, profile.Id, cancellationToken);
         CurrentChallenge = await db.Challenges.SingleAsync(item => item.Id == id, cancellationToken);
         Text = await db.TrainingTexts.SingleAsync(item => item.Id == CurrentChallenge.TrainingTextId, cancellationToken);
         return Page();

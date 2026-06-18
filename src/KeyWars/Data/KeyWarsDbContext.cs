@@ -15,6 +15,7 @@ public sealed class KeyWarsDbContext(DbContextOptions<KeyWarsDbContext> options)
     public DbSet<ChallengeParticipant> ChallengeParticipants => Set<ChallengeParticipant>();
     public DbSet<ChallengeRound> ChallengeRounds => Set<ChallengeRound>();
     public DbSet<ChallengeRoundResult> ChallengeRoundResults => Set<ChallengeRoundResult>();
+    public DbSet<ChallengeAttemptBinding> ChallengeAttemptBindings => Set<ChallengeAttemptBinding>();
     public DbSet<LiveRoomSummary> LiveRoomSummaries => Set<LiveRoomSummary>();
     public DbSet<LiveRoomParticipantSummary> LiveRoomParticipantSummaries => Set<LiveRoomParticipantSummary>();
     public DbSet<Mission> Missions => Set<Mission>();
@@ -153,6 +154,29 @@ public sealed class KeyWarsDbContext(DbContextOptions<KeyWarsDbContext> options)
                 .WithMany()
                 .HasForeignKey(result => result.TypingAttemptId)
                 .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<ChallengeAttemptBinding>(entity =>
+        {
+            entity.HasIndex(binding => new { binding.ChallengeRoundId, binding.UserProfileId }).IsUnique();
+            entity.HasIndex(binding => binding.TypingAttemptId).IsUnique();
+            entity.Property(binding => binding.Mode).HasConversion<string>();
+            entity.HasOne<Challenge>()
+                .WithMany()
+                .HasForeignKey(binding => binding.ChallengeId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<ChallengeRound>()
+                .WithMany()
+                .HasForeignKey(binding => binding.ChallengeRoundId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<TypingAttempt>()
+                .WithMany()
+                .HasForeignKey(binding => binding.TypingAttemptId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<UserProfile>()
+                .WithMany()
+                .HasForeignKey(binding => binding.UserProfileId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<LiveRoomSummary>(entity =>

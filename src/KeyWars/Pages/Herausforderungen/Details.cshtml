@@ -13,6 +13,9 @@
         <form method="post" asp-page-handler="Join">
             <button type="submit" class="secondary">Annehmen</button>
         </form>
+        <form method="post" asp-page-handler="Decline">
+            <button type="submit" class="secondary">Ablehnen</button>
+        </form>
         <a class="button" asp-page="/Herausforderungen/Spielen" asp-route-id="@Model.CurrentChallenge.Id">Runde spielen</a>
     </div>
 </section>

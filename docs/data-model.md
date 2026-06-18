@@ -11,6 +11,7 @@ Wichtige Tabellen:
 - `ChallengeParticipants`
 - `ChallengeRounds`
 - `ChallengeRoundResults`
+- `ChallengeAttemptBindings`
 - `LiveRoomSummaries`
 - `Missions`
 - `Achievements`
@@ -43,3 +44,12 @@ speichern minimale Wortzeit-Aggregate ohne vollstaendiges Keystroke-Replay.
 Versuch: Position, Fehlerart, erwartetes Graphem, tatsaechliches Graphem und
 betroffenes Muster. Die Tabelle ist Teil von Profil-Export und
 Statistik-Reset/Loeschung.
+
+## ChallengeAttemptBindings
+
+Challenge-Versuche werden vor dem Tippen serverseitig gebunden. Ein Binding
+enthaelt `ChallengeId`, `ChallengeRoundId`, `UserProfileId`, `TypingAttemptId`,
+`TextSnapshotHash`, Modus und einen internen Bindungstoken. Unique-Indizes auf
+`TypingAttemptId` und `(ChallengeRoundId, UserProfileId)` verhindern, dass freie
+Training-Attempts oder wiederverwendete Attempts eine Challenge-Runde
+abschliessen.

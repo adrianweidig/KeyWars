@@ -16,7 +16,7 @@ Statuswerte:
 | Zeit-Sprints | teilweise | Serverdauer startet beim Begin-Signal; Teiltext nach Zeitablauf zaehlt, Browser-Eingabe-E2E offen |
 | Fehleranalyse | teilweise | Alignment, echte Fehleraggregate und timingbasierte Konsistenz vorhanden; Browser-Visual-E2E und Langzeitaggregation offen |
 | Textbibliothek | teilweise | strikter UTF-8-Import und CRUD KW-041 offen |
-| Challenges | teilweise | Challenge-Attempt-Binding KW-040 offen |
+| Challenges | teilweise | Servergebundenes Challenge-Attempt-Binding, Annahme/Ablehnung, Expiry- und Replaytests vorhanden; Best-of/Browser-E2E offen |
 | Live-Arena Lobby | teilweise | Phasen, Countdown, Presence und Hosttransfer begonnen |
 | Live-Arena Countdown | teilweise | Serverzeit vorhanden, Browser-E2E fehlt |
 | Live-Arena grafische Strecke | geplant | KW-023 |

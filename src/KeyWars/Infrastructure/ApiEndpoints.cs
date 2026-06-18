@@ -79,6 +79,13 @@ public static class ApiEndpoints
             });
         });
 
+        api.MapPost("/herausforderungen/{id:guid}/start", async (Guid id, CurrentUser currentUser, HttpContext httpContext, AttemptService attempts, ChallengeService challenges, CancellationToken cancellationToken) =>
+        {
+            var profile = await currentUser.RequireProfileAsync(httpContext.User, cancellationToken);
+            var session = await challenges.StartAttemptAsync(id, profile.Id, attempts, cancellationToken);
+            return Results.Ok(session);
+        });
+
         api.MapPost("/herausforderungen/{id:guid}/abschliessen", async (Guid id, FinishAttemptRequest request, CurrentUser currentUser, HttpContext httpContext, AttemptService attempts, ChallengeService challenges, CancellationToken cancellationToken) =>
         {
             var profile = await currentUser.RequireProfileAsync(httpContext.User, cancellationToken);

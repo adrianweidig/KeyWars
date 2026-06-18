@@ -27,6 +27,13 @@ public sealed class DetailsModel(CurrentUser currentUser, KeyWarsDbContext db, C
         return RedirectToPage(new { id });
     }
 
+    public async Task<IActionResult> OnPostDeclineAsync(Guid id, CancellationToken cancellationToken)
+    {
+        var profile = await currentUser.RequireProfileAsync(User, cancellationToken);
+        await challenges.DeclineAsync(id, profile.Id, cancellationToken);
+        return RedirectToPage(new { id });
+    }
+
     private async Task LoadAsync(Guid id, CancellationToken cancellationToken)
     {
         var profile = await currentUser.RequireProfileAsync(User, cancellationToken);

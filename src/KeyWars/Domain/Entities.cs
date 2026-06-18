@@ -196,6 +196,23 @@ public sealed class ChallengeRoundResult
     public DateTimeOffset? FinishedAt { get; set; }
 }
 
+public sealed class ChallengeAttemptBinding
+{
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public Guid ChallengeId { get; set; }
+    public Guid ChallengeRoundId { get; set; }
+    public Guid UserProfileId { get; set; }
+    public Guid TypingAttemptId { get; set; }
+    [MaxLength(96)]
+    public string TextSnapshotHash { get; set; } = "";
+    public TrainingMode Mode { get; set; } = TrainingMode.Text;
+    [MaxLength(32)]
+    public string BindingToken { get; set; } = "";
+    public bool Consumed { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? ConsumedAt { get; set; }
+}
+
 public sealed class LiveRoomSummary
 {
     public Guid Id { get; set; }

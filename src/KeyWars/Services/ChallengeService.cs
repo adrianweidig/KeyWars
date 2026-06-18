@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using KeyWars.Data;
 using KeyWars.Domain;
 using Microsoft.EntityFrameworkCore;
@@ -19,6 +21,16 @@ public sealed class ChallengeService(
             throw new InvalidOperationException("Aktuell ist nur der Challenge-Modus \"Klassisches Rennen\" implementiert.");
         }
 
+        if (request.RoundCount != 1)
+        {
+            throw new InvalidOperationException("Mehrere Runden werden erst mit der Serienlogik aktiviert.");
+        }
+
+        if (request.ParticipantIds.Count != request.ParticipantIds.Distinct().Count())
+        {
+            throw new InvalidOperationException("Teilnehmer dürfen nicht doppelt ausgewählt werden.");
+        }
+
         var participants = request.ParticipantIds.Append(creatorProfileId).Distinct().ToArray();
         if (participants.Length < 2)
         {
@@ -30,9 +42,21 @@ public sealed class ChallengeService(
             throw new InvalidOperationException($"Maximal {options.Value.MaxParticipants} Personen sind erlaubt.");
         }
 
+        var profiles = await db.UserProfiles.Where(item => participants.Contains(item.Id) && !item.Deleted).ToListAsync(cancellationToken);
+        if (profiles.Count != participants.Length)
+        {
+            throw new InvalidOperationException("Mindestens eine ausgewählte Person ist nicht verfügbar.");
+        }
+
+        if (profiles.Any(item => item.Id != creatorProfileId && !item.ChallengesEnabled))
+        {
+            throw new InvalidOperationException("Mindestens eine ausgewählte Person nimmt keine Herausforderungen an.");
+        }
+
         var text = await db.TrainingTexts.SingleAsync(item =>
             item.Id == request.TrainingTextId &&
             (item.IsStandard || item.Visibility == TrainingTextVisibility.Organization || item.OwnerProfileId == creatorProfileId), cancellationToken);
+        var now = timeProvider.GetUtcNow();
         var challenge = new Challenge
         {
             CreatorProfileId = creatorProfileId,
@@ -41,10 +65,11 @@ public sealed class ChallengeService(
             Mode = request.Mode,
             RoundCount = 1,
             RatingEligible = text.RatingEligible && request.Mode is ChallengeMode.Classic or ChallengeMode.BestOf,
-            ExpiresAt = timeProvider.GetUtcNow().AddDays(Math.Clamp(request.ExpiryDays, 1, 30))
+            CreatedAt = now,
+            ExpiresAt = now.AddDays(Math.Clamp(request.ExpiryDays, 1, 30))
         };
         db.Challenges.Add(challenge);
-        db.ChallengeRounds.Add(new ChallengeRound { ChallengeId = challenge.Id, RoundNumber = 1 });
+        db.ChallengeRounds.Add(new ChallengeRound { ChallengeId = challenge.Id, RoundNumber = 1, CreatedAt = now });
 
         foreach (var participantId in participants)
         {
@@ -52,12 +77,65 @@ public sealed class ChallengeService(
             {
                 ChallengeId = challenge.Id,
                 UserProfileId = participantId,
+                InvitedAt = now,
                 Status = participantId == creatorProfileId ? ParticipantStatus.Joined : ParticipantStatus.Invited
             });
         }
 
         await db.SaveChangesAsync(cancellationToken);
         return challenge;
+    }
+
+    public async Task<AttemptSession> StartAttemptAsync(Guid challengeId, Guid profileId, AttemptService attempts, CancellationToken cancellationToken = default)
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var challenge = await RequireActiveChallengeAsync(challengeId, cancellationToken);
+        var participant = await db.ChallengeParticipants.SingleAsync(item => item.ChallengeId == challengeId && item.UserProfileId == profileId, cancellationToken);
+        if (participant.Status == ParticipantStatus.Invited)
+        {
+            throw new InvalidOperationException("Die Herausforderung muss vor dem Start angenommen werden.");
+        }
+
+        if (participant.Status is ParticipantStatus.Finished or ParticipantStatus.Dnf or ParticipantStatus.Declined)
+        {
+            throw new InvalidOperationException("Diese Herausforderung kann nicht mehr gestartet werden.");
+        }
+
+        var round = await db.ChallengeRounds.SingleAsync(item => item.ChallengeId == challengeId && item.RoundNumber == 1, cancellationToken);
+        var existingBinding = await db.ChallengeAttemptBindings.AnyAsync(item => item.ChallengeRoundId == round.Id && item.UserProfileId == profileId, cancellationToken);
+        if (existingBinding)
+        {
+            throw new InvalidOperationException("Für diese Challenge-Runde wurde bereits ein Versuch gestartet.");
+        }
+
+        var existingResult = await db.ChallengeRoundResults.AnyAsync(item => item.ChallengeRoundId == round.Id && item.UserProfileId == profileId, cancellationToken);
+        if (existingResult)
+        {
+            throw new InvalidOperationException("Diese Challenge-Runde wurde bereits abgeschlossen.");
+        }
+
+        var session = await attempts.StartAsync(profileId, new StartAttemptRequest(TrainingMode.Text, challenge.TrainingTextId, null, null), cancellationToken);
+        db.ChallengeAttemptBindings.Add(new ChallengeAttemptBinding
+        {
+            ChallengeId = challenge.Id,
+            ChallengeRoundId = round.Id,
+            UserProfileId = profileId,
+            TypingAttemptId = session.Id,
+            TextSnapshotHash = ComputeTextHash(session.Text),
+            Mode = TrainingMode.Text,
+            BindingToken = CreateBindingToken(),
+            CreatedAt = timeProvider.GetUtcNow()
+        });
+
+        if (challenge.Status == ChallengeStatus.Open)
+        {
+            challenge.Status = ChallengeStatus.Running;
+        }
+
+        participant.Status = ParticipantStatus.Running;
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return session;
     }
 
     public async Task<IReadOnlyList<Challenge>> ListForProfileAsync(Guid profileId, CancellationToken cancellationToken = default)
@@ -100,6 +178,21 @@ public sealed class ChallengeService(
         }
     }
 
+    public async Task RequirePlayableAsync(Guid challengeId, Guid profileId, CancellationToken cancellationToken = default)
+    {
+        await RequireActiveChallengeAsync(challengeId, cancellationToken);
+        var participant = await db.ChallengeParticipants.SingleAsync(item => item.ChallengeId == challengeId && item.UserProfileId == profileId, cancellationToken);
+        if (participant.Status == ParticipantStatus.Invited)
+        {
+            throw new InvalidOperationException("Die Herausforderung muss vor dem Start angenommen werden.");
+        }
+
+        if (participant.Status is ParticipantStatus.Finished or ParticipantStatus.Dnf or ParticipantStatus.Declined)
+        {
+            throw new InvalidOperationException("Diese Herausforderung ist für dich abgeschlossen.");
+        }
+    }
+
     public async Task FinishRoundAsync(Guid challengeId, Guid profileId, TypingAttempt attempt, CancellationToken cancellationToken = default)
     {
         var challenge = await RequireActiveChallengeAsync(challengeId, cancellationToken);
@@ -114,7 +207,29 @@ public sealed class ChallengeService(
             return;
         }
 
-        if (attempt.TrainingTextId != challenge.TrainingTextId ||
+        var round = await db.ChallengeRounds.SingleAsync(item => item.ChallengeId == challengeId && item.RoundNumber == 1, cancellationToken);
+        var binding = await db.ChallengeAttemptBindings.SingleOrDefaultAsync(item =>
+            item.ChallengeId == challengeId &&
+            item.ChallengeRoundId == round.Id &&
+            item.UserProfileId == profileId &&
+            item.TypingAttemptId == attempt.Id, cancellationToken);
+        if (binding is null)
+        {
+            throw new InvalidOperationException("Der Versuch gehört nicht zu dieser Herausforderung.");
+        }
+
+        var duplicateResult = await db.ChallengeRoundResults.AnyAsync(item =>
+            item.ChallengeRoundId == round.Id &&
+            item.UserProfileId == profileId, cancellationToken);
+        if (duplicateResult)
+        {
+            return;
+        }
+
+        if (binding.Consumed ||
+            binding.Mode != attempt.Mode ||
+            binding.TextSnapshotHash != attempt.TextHash ||
+            attempt.TrainingTextId != challenge.TrainingTextId ||
             attempt.UserProfileId != profileId ||
             attempt.Mode != TrainingMode.Text ||
             !attempt.Official ||
@@ -125,20 +240,13 @@ public sealed class ChallengeService(
             throw new InvalidOperationException("Der Versuch gehört nicht zu dieser Herausforderung.");
         }
 
-        var duplicateResult = await db.ChallengeRoundResults.AnyAsync(item =>
-            item.UserProfileId == profileId &&
-            db.ChallengeRounds.Any(round => round.Id == item.ChallengeRoundId && round.ChallengeId == challengeId), cancellationToken);
-        if (duplicateResult)
-        {
-            return;
-        }
-
-        var round = await db.ChallengeRounds.SingleAsync(item => item.ChallengeId == challengeId && item.RoundNumber == 1, cancellationToken);
         if (challenge.Status == ChallengeStatus.Open)
         {
             challenge.Status = ChallengeStatus.Running;
         }
 
+        binding.Consumed = true;
+        binding.ConsumedAt = timeProvider.GetUtcNow();
         participant.Status = attempt.Completed ? ParticipantStatus.Finished : ParticipantStatus.Dnf;
         participant.FinishedAt = timeProvider.GetUtcNow();
         db.ChallengeRoundResults.Add(new ChallengeRoundResult
@@ -245,5 +353,17 @@ public sealed class ChallengeService(
         }
 
         await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private static string ComputeTextHash(string text)
+    {
+        var normalized = TypingEngine.NormalizeText(text);
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(normalized));
+        return $"sha256:{Convert.ToHexString(hash).ToLowerInvariant()}";
+    }
+
+    private static string CreateBindingToken()
+    {
+        return Convert.ToHexString(RandomNumberGenerator.GetBytes(12));
     }
 }

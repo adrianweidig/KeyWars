@@ -100,6 +100,7 @@ public sealed class ProfilePrivacyService(KeyWarsDbContext db, LiveRoomManager l
     private async Task DeleteDerivedStatisticsAsync(Guid profileId, CancellationToken cancellationToken)
     {
         await db.TypingAttemptErrors.Where(item => item.UserProfileId == profileId).ExecuteDeleteAsync(cancellationToken);
+        await db.ChallengeAttemptBindings.Where(item => item.UserProfileId == profileId).ExecuteDeleteAsync(cancellationToken);
         await db.TypingAttempts.Where(item => item.UserProfileId == profileId).ExecuteDeleteAsync(cancellationToken);
         await db.Missions.Where(item => item.UserProfileId == profileId).ExecuteDeleteAsync(cancellationToken);
         await db.Achievements.Where(item => item.UserProfileId == profileId).ExecuteDeleteAsync(cancellationToken);
