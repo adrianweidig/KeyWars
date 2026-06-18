@@ -25,13 +25,16 @@ jobs:
       - name: Build image
         run: docker build -t keywars:scan .
       - name: Trivy vulnerability scan
-        uses: aquasecurity/trivy-action@v0.33.0
-        with:
-          image-ref: keywars:scan
-          format: sarif
-          output: trivy-results.sarif
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$PWD:/work" \
+            aquasec/trivy:0.65.0 \
+            image keywars:scan \
+            --format sarif \
+            --output /work/trivy-results.sarif \
+            --severity CRITICAL,HIGH \
+            --ignore-unfixed
       - name: Upload Trivy SARIF
         uses: github/codeql-action/upload-sarif@v3
         if: always()
