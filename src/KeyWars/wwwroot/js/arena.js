@@ -9,8 +9,7 @@ export function attachArenaPages() {
     const timer = root.querySelector("[data-arena-timer]");
     const readyForm = document.querySelector("[data-arena-ready-form]");
     const startForm = document.querySelector("[data-arena-start-form]");
-    const finishForm = root.querySelector("[data-arena-finish-form]");
-    const finishButton = root.querySelector("[data-arena-finish]");
+    const dnfButton = root.querySelector("[data-arena-dnf]");
     const leaveButton = document.querySelector("[data-arena-leave]");
     const connection = new SignalRConnection("/hubs/arena");
 
@@ -78,8 +77,8 @@ export function attachArenaPages() {
         input.disabled = !running || finishedLocally || !snapshot.targetText;
       }
 
-      if (finishButton) {
-        finishButton.disabled = !running || finishedLocally;
+      if (dnfButton) {
+        dnfButton.disabled = !running || finishedLocally;
       }
 
       const current = snapshot.participants?.find((participant) => participant.profileId === currentProfileId);
@@ -236,8 +235,11 @@ export function attachArenaPages() {
       }
     });
 
-    finishForm?.addEventListener("submit", (event) => {
-      event.preventDefault();
+    dnfButton?.addEventListener("click", () => {
+      if (!window.confirm("Runde wirklich aufgeben? Das Ergebnis wird als nicht beendet gespeichert.")) {
+        return;
+      }
+
       finish();
     });
 

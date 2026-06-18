@@ -19,7 +19,8 @@ public sealed class BeitretenModel(CurrentUser currentUser, LiveRoomManager room
         var profile = await currentUser.RequireProfileAsync(User, cancellationToken);
         try
         {
-            var snapshot = rooms.JoinByCode(Code.Trim(), profile.Id, profile.DisplayName);
+            Code = LiveRoomManager.NormalizeRoomCode(Code);
+            var snapshot = rooms.JoinByCode(Code, profile.Id, profile.DisplayName);
             return RedirectToPage("/Arena/Raum", new { id = snapshot.RoomId });
         }
         catch (InvalidOperationException ex)

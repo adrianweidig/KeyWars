@@ -63,6 +63,7 @@ public sealed class LiveRoomManager(
     ILiveRoomCompletionSink? completionSink = null)
 {
     private const int MinimumParticipants = 2;
+    private const string RoomCodeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     private readonly object createGate = new();
     private readonly ConcurrentDictionary<Guid, LiveRoomState> rooms = new();
     private readonly ConcurrentDictionary<string, Guid> roomCodes = new(StringComparer.OrdinalIgnoreCase);
@@ -122,12 +123,24 @@ public sealed class LiveRoomManager(
 
     public LiveRoomSnapshot JoinByCode(string code, Guid profileId, string displayName)
     {
-        if (!roomCodes.TryGetValue(code.Trim(), out var roomId) || !rooms.TryGetValue(roomId, out var room))
+        var normalizedCode = NormalizeRoomCode(code);
+        if (!roomCodes.TryGetValue(normalizedCode, out var roomId) || !rooms.TryGetValue(roomId, out var room))
         {
             throw new InvalidOperationException("Der Raumcode ist ungültig.");
         }
 
         return Join(room.Id, profileId, displayName, viaCode: true);
+    }
+
+    public static string NormalizeRoomCode(string code)
+    {
+        var normalized = (code ?? "").Trim().ToUpperInvariant();
+        if (normalized.Length != 6 || normalized.Any(character => !RoomCodeAlphabet.Contains(character, StringComparison.Ordinal)))
+        {
+            throw new InvalidOperationException("Der Raumcode muss aus genau sechs Zeichen bestehen. Erlaubt sind A-Z ohne I/O sowie 2-9.");
+        }
+
+        return normalized;
     }
 
     public LiveRoomSnapshot Join(Guid roomId, Guid profileId, string displayName) => Join(roomId, profileId, displayName, viaCode: false);
@@ -808,11 +821,10 @@ public sealed class LiveRoomManager(
 
     private static string GenerateCode()
     {
-        const string alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
         Span<char> chars = stackalloc char[6];
         for (var index = 0; index < chars.Length; index++)
         {
-            chars[index] = alphabet[RandomNumberGenerator.GetInt32(alphabet.Length)];
+            chars[index] = RoomCodeAlphabet[RandomNumberGenerator.GetInt32(RoomCodeAlphabet.Length)];
         }
 
         return new string(chars);

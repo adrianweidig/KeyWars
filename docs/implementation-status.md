@@ -15,7 +15,7 @@ Dieser Tracker folgt dem Audit-Paket `2f3379490dcd`.
 | KW-014 | teilweise | offen | Concurrency-Tests | Sequenz-/Fuzztests fehlen |
 | KW-015 | teilweise | offen | Unit-Tests fuer Progress-Koaleszierung und Pending-Drop; Concurrency-Test fuer Delta-Pfad ohne Vollsnapshot; Build/Test gruen | Vollstaendige RoomCommand-Pipeline, echter SignalR-Netzlasttest und Soak-Evidenz fehlen |
 | KW-016 | teilweise | offen | Integrationstests fuer Completion-Queue, Idempotenz, transienten SQLite-Retry, Shutdown-Flush, Serverabbruch ohne Rating und konkurrierende Raeume; Concurrency-Tests fuer einmaliges Enqueue und Cleanup | Mehrfachrunden-/Serienpersistenz und vollstaendige Browser-E2E-Abnahme fehlen |
-| KW-017 | teilweise | offen | Build gruen | Fehlercodes/E2E fehlen |
+| KW-017 | teilweise | offen | Unit-Tests fuer Raumcodevalidierung, Build/Test gruen; POST-Finish-Fallback entfernt; DNF-Aktion und differenzierte Raumfehler umgesetzt | Rollenbasierte Browser-E2E, Copy-to-Clipboard und Slow-network-/Double-click-Evidenz fehlen |
 | KW-018 | offen | offen | keine | Serienlogik fehlt |
 | KW-020 | offen | offen | keine | Designsystem fehlt |
 | KW-021 | offen | offen | keine | Dashboard-Slice fehlt |

@@ -50,13 +50,13 @@
             <strong>00:00.0</strong>
             <span>@DisplayNames.For(Model.Snapshot.Phase)</span>
         </div>
-        <form method="post" asp-page-handler="Finish" class="form-grid form-grid-spaced" data-arena-finish-form>
+        <div class="form-grid form-grid-spaced">
             <label>
                 Eingabe
                 <textarea asp-for="Input" class="typing-input" data-arena-input autocapitalize="off" autocomplete="off" spellcheck="false"></textarea>
             </label>
-            <button type="submit" class="visually-hidden" data-arena-finish tabindex="-1">Runde abschließen</button>
-        </form>
+            <button type="button" class="secondary" data-arena-dnf>Runde aufgeben</button>
+        </div>
     </div>
     <aside class="card">
         <h2>Teilnehmende</h2>

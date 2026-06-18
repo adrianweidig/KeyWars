@@ -34,7 +34,6 @@ public sealed class RaumModel(CurrentUser currentUser, LiveRoomManager rooms) : 
 
     public Guid CurrentProfileId { get; private set; }
 
-    [BindProperty]
     public string Input { get; set; } = "";
 
     public async Task<IActionResult> OnGetAsync(Guid id, CancellationToken cancellationToken)
@@ -45,9 +44,9 @@ public sealed class RaumModel(CurrentUser currentUser, LiveRoomManager rooms) : 
         {
             Snapshot = rooms.Join(id, profile.Id, profile.DisplayName);
         }
-        catch (InvalidOperationException)
+        catch (InvalidOperationException ex)
         {
-            return Forbid();
+            return ArenaError(ex);
         }
 
         return Page();
@@ -57,10 +56,17 @@ public sealed class RaumModel(CurrentUser currentUser, LiveRoomManager rooms) : 
     {
         var profile = await currentUser.RequireProfileAsync(User, cancellationToken);
         CurrentProfileId = profile.Id;
-        var snapshot = rooms.Snapshot(id);
-        var participant = snapshot.Participants.FirstOrDefault(item => item.ProfileId == profile.Id);
-        rooms.SetReady(id, profile.Id, participant?.Ready != true);
-        return RedirectToPage(new { id });
+        try
+        {
+            var snapshot = rooms.Snapshot(id);
+            var participant = snapshot.Participants.FirstOrDefault(item => item.ProfileId == profile.Id);
+            rooms.SetReady(id, profile.Id, participant?.Ready != true);
+            return RedirectToPage(new { id });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return ArenaError(ex);
+        }
     }
 
     public async Task<IActionResult> OnPostStartAsync(Guid id, CancellationToken cancellationToken)
@@ -81,11 +87,18 @@ public sealed class RaumModel(CurrentUser currentUser, LiveRoomManager rooms) : 
         return RedirectToPage(new { id });
     }
 
-    public async Task<IActionResult> OnPostFinishAsync(Guid id, CancellationToken cancellationToken)
+    private IActionResult ArenaError(InvalidOperationException exception)
     {
-        var profile = await currentUser.RequireProfileAsync(User, cancellationToken);
-        CurrentProfileId = profile.Id;
-        rooms.Finish(id, profile.Id, Input, 0, 0);
-        return RedirectToPage(new { id });
+        if (exception.Message.Contains("nicht gefunden", StringComparison.OrdinalIgnoreCase))
+        {
+            return NotFound(exception.Message);
+        }
+
+        if (exception.Message.Contains("Raumcode", StringComparison.OrdinalIgnoreCase))
+        {
+            return RedirectToPage("/Arena/Beitreten");
+        }
+
+        return StatusCode(StatusCodes.Status409Conflict, exception.Message);
     }
 }
