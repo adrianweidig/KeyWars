@@ -26,7 +26,7 @@ Statuswerte:
 | XP/Level/Missionen | teilweise | Reward-Ledger KW-032 offen |
 | Arena-Rating | teilweise | transaktionale Persistenz KW-016/KW-034 offen |
 | Profiltrends und Kalender | geplant | KW-033 |
-| Datenschutz-Reset/Loeschung | teilweise | Re-Provisioning-Semantik KW-043 offen |
+| Datenschutz-Reset/Loeschung | teilweise | Export/Reset/Loeschung mit Re-Provisioning getestet, aktive Browser-E2E offen |
 | GHCR Multiarch Image | teilweise | Workflow vorhanden, Release-Gate offen |
 | Air-Gap Image-Archiv | teilweise | amd64-Archiv vorhanden, Import-Evidenz offen |
 | Playwright Visual Regression | geplant | KW-051 |

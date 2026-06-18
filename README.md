@@ -139,6 +139,8 @@ In `Production` zählt nur die explizite LDAP-Konfiguration.
 - [Backup und Restore](docs/backup-restore.md): Sicherung der SQLite-Daten.
 - [Air-Gap-Installation](docs/airgap-install.md): Betrieb in abgeschotteten
   Umgebungen.
+- [Datenschutz](docs/privacy.md): Export, Statistik-Reset und
+  Profil-Löschung.
 
 ## Was KeyWars bewusst nicht ist
 

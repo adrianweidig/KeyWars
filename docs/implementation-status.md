@@ -33,7 +33,7 @@ Dieser Tracker folgt dem Audit-Paket `2f3379490dcd`.
 | KW-040 | teilweise | offen | Integrationstests fuer Ablauf und Attempt-Binding | Best-of/mehrere Runden fehlen |
 | KW-041 | teilweise | offen | Integrationstest fuer striktes UTF-8 | Edit/Delete/Import-UX fehlen |
 | KW-042 | teilweise | offen | `DisplayNames.For(TrainingMode)` und Profilansichten | Vollstaendige UI-Pruefung fehlt |
-| KW-043 | offen | offen | keine | Datenschutzsemantik fehlt |
+| KW-043 | teilweise | offen | Integrationstests fuer Export, Reset, Loeschung und Re-Provisioning | Browser-E2E und vollstaendige Datenschutzabnahme fehlen |
 | KW-050 | blockiert | offen | Agent-Share-Pruefung | Kein AD-Runbook gefunden |
 | KW-051 | blockiert | offen | HTTP-E2E gruen, Playwright-CLI-Versuch dokumentiert | Lokales Node 8/unvollstaendige Playwright-Runtime |
 | KW-052 | teilweise | offen | `tools/KeyWars.LoadTest` lokal bis 100 Teilnehmende | Echter SignalR-Netzlasttest fehlt |

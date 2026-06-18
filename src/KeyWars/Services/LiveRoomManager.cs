@@ -334,6 +334,44 @@ public sealed class LiveRoomManager(
         CleanupExpiredRooms(timeProvider.GetUtcNow());
     }
 
+    public void RemoveProfile(Guid profileId)
+    {
+        var now = timeProvider.GetUtcNow();
+        foreach (var room in rooms.Values)
+        {
+            CompletedRoomRecord? completed = null;
+            lock (room.Gate)
+            {
+                if (!room.Participants.TryGetValue(profileId, out var participant) ||
+                    participant.Status is ParticipantStatus.Finished or ParticipantStatus.Dnf or ParticipantStatus.LeftBeforeStart)
+                {
+                    continue;
+                }
+
+                if (room.Phase == LiveRoomPhase.Lobby)
+                {
+                    participant.Status = ParticipantStatus.LeftBeforeStart;
+                    participant.Ready = false;
+                    participant.FinishedAt = now;
+                    ApplyHostDisconnectRule(room);
+                }
+                else
+                {
+                    participant.Status = ParticipantStatus.Dnf;
+                    participant.Ready = false;
+                    participant.FinishedAt = now;
+                    participant.DurationMilliseconds = room.StartedAt is { } startedAt
+                        ? (int)Math.Round(NormalizeDuration(now - startedAt).TotalMilliseconds)
+                        : 0;
+                    ApplyPlacements(room);
+                    completed = TryCompleteRoom(room, now);
+                }
+            }
+
+            QueuePersistence(completed);
+        }
+    }
+
     private LiveRoomSnapshot Join(Guid roomId, Guid profileId, string displayName, bool viaCode)
     {
         var room = GetRoom(roomId);

@@ -1,13 +1,14 @@
 using KeyWars.Auth;
 using KeyWars.Data;
 using KeyWars.Domain;
+using KeyWars.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
 
 namespace KeyWars.Pages.Profil;
 
-public sealed class IndexModel(CurrentUser currentUser, KeyWarsDbContext db) : PageModel
+public sealed class IndexModel(CurrentUser currentUser, KeyWarsDbContext db, ProfilePrivacyService privacy) : PageModel
 {
     public UserProfile Profile { get; private set; } = new();
     public IReadOnlyList<TypingAttempt> Attempts { get; private set; } = [];
@@ -25,12 +26,7 @@ public sealed class IndexModel(CurrentUser currentUser, KeyWarsDbContext db) : P
     public async Task<IActionResult> OnPostDeleteAsync(CancellationToken cancellationToken)
     {
         var profile = await currentUser.RequireProfileAsync(User, cancellationToken);
-        profile.Deleted = true;
-        profile.DisplayName = "Gelöschtes Profil";
-        profile.Email = null;
-        profile.GivenName = null;
-        profile.Surname = null;
-        await db.SaveChangesAsync(cancellationToken);
+        await privacy.DeleteProfileAsync(profile.Id, cancellationToken);
         return RedirectToPage("/Abmelden");
     }
 }
