@@ -3,17 +3,24 @@ name: ci
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [master]
+  schedule:
+    - cron: '17 4 * * 1'
 
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-test:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 10.0.x
       - name: Restore
@@ -23,7 +30,13 @@ jobs:
       - name: Build
         run: dotnet build -c Release --no-restore
       - name: Test
-        run: dotnet test -c Release --no-build --collect:"XPlat Code Coverage"
+        run: dotnet test -c Release --no-build --collect:"XPlat Code Coverage" --results-directory TestResults
+      - name: Upload coverage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: TestResults
+          if-no-files-found: error
       - name: Docker build smoke
         run: docker build -t keywars:ci .
       - name: Compose config

@@ -20,7 +20,7 @@ LABEL org.opencontainers.image.title="KeyWars" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${REVISION}" \
       org.opencontainers.image.created="${CREATED}" \
-      org.opencontainers.image.source="https://github.com/theheadless/keywars" \
+      org.opencontainers.image.source="https://github.com/adrianweidig/KeyWars" \
       org.opencontainers.image.licenses="MIT"
 WORKDIR /app
 RUN mkdir -p /data/dataprotection-keys /data/backups && chown -R app:app /data

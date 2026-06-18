@@ -1,6 +1,6 @@
 services:
   keywars:
-    image: ${KEYWARS_IMAGE:-ghcr.io/theheadless/keywars}:${KEYWARS_VERSION:-latest}
+    image: ${KEYWARS_IMAGE:-ghcr.io/adrianweidig/keywars}:${KEYWARS_VERSION:-latest}
     container_name: keywars
     restart: unless-stopped
     ports:

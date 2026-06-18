@@ -1,0 +1,70 @@
+name: quality
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  schedule:
+    - cron: '41 4 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Markdown lint
+        uses: DavidAnson/markdownlint-cli2-action@v20
+        with:
+          globs: |
+            **/*.md
+            !**/bin/**
+            !**/obj/**
+
+      - name: YAML lint
+        uses: ibiqlik/action-yamllint@v3
+        with:
+          file_or_dir: .github .github/workflows compose.yaml
+          config_data: |
+            extends: default
+            rules:
+              line-length:
+                max: 140
+                level: warning
+              truthy:
+                allowed-values: ['true', 'false', 'on']
+
+      - name: GitHub Actions lint
+        uses: reviewdog/action-actionlint@v1
+
+      - name: Dockerfile lint
+        uses: hadolint/hadolint-action@v3.2.0
+        with:
+          dockerfile: Dockerfile
+
+      - name: Repository hygiene
+        shell: bash
+        run: |
+          test -f LICENSE
+          test -f SECURITY.md
+          test -f CONTRIBUTING.md
+          test -f CODE_OF_CONDUCT.md
+          test -f .github/CODEOWNERS
+          test -f .github/dependabot.yml
+          test -f .editorconfig
+          artifacts="$(find . -path ./.git -prune -o -type f \
+            \( -name '*.7z' -o -name '*.tar' -o -name '*.tar.gz' -o -name '*.db' -o -name '*.log' \) \
+            -print -quit)"
+          if [ -n "$artifacts" ]; then
+            echo "$artifacts"
+            echo "Generated or local artifact files must not be committed."
+            exit 1
+          fi

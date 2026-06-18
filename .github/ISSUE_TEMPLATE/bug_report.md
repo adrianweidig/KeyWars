@@ -1,7 +1,10 @@
 ---
 name: Fehlerbericht
 about: Einen reproduzierbaren Fehler melden
+labels: bug
 ---
+
+# Fehlerbericht
 
 ## Beschreibung
 
