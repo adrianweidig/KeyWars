@@ -9,7 +9,7 @@
 docker load -i keywars-vX.Y.Z-linux-amd64.tar.gz
 ```
 
-5. Tag in `.env` oder Portainer setzen.
-6. Stack starten.
+1. Tag in `.env` oder Portainer setzen.
+2. Stack starten.
 
 Nach Installation benötigt KeyWars nur Browser/Proxy-Zugriffe und LDAP/LDAPS zu Domain Controllern.
