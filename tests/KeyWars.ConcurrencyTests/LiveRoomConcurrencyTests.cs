@@ -187,16 +187,28 @@ public sealed class LiveRoomConcurrencyTests
     }
 
     [Fact]
-    public void CreateRoomUsesRequestedRoundCount()
+    public void CreateRoomUsesSingleRoundContract()
     {
         var manager = CreateManager();
         var creator = Guid.CreateVersion7();
 
-        var room = manager.CreateRoom(new CreateLiveRoomRequest(creator, "A", "Raum", "Text", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 3, 8));
+        var room = manager.CreateRoom(new CreateLiveRoomRequest(creator, "A", "Raum", "Text", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 8));
 
-        Assert.Equal(3, room.RoundCount);
+        Assert.Equal(1, room.RoundCount);
         Assert.Equal(1, room.CurrentRound);
         Assert.Equal(LiveRoomPhase.Lobby, room.Phase);
+    }
+
+    [Fact]
+    public void CreateRoomRejectsSeriesUntilRoundFlowExists()
+    {
+        var manager = CreateManager();
+        var creator = Guid.CreateVersion7();
+
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            manager.CreateRoom(new CreateLiveRoomRequest(creator, "A", "Raum", "Text", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 3, 8)));
+
+        Assert.Contains("Arena-Serien", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -21,7 +21,7 @@ Statuswerte:
 | Live-Arena Countdown | teilweise | Serverzeit vorhanden, Browser-E2E fehlt |
 | Live-Arena grafische Strecke | geplant | KW-023 |
 | Live-HUD und Podium | geplant | KW-024, KW-025 |
-| Mehrere Runden/Best-of | geplant | KW-018 |
+| Mehrere Runden/Best-of | geplant | Raumvertrag lehnt Serien bis zur KW-018-Implementierung ab |
 | Zuschauer | geplant | KW-027 |
 | XP/Level/Missionen | teilweise | Reward-Ledger KW-032 offen |
 | Arena-Rating | teilweise | transaktionale Persistenz KW-016/KW-034 offen |

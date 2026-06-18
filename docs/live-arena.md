@@ -6,6 +6,11 @@ pro Taste in SQLite geschrieben. Ein Host-Start fuehrt zuerst in eine
 serverseitige Countdown-Phase; der Zieltext wird erst zur freigegebenen
 Startzeit im Snapshot ausgeliefert.
 
+Bis die Serienlogik aus KW-018 vollstaendig umgesetzt ist, akzeptiert der
+produktive Raumvertrag genau eine Runde. Anfragen fuer 3- oder 5-Runden-Serien
+werden kontrolliert abgelehnt, damit die UI keine Best-of-Serie verspricht, die
+nach Runde 1 endet.
+
 Praesenz wird pro Profil und aktiver SignalR-Connection gefuehrt. Mehrere Tabs
 derselben Person erzeugen eine Teilnehmerzeile. Erst wenn die letzte
 Raumverbindung eines Profils verschwindet, startet die Reconnect-Grace. Ein

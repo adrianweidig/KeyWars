@@ -721,9 +721,9 @@ public sealed class LiveRoomManager(
 
     private static int ValidateRoundCount(int roundCount)
     {
-        return roundCount is 1 or 3 or 5
+        return roundCount == 1
             ? roundCount
-            : throw new InvalidOperationException("Arena-Serien unterstützen aktuell 1, 3 oder 5 Runden.");
+            : throw new InvalidOperationException("Arena-Serien sind noch nicht freigeschaltet. Erstelle aktuell eine einzelne Runde.");
     }
 
     private static bool IsLobbyActive(LiveParticipantState participant)
