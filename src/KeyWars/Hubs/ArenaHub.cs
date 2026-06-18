@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.SignalR;
 namespace KeyWars.Hubs;
 
 [Authorize]
-public sealed class ArenaHub(CurrentUser currentUser, LiveRoomManager rooms, LivePresenceTracker presence) : Hub
+public sealed class ArenaHub(CurrentUser currentUser, LiveRoomManager rooms, LivePresenceTracker presence, LiveProgressBroadcaster progress) : Hub
 {
     public async Task<LiveRoomSnapshot> JoinRoom(Guid roomId)
     {
@@ -49,8 +49,16 @@ public sealed class ArenaHub(CurrentUser currentUser, LiveRoomManager rooms, Liv
     public async Task SubmitProgress(Guid roomId, int sequence, string input)
     {
         var profile = await currentUser.RequireProfileAsync(Context.User!, Context.ConnectionAborted);
-        var snapshot = rooms.SubmitProgress(roomId, profile.Id, sequence, input);
-        await Clients.Group(roomId.ToString("N")).SendAsync("roomChanged", snapshot, Context.ConnectionAborted);
+        var result = rooms.SubmitProgressDelta(roomId, profile.Id, sequence, input);
+        if (result.Snapshot is { } snapshot)
+        {
+            await Clients.Group(roomId.ToString("N")).SendAsync("roomChanged", snapshot, Context.ConnectionAborted);
+        }
+
+        if (result.Delta is { } delta)
+        {
+            await progress.PublishAsync(delta, Context.ConnectionAborted);
+        }
     }
 
     public async Task<LiveRoomSnapshot> Finish(Guid roomId, string input, int backspaces, int focusLosses)

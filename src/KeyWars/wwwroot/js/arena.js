@@ -58,7 +58,7 @@ export function attachArenaPages() {
           tableCell(participant.displayName),
           tableCell(statusPill(participant.status)),
           tableCell(`${participant.correctCharacters} / ${snapshot.targetCharacterCount}`),
-          tableCell(participant.placement ? String(participant.placement) : "-")
+          tableCell(participant.placement ? String(participant.placement) : participant.rankHint ? `~${participant.rankHint}` : "-")
         );
         return row;
       }));
@@ -159,6 +159,32 @@ export function attachArenaPages() {
       renderState();
     };
 
+    const applyProgressBatch = (next) => {
+      const batch = camelize(next);
+      if (!snapshot || batch.roomId !== snapshot.roomId || !Array.isArray(batch.deltas)) {
+        return;
+      }
+
+      if (batch.roomVersion < snapshot.roundVersion) {
+        return;
+      }
+
+      snapshot.roundVersion = Math.max(snapshot.roundVersion, batch.roomVersion);
+      batch.deltas.forEach((delta) => {
+        const participant = snapshot.participants?.find((item) => item.profileId === delta.participantId);
+        if (!participant) {
+          return;
+        }
+
+        participant.correctCharacters = delta.correctCharacters;
+        participant.wpm = delta.wpm;
+        participant.accuracy = delta.accuracy;
+        participant.rankHint = delta.rankHint;
+      });
+      renderParticipants();
+      renderState();
+    };
+
     const submitProgress = () => {
       if (!snapshot || snapshot.phase !== "Running" || snapshot.finished || finishedLocally) {
         return;
@@ -243,6 +269,7 @@ export function attachArenaPages() {
     });
 
     connection.on("roomChanged", applySnapshot);
+    connection.on("progressChanged", applyProgressBatch);
     connection.onReconnect(async () => {
       try {
         applySnapshot(await connection.invoke("JoinRoom", [roomId]));

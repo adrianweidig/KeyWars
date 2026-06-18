@@ -36,10 +36,10 @@ anderen Umgebungen wird ausschliesslich LDAP/LDAPS verwendet.
 | `KEYWARS__LIVE__MAX_SPECTATORS_PER_ROOM` | `128` | geplant KW-027 | noch nicht verfuegbar |
 | `KEYWARS__LIVE__MAX_CONCURRENT_ROOMS` | `200` | `LiveRoomManager` | mindestens 1 |
 | `KEYWARS__LIVE__MAX_CONNECTIONS_PER_USER` | `3` | `LivePresenceTracker` | 1 bis 20 aktive Arena-Verbindungen pro Profil |
-| `KEYWARS__LIVE__PROGRESS_BROADCAST_HZ` | `10` | geplant KW-015 | noch nicht vollstaendig umgesetzt |
+| `KEYWARS__LIVE__PROGRESS_BROADCAST_HZ` | `10` | `LiveProgressBroadcaster` | maximaler Progress-Broadcast-Takt je Raum |
 | `KEYWARS__LIVE__COUNTDOWN_SECONDS` | `3` | `LiveRoomManager` | 1 bis 10 Sekunden |
 | `KEYWARS__LIVE__RECONNECT_GRACE_SECONDS` | `30` | `LiveRoomManager` | 0 bis 300 Sekunden |
-| `KEYWARS__LIVE__ROOM_COMMAND_QUEUE_CAPACITY` | `4096` | geplant KW-015 | noch nicht verfuegbar |
+| `KEYWARS__LIVE__ROOM_COMMAND_QUEUE_CAPACITY` | `4096` | `LiveProgressBroadcaster` | Pending-Kapazitaet fuer koaleszierte Progress-Deltas |
 | `KEYWARS__LIVE__COMPLETION_QUEUE_CAPACITY` | `4096` | `LiveRoomCompletionQueue` | begrenzte Queue fuer Arena-Abschlussjobs |
 | `KEYWARS__LIVE__COMPLETED_ROOM_RETENTION_MINUTES` | `60` | `LiveRoomManager` | Cleanup-Retention |
 | `KEYWARS__LIVE__LOBBY_ROOM_RETENTION_MINUTES` | `720` | `LiveRoomManager` | Cleanup-Retention |
@@ -81,3 +81,4 @@ beschraenkt.
 | `/health/live` | Prozess lebt |
 | `/health/ready` | SQLite ist erreichbar |
 | `/health/arena-persistence` | Pending Jobs, Kapazitaet und Fehlversuche der Arena-Abschlussqueue |
+| `/health/arena-progress` | aktive Progress-Raeume, Pending Deltas, Koaleszierungen, Drops und Broadcastzaehler |

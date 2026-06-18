@@ -14,6 +14,8 @@ Abschlussdaten laufen ueber `LiveRoomCompletionQueue` und
 Raum/Runde/Version, SQLite-Transaktion, Retry fuer transiente Locks und
 Shutdown-Flush. Laufende Countdown- und Rennraeume werden beim Shutdown als
 serverseitig abgebrochen gespeichert und bewirken keine Ratingaenderung.
-Eine begrenzte Command-Queue mit Progress-Deltas ist als KW-015 geplant und
-darf bis zur Implementierung nicht als produktiver Ist-Zustand beschrieben
-werden.
+Der heisse SignalR-Progresspfad sendet keine Vollsnapshots mehr, sondern
+koaleszierte `LiveProgressDelta`-Batches ueber `LiveProgressBroadcaster`.
+Zuverlaessige Raumereignisse bleiben direkte Commands mit Vollsnapshot;
+eine vollstaendige RoomCommand-Pipeline fuer alle Befehle bleibt weiterer
+KW-015-/KW-052-Ausbau.

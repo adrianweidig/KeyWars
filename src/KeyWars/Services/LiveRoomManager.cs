@@ -41,6 +41,10 @@ public sealed record LiveRoomSnapshot(
     string? CloseReason,
     IReadOnlyList<LiveParticipantSnapshot> Participants);
 
+public sealed record LiveProgressResult(
+    LiveProgressDelta? Delta,
+    LiveRoomSnapshot? Snapshot);
+
 public sealed record CreateLiveRoomRequest(
     Guid CreatorProfileId,
     string CreatorDisplayName,
@@ -202,35 +206,13 @@ public sealed class LiveRoomManager(
 
     public LiveRoomSnapshot SubmitProgress(Guid roomId, Guid profileId, int sequence, string input)
     {
-        var room = GetRoom(roomId);
-        CompletedRoomRecord? completed = null;
-        LiveRoomSnapshot snapshot;
-        lock (room.Gate)
-        {
-            var now = timeProvider.GetUtcNow();
-            completed = ApplyDisconnectTimeouts(room, now);
-            AdvancePhase(room, now);
-            var participant = RequireParticipant(room, profileId);
-            if (room.Phase != LiveRoomPhase.Running || participant.Status != ParticipantStatus.Running)
-            {
-                snapshot = SnapshotUnlocked(room, now);
-            }
-            else if (sequence <= participant.Sequence)
-            {
-                snapshot = SnapshotUnlocked(room, now);
-            }
-            else
-            {
-                var correctCharacters = CountCorrectPrefix(room.Text, input);
-                participant.Sequence = sequence;
-                participant.CorrectCharacters = correctCharacters;
-                participant.Wpm = CalculateWpm(participant.CorrectCharacters, room.StartedAt, now);
-                snapshot = SnapshotUnlocked(room, now);
-            }
-        }
+        return SubmitProgressCore(roomId, profileId, sequence, input, includeSnapshot: true).Snapshot
+            ?? Snapshot(roomId);
+    }
 
-        QueuePersistence(completed);
-        return snapshot;
+    public LiveProgressResult SubmitProgressDelta(Guid roomId, Guid profileId, int sequence, string input)
+    {
+        return SubmitProgressCore(roomId, profileId, sequence, input, includeSnapshot: false);
     }
 
     public LiveRoomSnapshot Finish(Guid roomId, Guid profileId, string input, int backspaces, int focusLosses)
@@ -470,6 +452,50 @@ public sealed class LiveRoomManager(
         return snapshot;
     }
 
+    private LiveProgressResult SubmitProgressCore(Guid roomId, Guid profileId, int sequence, string input, bool includeSnapshot)
+    {
+        var room = GetRoom(roomId);
+        CompletedRoomRecord? completed = null;
+        LiveRoomSnapshot? snapshot = null;
+        LiveProgressDelta? delta = null;
+        lock (room.Gate)
+        {
+            var now = timeProvider.GetUtcNow();
+            completed = ApplyDisconnectTimeouts(room, now);
+            AdvancePhase(room, now);
+            var participant = RequireParticipant(room, profileId);
+            if (room.Phase != LiveRoomPhase.Running || participant.Status != ParticipantStatus.Running)
+            {
+                snapshot = includeSnapshot ? SnapshotUnlocked(room, now) : null;
+            }
+            else if (sequence <= participant.Sequence)
+            {
+                snapshot = includeSnapshot ? SnapshotUnlocked(room, now) : null;
+            }
+            else
+            {
+                var inputElements = TypingEngine.SplitGraphemes(input);
+                var correctCharacters = CountCorrectPrefix(room.TargetElements, inputElements);
+                participant.Sequence = sequence;
+                participant.CorrectCharacters = correctCharacters;
+                participant.Accuracy = CalculateProgressAccuracy(correctCharacters, inputElements.Count);
+                participant.Wpm = CalculateWpm(participant.CorrectCharacters, room.StartedAt, now);
+                delta = new LiveProgressDelta(
+                    room.Id,
+                    room.RoundVersion,
+                    participant.ProfileId,
+                    participant.CorrectCharacters,
+                    participant.Wpm,
+                    participant.Accuracy,
+                    CalculateRankHint(room, participant.ProfileId));
+                snapshot = includeSnapshot ? SnapshotUnlocked(room, now) : null;
+            }
+        }
+
+        QueuePersistence(completed);
+        return new LiveProgressResult(delta, snapshot);
+    }
+
     private CompletedRoomRecord? ApplyDisconnectTimeouts(LiveRoomState room, DateTimeOffset now)
     {
         var grace = TimeSpan.FromSeconds(Math.Clamp(options.Value.ReconnectGraceSeconds, 0, 300));
@@ -639,7 +665,6 @@ public sealed class LiveRoomManager(
 
     private static LiveRoomSnapshot SnapshotUnlocked(LiveRoomState room, DateTimeOffset now)
     {
-        var targetCharacters = TypingEngine.SplitGraphemes(room.Text).Count;
         var exposeTargetText = room.Phase is LiveRoomPhase.Running or LiveRoomPhase.RoundResults or LiveRoomPhase.SeriesResults or LiveRoomPhase.Closed;
         return new LiveRoomSnapshot(
             room.Id,
@@ -647,7 +672,7 @@ public sealed class LiveRoomManager(
             room.Code,
             room.Title,
             exposeTargetText ? room.Text : "",
-            targetCharacters,
+            room.TargetCharacterCount,
             room.Mode,
             room.Visibility,
             room.RoundCount,
@@ -721,10 +746,8 @@ public sealed class LiveRoomManager(
         }
     }
 
-    private static int CountCorrectPrefix(string target, string input)
+    private static int CountCorrectPrefix(IReadOnlyList<string> targetElements, IReadOnlyList<string> inputElements)
     {
-        var targetElements = TypingEngine.SplitGraphemes(target);
-        var inputElements = TypingEngine.SplitGraphemes(input);
         var count = 0;
         for (var index = 0; index < Math.Min(targetElements.Count, inputElements.Count); index++)
         {
@@ -748,6 +771,23 @@ public sealed class LiveRoomManager(
 
         var minutes = Math.Max((now - startedAt.Value).TotalMinutes, 1d / 60d);
         return Math.Round(correctCharacters / 5d / minutes, 2);
+    }
+
+    private static double CalculateProgressAccuracy(int correctCharacters, int inputCharacters)
+    {
+        return inputCharacters == 0 ? 100 : Math.Round(correctCharacters * 100d / inputCharacters, 2);
+    }
+
+    private static int CalculateRankHint(LiveRoomState room, Guid profileId)
+    {
+        var ranked = room.Participants.Values
+            .OrderByDescending(item => item.CorrectCharacters)
+            .ThenByDescending(item => item.Wpm)
+            .ThenBy(item => item.JoinedAt)
+            .ThenBy(item => item.ProfileId)
+            .Select((participant, index) => new { participant.ProfileId, Rank = index + 1 })
+            .FirstOrDefault(item => item.ProfileId == profileId);
+        return ranked?.Rank ?? room.Participants.Count;
     }
 
     private static TimeSpan NormalizeDuration(TimeSpan duration) => duration < TimeSpan.FromSeconds(1) ? TimeSpan.FromSeconds(1) : duration;
@@ -835,6 +875,8 @@ internal sealed class LiveRoomState(
     public string Code { get; } = code;
     public string Title { get; } = title;
     public string Text { get; } = text;
+    public IReadOnlyList<string> TargetElements { get; } = TypingEngine.SplitGraphemes(text);
+    public int TargetCharacterCount => TargetElements.Count;
     public LiveRoomMode Mode { get; } = mode;
     public LiveRoomVisibility Visibility { get; } = visibility;
     public int RoundCount { get; } = roundCount;

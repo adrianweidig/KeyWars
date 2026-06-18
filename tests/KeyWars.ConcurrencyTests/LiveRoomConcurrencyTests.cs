@@ -240,6 +240,31 @@ public sealed class LiveRoomConcurrencyTests
     }
 
     [Fact]
+    public void ProgressDeltaPathDoesNotReturnFullSnapshot()
+    {
+        var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-06-18T12:00:00Z"));
+        var manager = CreateManager(new LiveOptions { CountdownSeconds = 1 }, time);
+        var first = Guid.CreateVersion7();
+        var second = Guid.CreateVersion7();
+        var room = manager.CreateRoom(new CreateLiveRoomRequest(first, "A", "Raum", "Schlüssel", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 8));
+        manager.Join(room.RoomId, second, "B");
+        manager.SetReady(room.RoomId, first, true);
+        manager.SetReady(room.RoomId, second, true);
+        manager.Start(room.RoomId, first);
+        time.Advance(TimeSpan.FromSeconds(1));
+
+        var result = manager.SubmitProgressDelta(room.RoomId, first, 1, "Schl");
+
+        Assert.Null(result.Snapshot);
+        Assert.NotNull(result.Delta);
+        Assert.Equal(room.RoomId, result.Delta.RoomId);
+        Assert.Equal(first, result.Delta.ParticipantId);
+        Assert.Equal(4, result.Delta.CorrectCharacters);
+        Assert.Equal(100, result.Delta.Accuracy);
+        Assert.Equal(1, result.Delta.RankHint);
+    }
+
+    [Fact]
     public void PresenceKeepsParticipantConnectedWhileSecondTabIsActive()
     {
         var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-06-18T12:00:00Z"));

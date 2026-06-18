@@ -28,6 +28,15 @@ Beim Anwendungs-Shutdown werden laufende Countdown- und Rennraeume als
 persistiert, veraendern aber kein Rating. Lobby-Raeume werden weiterhin nur als
 fluechtiger Arbeitsspeicherzustand verworfen.
 
+Hochfrequenter Schreibfortschritt wird als kompaktes `progressChanged`-Batch
+uebertragen: Raumversion, Profil-ID, Fortschritt, WPM, Genauigkeit und
+Ranghinweis. Der Broadcast-Takt ist durch
+`KEYWARS__LIVE__PROGRESS_BROADCAST_HZ` begrenzt. Innerhalb eines Takts wird nur
+das neueste Delta je Person behalten; bei voller Pending-Kapazitaet werden neue
+nichtkritische Progress-Deltas verworfen und unter `/health/arena-progress`
+sichtbar. Zuverlaessige Ereignisse wie Start, Finish, Leave und Phasenwechsel
+nutzen weiterhin Vollsnapshots.
+
 Grenzen:
 
 - `KEYWARS__LIVE__MAX_PARTICIPANTS_PER_ROOM`
@@ -35,6 +44,7 @@ Grenzen:
 - `KEYWARS__LIVE__MAX_CONCURRENT_ROOMS`
 - `KEYWARS__LIVE__MAX_CONNECTIONS_PER_USER`
 - `KEYWARS__LIVE__PROGRESS_BROADCAST_HZ`
+- `KEYWARS__LIVE__ROOM_COMMAND_QUEUE_CAPACITY`
 - `KEYWARS__LIVE__COUNTDOWN_SECONDS`
 - `KEYWARS__LIVE__RECONNECT_GRACE_SECONDS`
 - `KEYWARS__LIVE__COMPLETION_QUEUE_CAPACITY`

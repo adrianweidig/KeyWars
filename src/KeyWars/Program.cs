@@ -68,6 +68,8 @@ builder.Services.AddSingleton<ILiveRoomCompletionWriter, SqliteLiveRoomCompletio
 builder.Services.AddSingleton<LiveRoomCompletionQueue>();
 builder.Services.AddSingleton<ILiveRoomCompletionSink>(services => services.GetRequiredService<LiveRoomCompletionQueue>());
 builder.Services.AddSingleton<IHostedService>(services => services.GetRequiredService<LiveRoomCompletionQueue>());
+builder.Services.AddSingleton<ILiveProgressSender, SignalRLiveProgressSender>();
+builder.Services.AddSingleton<LiveProgressBroadcaster>();
 builder.Services.AddSingleton<LiveRoomManager>();
 builder.Services.AddSingleton<LivePresenceTracker>();
 builder.Services.AddScoped<DatabaseInitializer>();
@@ -255,6 +257,7 @@ app.MapGet("/health/arena-persistence", (LiveRoomCompletionQueue queue) => Resul
     capacity = queue.Capacity,
     failedAttempts = queue.FailedAttempts
 })).AllowAnonymous();
+app.MapGet("/health/arena-progress", (LiveProgressBroadcaster progress) => Results.Ok(progress.Snapshot())).AllowAnonymous();
 
 app.MapKeyWarsApi();
 app.MapHub<ArenaHub>("/hubs/arena");

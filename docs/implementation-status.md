@@ -13,7 +13,7 @@ Dieser Tracker folgt dem Audit-Paket `2f3379490dcd`.
 | KW-012 | teilweise | offen | Concurrency-Tests fuer Presence, Limit, Raumwechsel, Hosttransfer und Grace-Sweep | Zwei-Tab-Browser-E2E und Presence-Deltas fehlen |
 | KW-013 | teilweise | offen | Concurrency-Tests | Zwei-Browser-E2E fehlt |
 | KW-014 | teilweise | offen | Concurrency-Tests | Sequenz-/Fuzztests fehlen |
-| KW-015 | offen | offen | keine | Delta-/Queue-Protokoll fehlt |
+| KW-015 | teilweise | offen | Unit-Tests fuer Progress-Koaleszierung und Pending-Drop; Concurrency-Test fuer Delta-Pfad ohne Vollsnapshot; Build/Test gruen | Vollstaendige RoomCommand-Pipeline, echter SignalR-Netzlasttest und Soak-Evidenz fehlen |
 | KW-016 | teilweise | offen | Integrationstests fuer Completion-Queue, Idempotenz, transienten SQLite-Retry, Shutdown-Flush, Serverabbruch ohne Rating und konkurrierende Raeume; Concurrency-Tests fuer einmaliges Enqueue und Cleanup | Mehrfachrunden-/Serienpersistenz und vollstaendige Browser-E2E-Abnahme fehlen |
 | KW-017 | teilweise | offen | Build gruen | Fehlercodes/E2E fehlen |
 | KW-018 | offen | offen | keine | Serienlogik fehlt |

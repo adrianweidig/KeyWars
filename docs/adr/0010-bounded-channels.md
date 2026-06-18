@@ -1,4 +1,4 @@
-# ADR 0010: Geplante begrenzte Channels
+# ADR 0010: Begrenzte Progress-Deltas
 
 ## Kontext
 
@@ -6,13 +6,17 @@ Viele Fortschrittsmeldungen dürfen nicht unbeschränkt Speicher aufbauen.
 
 ## Entscheidung
 
-Fortschrittskommandos sollen ueber begrenzte Channels laufen. Der aktuelle
-Produktionspfad verarbeitet Progressmeldungen noch direkt im `LiveRoomManager`.
-Die Channel-Architektur ist deshalb ein verbindlicher Zielzustand fuer KW-015,
-aber kein bereits abgeschlossener Ist-Zustand.
+Der heisse Progresspfad verwendet `LiveProgressBroadcaster` als begrenzten
+Koaleszierer. Pro Raum wird nur das neueste Delta je Person gepuffert und
+hoechstens mit `KEYWARS__LIVE__PROGRESS_BROADCAST_HZ` gesendet.
+`KEYWARS__LIVE__ROOM_COMMAND_QUEUE_CAPACITY` begrenzt die Pending-Deltas; bei
+Ueberlast werden neue nichtkritische Progress-Deltas verworfen und in
+`/health/arena-progress` gezaehlt. Zuverlaessige Commands wie Start, Finish,
+Leave und Phasenwechsel bleiben direkte Hub-Commands mit Vollsnapshot.
 
 ## Konsequenzen
 
-Bis KW-015 abgeschlossen ist, duerfen Dokumentation und UI keine belastbare
-Backpressure-Garantie behaupten. Nach Umsetzung soll Ueberlast kontrollierten
-Verlust nichtkritischer Progress-Deltas erzeugen, nicht Datenbanklast.
+Die Implementierung verhindert Vollsnapshot-Broadcasts pro Keystroke und
+Datenbanklast im Progresspfad. Eine vollstaendige serialisierte
+RoomCommand-Pipeline fuer alle Raumcommands und echte SignalR-Soak-Evidenz
+bleiben fuer den weiteren KW-015/KW-052-Ausbau offen.
