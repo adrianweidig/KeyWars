@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0@sha256:548d93f8a18a1acbe6cc127bc4f47281430d34a9e35c18afa80a8d6741c2adc3 AS build
 WORKDIR /src
 COPY NuGet.config Directory.Build.props KeyWars.slnx ./
 COPY src/KeyWars/KeyWars.csproj src/KeyWars/
@@ -17,7 +17,7 @@ RUN dotnet restore --locked-mode
 COPY . .
 RUN dotnet publish src/KeyWars/KeyWars.csproj -c Release -o /app/publish --no-restore -p:UseAppHost=false
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:ddcf70ad1ab963a4fcd41fbd722a6b660e404e87567cfbd46fd2809c21b02088 AS runtime
 ARG VERSION=0.1.0
 ARG REVISION=local
 ARG CREATED=unknown
