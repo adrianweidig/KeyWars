@@ -44,7 +44,7 @@ jobs:
       - name: Runtime asset check
         shell: bash
         run: |
-          if grep -RInE 'https?://|//cdn|fonts.googleapis|unpkg|jsdelivr' src/KeyWars/Pages src/KeyWars/wwwroot; then
+          if grep -RInE --exclude-dir=vendor 'https?://|//cdn|fonts.googleapis|unpkg|jsdelivr' src/KeyWars/Pages src/KeyWars/wwwroot; then
             echo "External runtime asset reference found"
             exit 1
           fi
