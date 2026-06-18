@@ -1,9 +1,6 @@
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
-using KeyWars.Data;
 using KeyWars.Domain;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
 namespace KeyWars.Services;
@@ -59,7 +56,7 @@ public sealed class LiveRoomManager(
     TimeProvider timeProvider,
     TypingEngine typingEngine,
     ILogger<LiveRoomManager> logger,
-    IServiceScopeFactory? scopeFactory = null)
+    ILiveRoomCompletionSink? completionSink = null)
 {
     private const int MinimumParticipants = 2;
     private readonly object createGate = new();
@@ -370,6 +367,53 @@ public sealed class LiveRoomManager(
 
             QueuePersistence(completed);
         }
+    }
+
+    public int AbortActiveRooms()
+    {
+        var now = timeProvider.GetUtcNow();
+        var abortedRooms = 0;
+        foreach (var room in rooms.Values)
+        {
+            CompletedRoomRecord? completed = null;
+            lock (room.Gate)
+            {
+                if (room.Finished || room.PersistenceQueued || room.Phase is not (LiveRoomPhase.Countdown or LiveRoomPhase.Running))
+                {
+                    continue;
+                }
+
+                foreach (var participant in room.Participants.Values)
+                {
+                    if (participant.Status is ParticipantStatus.Finished or ParticipantStatus.Dnf or ParticipantStatus.LeftBeforeStart)
+                    {
+                        continue;
+                    }
+
+                    participant.Status = ParticipantStatus.AbortedByServer;
+                    participant.Ready = false;
+                    participant.FinishedAt = now;
+                    participant.DurationMilliseconds = room.StartedAt is { } startedAt
+                        ? (int)Math.Round(NormalizeDuration(now - startedAt).TotalMilliseconds)
+                        : 0;
+                }
+
+                room.Finished = true;
+                room.FinishedAt = now;
+                room.RoundEndsAt = now;
+                room.Phase = LiveRoomPhase.Aborted;
+                room.PhaseChangedAt = now;
+                room.CloseReason = "Der Server wurde beendet; diese Runde wurde ohne Rating abgebrochen.";
+                room.RoundVersion++;
+                room.PersistenceQueued = true;
+                completed = BuildPersistenceRecord(room);
+                abortedRooms++;
+            }
+
+            QueuePersistence(completed);
+        }
+
+        return abortedRooms;
     }
 
     private LiveRoomSnapshot Join(Guid roomId, Guid profileId, string displayName, bool viaCode)
@@ -736,6 +780,9 @@ public sealed class LiveRoomManager(
 
     private CompletedRoomRecord BuildPersistenceRecord(LiveRoomState room) => new(
         room.Id,
+        room.CurrentRound,
+        room.RoundVersion,
+        $"{room.Id:N}:{room.CurrentRound}:{room.RoundVersion}",
         room.CreatorProfileId,
         room.Code,
         room.Mode,
@@ -754,56 +801,20 @@ public sealed class LiveRoomManager(
 
     private void QueuePersistence(CompletedRoomRecord? record)
     {
-        if (record is null || scopeFactory is null)
+        if (record is null || completionSink is null)
         {
             return;
         }
 
-        _ = Task.Run(async () =>
+        try
         {
-            try
-            {
-                await using var scope = scopeFactory.CreateAsyncScope();
-                var db = scope.ServiceProvider.GetRequiredService<KeyWarsDbContext>();
-                if (await db.LiveRoomSummaries.AnyAsync(item => item.Id == record.Id))
-                {
-                    return;
-                }
-
-                db.LiveRoomSummaries.Add(new LiveRoomSummary
-                {
-                    Id = record.Id,
-                    CreatorProfileId = record.CreatorProfileId,
-                    RoomCode = record.RoomCode,
-                    Mode = record.Mode,
-                    Visibility = record.Visibility,
-                    RoundCount = record.RoundCount,
-                    CreatedAt = record.CreatedAt,
-                    StartedAt = record.StartedAt,
-                    FinishedAt = record.FinishedAt
-                });
-
-                foreach (var participant in record.Participants)
-                {
-                    db.LiveRoomParticipantSummaries.Add(new LiveRoomParticipantSummary
-                    {
-                        LiveRoomSummaryId = record.Id,
-                        UserProfileId = participant.UserProfileId,
-                        Status = participant.Status,
-                        Placement = participant.Placement,
-                        DurationMilliseconds = participant.DurationMilliseconds,
-                        Wpm = participant.Wpm,
-                        Accuracy = participant.Accuracy
-                    });
-                }
-
-                await db.SaveChangesAsync();
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Live-Raum {RoomId} konnte nicht persistiert werden.", record.Id);
-            }
-        });
+            completionSink.Enqueue(record);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Live-Raum {RoomId} konnte nicht fuer die Persistenz eingereiht werden.", record.Id);
+            throw new InvalidOperationException("Das Arena-Ergebnis konnte nicht zur Speicherung vorgemerkt werden.", ex);
+        }
     }
 }
 
@@ -863,8 +874,11 @@ internal sealed class LiveParticipantState(Guid profileId, string displayName, P
     public double Accuracy { get; set; }
 }
 
-internal sealed record CompletedRoomRecord(
+public sealed record CompletedRoomRecord(
     Guid Id,
+    int RoundNumber,
+    int RoundVersion,
+    string IdempotencyKey,
     Guid CreatorProfileId,
     string RoomCode,
     LiveRoomMode Mode,
@@ -875,7 +889,7 @@ internal sealed record CompletedRoomRecord(
     DateTimeOffset? FinishedAt,
     IReadOnlyList<CompletedParticipantRecord> Participants);
 
-internal sealed record CompletedParticipantRecord(
+public sealed record CompletedParticipantRecord(
     Guid UserProfileId,
     ParticipantStatus Status,
     int? Placement,

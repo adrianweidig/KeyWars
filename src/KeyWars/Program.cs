@@ -64,6 +64,10 @@ builder.Services.AddScoped<ProfilePrivacyService>();
 builder.Services.AddScoped<BackupService>();
 builder.Services.AddSingleton<TypingEngine>();
 builder.Services.AddSingleton<AttemptSessionStore>();
+builder.Services.AddSingleton<ILiveRoomCompletionWriter, SqliteLiveRoomCompletionWriter>();
+builder.Services.AddSingleton<LiveRoomCompletionQueue>();
+builder.Services.AddSingleton<ILiveRoomCompletionSink>(services => services.GetRequiredService<LiveRoomCompletionQueue>());
+builder.Services.AddSingleton<IHostedService>(services => services.GetRequiredService<LiveRoomCompletionQueue>());
 builder.Services.AddSingleton<LiveRoomManager>();
 builder.Services.AddSingleton<LivePresenceTracker>();
 builder.Services.AddScoped<DatabaseInitializer>();
@@ -245,6 +249,12 @@ app.MapGet("/health/ready", async (KeyWarsDbContext db, CancellationToken cancel
     await db.Database.ExecuteSqlRawAsync("SELECT 1;", cancellationToken);
     return Results.Ok(new { status = "ok" });
 }).AllowAnonymous();
+app.MapGet("/health/arena-persistence", (LiveRoomCompletionQueue queue) => Results.Ok(new
+{
+    pendingJobs = queue.PendingCount,
+    capacity = queue.Capacity,
+    failedAttempts = queue.FailedAttempts
+})).AllowAnonymous();
 
 app.MapKeyWarsApi();
 app.MapHub<ArenaHub>("/hubs/arena");

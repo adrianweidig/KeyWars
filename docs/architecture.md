@@ -9,6 +9,11 @@ Das Challenge-Modell verwendet `Challenge`, `ChallengeParticipant`, `ChallengeRo
 Die Live-Arena nutzt `LiveRoomManager` mit konfigurierbaren Kapazitätsgrenzen,
 einer serverseitigen Raumphase und einem synchronisierten Countdown. Fortschritt
 wird im Speicher verarbeitet; SQLite erhält nur zusammengefasste Ergebnisse.
+Abschlussdaten laufen ueber `LiveRoomCompletionQueue` und
+`SqliteLiveRoomCompletionWriter`: begrenzte In-Process-Queue, Idempotenz pro
+Raum/Runde/Version, SQLite-Transaktion, Retry fuer transiente Locks und
+Shutdown-Flush. Laufende Countdown- und Rennraeume werden beim Shutdown als
+serverseitig abgebrochen gespeichert und bewirken keine Ratingaenderung.
 Eine begrenzte Command-Queue mit Progress-Deltas ist als KW-015 geplant und
 darf bis zur Implementierung nicht als produktiver Ist-Zustand beschrieben
 werden.

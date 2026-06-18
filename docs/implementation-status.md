@@ -14,7 +14,7 @@ Dieser Tracker folgt dem Audit-Paket `2f3379490dcd`.
 | KW-013 | teilweise | offen | Concurrency-Tests | Zwei-Browser-E2E fehlt |
 | KW-014 | teilweise | offen | Concurrency-Tests | Sequenz-/Fuzztests fehlen |
 | KW-015 | offen | offen | keine | Delta-/Queue-Protokoll fehlt |
-| KW-016 | offen | offen | keine | Background-Persistenz fehlt |
+| KW-016 | teilweise | offen | Integrationstests fuer Completion-Queue, Idempotenz, transienten SQLite-Retry, Shutdown-Flush, Serverabbruch ohne Rating und konkurrierende Raeume; Concurrency-Tests fuer einmaliges Enqueue und Cleanup | Mehrfachrunden-/Serienpersistenz und vollstaendige Browser-E2E-Abnahme fehlen |
 | KW-017 | teilweise | offen | Build gruen | Fehlercodes/E2E fehlen |
 | KW-018 | offen | offen | keine | Serienlogik fehlt |
 | KW-020 | offen | offen | keine | Designsystem fehlt |

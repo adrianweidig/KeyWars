@@ -141,6 +141,8 @@ public sealed class KeyWarsDbContext(DbContextOptions<KeyWarsDbContext> options)
         modelBuilder.Entity<LiveRoomSummary>(entity =>
         {
             entity.HasIndex(room => room.RoomCode);
+            entity.HasIndex(room => room.IdempotencyKey).IsUnique();
+            entity.Property(room => room.IdempotencyKey).HasMaxLength(80);
             entity.Property(room => room.Mode).HasConversion<string>();
             entity.Property(room => room.Visibility).HasConversion<string>();
             entity.HasOne<UserProfile>()

@@ -175,6 +175,10 @@ public sealed class ChallengeRoundResult
 public sealed class LiveRoomSummary
 {
     public Guid Id { get; set; }
+    public int RoundNumber { get; set; } = 1;
+    public int RoundVersion { get; set; } = 1;
+    [MaxLength(80)]
+    public string IdempotencyKey { get; set; } = "";
     public Guid CreatorProfileId { get; set; }
     [MaxLength(16)]
     public string RoomCode { get; set; } = "";

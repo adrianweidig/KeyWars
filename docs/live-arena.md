@@ -14,6 +14,20 @@ periodischer Hintergrund-Sweep setzt abgelaufene Lobby-Verbindungen auf
 Verlaesst die Raumleitung in der Lobby den Raum, geht die Leitung auf die
 aelteste aktive Person ueber.
 
+Beendete Arena-Runden werden nicht per Fire-and-forget gespeichert. Der
+Raummanager erstellt einen unveraenderlichen Abschlussrecord mit Raum-ID, Runde,
+Raumversion und Idempotenzschluessel. Eine begrenzte gehostete Queue schreibt
+die Zusammenfassung und alle Teilnehmerresultate in einer SQLite-Transaktion,
+berechnet das Arena-Rating genau einmal und aktualisiert Profilrating,
+Matchanzahl und Saisonpunkte atomar. Transiente SQLite-Fehler werden begrenzt
+mit Backoff wiederholt; dauerhaft fehlgeschlagene Jobs bleiben in der
+Queue-Diagnose sichtbar.
+
+Beim Anwendungs-Shutdown werden laufende Countdown- und Rennraeume als
+`AbortedByServer` abgeschlossen. Diese Abbrueche werden nachvollziehbar
+persistiert, veraendern aber kein Rating. Lobby-Raeume werden weiterhin nur als
+fluechtiger Arbeitsspeicherzustand verworfen.
+
 Grenzen:
 
 - `KEYWARS__LIVE__MAX_PARTICIPANTS_PER_ROOM`
@@ -23,5 +37,6 @@ Grenzen:
 - `KEYWARS__LIVE__PROGRESS_BROADCAST_HZ`
 - `KEYWARS__LIVE__COUNTDOWN_SECONDS`
 - `KEYWARS__LIVE__RECONNECT_GRACE_SECONDS`
+- `KEYWARS__LIVE__COMPLETION_QUEUE_CAPACITY`
 
 Bei erreichter Kapazität werden neue Räume oder Beitritte kontrolliert abgelehnt.

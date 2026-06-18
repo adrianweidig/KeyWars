@@ -267,6 +267,11 @@ namespace KeyWars.Data.Migrations
                     b.Property<DateTimeOffset?>("FinishedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Mode")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -279,6 +284,12 @@ namespace KeyWars.Data.Migrations
                     b.Property<int>("RoundCount")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int>("RoundNumber")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("RoundVersion")
+                        .HasColumnType("INTEGER");
+
                     b.Property<DateTimeOffset?>("StartedAt")
                         .HasColumnType("TEXT");
 
@@ -289,6 +300,9 @@ namespace KeyWars.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("CreatorProfileId");
+
+                    b.HasIndex("IdempotencyKey")
+                        .IsUnique();
 
                     b.HasIndex("RoomCode");
 

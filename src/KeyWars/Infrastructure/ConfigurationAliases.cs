@@ -54,6 +54,7 @@ public static class ConfigurationAliases
         SetInt(section, "COUNTDOWN_SECONDS", value => options.CountdownSeconds = value);
         SetInt(section, "RECONNECT_GRACE_SECONDS", value => options.ReconnectGraceSeconds = value);
         SetInt(section, "ROOM_COMMAND_QUEUE_CAPACITY", value => options.RoomCommandQueueCapacity = value);
+        SetInt(section, "COMPLETION_QUEUE_CAPACITY", value => options.CompletionQueueCapacity = value);
         SetInt(section, "COMPLETED_ROOM_RETENTION_MINUTES", value => options.CompletedRoomRetentionMinutes = value);
         SetInt(section, "LOBBY_ROOM_RETENTION_MINUTES", value => options.LobbyRoomRetentionMinutes = value);
     }

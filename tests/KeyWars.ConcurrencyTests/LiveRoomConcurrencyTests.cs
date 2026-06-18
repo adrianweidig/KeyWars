@@ -78,6 +78,68 @@ public sealed class LiveRoomConcurrencyTests
     }
 
     [Fact]
+    public void RoomCompletionEnqueuesPersistenceExactlyOnce()
+    {
+        var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-06-18T12:00:00Z"));
+        var sink = new RecordingCompletionSink();
+        var manager = CreateManager(timeProvider: time, completionSink: sink);
+        var first = Guid.CreateVersion7();
+        var second = Guid.CreateVersion7();
+        var room = manager.CreateRoom(new CreateLiveRoomRequest(first, "A", "Raum", "Text", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 8));
+        manager.Join(room.RoomId, second, "B");
+        manager.SetReady(room.RoomId, first, true);
+        manager.SetReady(room.RoomId, second, true);
+        manager.Start(room.RoomId, first);
+        time.Advance(TimeSpan.FromSeconds(3));
+
+        manager.Finish(room.RoomId, first, "Text", 0, 0);
+        manager.Finish(room.RoomId, second, "Text", 0, 0);
+        manager.Finish(room.RoomId, first, "Text", 0, 0);
+        manager.Finish(room.RoomId, second, "Text", 0, 0);
+
+        var record = Assert.Single(sink.Records);
+        Assert.Equal(room.RoomId, record.Id);
+        Assert.Equal(1, record.RoundNumber);
+        Assert.Equal(2, record.Participants.Count);
+    }
+
+    [Fact]
+    public void ShutdownAbortEnqueuesServerAbortWithoutRatingResult()
+    {
+        var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-06-18T12:00:00Z"));
+        var sink = new RecordingCompletionSink();
+        var manager = CreateManager(timeProvider: time, completionSink: sink);
+        var first = Guid.CreateVersion7();
+        var second = Guid.CreateVersion7();
+        var room = manager.CreateRoom(new CreateLiveRoomRequest(first, "A", "Raum", "Text", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 8));
+        manager.Join(room.RoomId, second, "B");
+        manager.SetReady(room.RoomId, first, true);
+        manager.SetReady(room.RoomId, second, true);
+        manager.Start(room.RoomId, first);
+        time.Advance(TimeSpan.FromSeconds(3));
+        Assert.Equal(LiveRoomPhase.Running, manager.Snapshot(room.RoomId).Phase);
+
+        var aborted = manager.AbortActiveRooms();
+
+        Assert.Equal(1, aborted);
+        var record = Assert.Single(sink.Records);
+        Assert.All(record.Participants, participant => Assert.Equal(ParticipantStatus.AbortedByServer, participant.Status));
+        Assert.Equal(LiveRoomPhase.Aborted, manager.Snapshot(room.RoomId).Phase);
+    }
+
+    [Fact]
+    public void ShutdownAbortSkipsLobbyRooms()
+    {
+        var sink = new RecordingCompletionSink();
+        var manager = CreateManager(completionSink: sink);
+        var first = Guid.CreateVersion7();
+        manager.CreateRoom(new CreateLiveRoomRequest(first, "A", "Raum", "Text", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 8));
+
+        Assert.Equal(0, manager.AbortActiveRooms());
+        Assert.Empty(sink.Records);
+    }
+
+    [Fact]
     public void ReadyStateSurvivesIdempotentJoin()
     {
         var manager = CreateManager();
@@ -279,11 +341,12 @@ public sealed class LiveRoomConcurrencyTests
         Assert.False(snapshot.Participants.Single(item => item.ProfileId == second).Ready);
     }
 
-    private static LiveRoomManager CreateManager(LiveOptions? options = null, TimeProvider? timeProvider = null) => new(
+    private static LiveRoomManager CreateManager(LiveOptions? options = null, TimeProvider? timeProvider = null, ILiveRoomCompletionSink? completionSink = null) => new(
         Options.Create(options ?? new LiveOptions()),
         timeProvider ?? TimeProvider.System,
         new TypingEngine(timeProvider ?? TimeProvider.System),
-        NullLogger<LiveRoomManager>.Instance);
+        NullLogger<LiveRoomManager>.Instance,
+        completionSink);
 
     private static LivePresenceTracker CreatePresence(LiveOptions? options = null, TimeProvider? timeProvider = null) => new(
         Options.Create(options ?? new LiveOptions()),
@@ -296,5 +359,15 @@ public sealed class LiveRoomConcurrencyTests
         public override DateTimeOffset GetUtcNow() => utcNow;
 
         public void Advance(TimeSpan duration) => utcNow += duration;
+    }
+
+    private sealed class RecordingCompletionSink : ILiveRoomCompletionSink
+    {
+        public List<CompletedRoomRecord> Records { get; } = [];
+
+        public void Enqueue(CompletedRoomRecord record)
+        {
+            Records.Add(record);
+        }
     }
 }

@@ -106,6 +106,7 @@ public sealed class ProfileAndPersistenceTests
                 ["KEYWARS:AUTH:COOKIE_LIFETIME_HOURS"] = "6",
                 ["KEYWARS:LIVE:MAX_PARTICIPANTS_PER_ROOM"] = "12",
                 ["KEYWARS:LIVE:COUNTDOWN_SECONDS"] = "4",
+                ["KEYWARS:LIVE:COMPLETION_QUEUE_CAPACITY"] = "32",
                 ["KEYWARS:CONTENT:MAX_UPLOAD_BYTES"] = "4096"
             })
             .Build();
@@ -125,6 +126,7 @@ public sealed class ProfileAndPersistenceTests
         Assert.Equal(6, auth.CookieLifetimeHours);
         Assert.Equal(12, live.MaxParticipantsPerRoom);
         Assert.Equal(4, live.CountdownSeconds);
+        Assert.Equal(32, live.CompletionQueueCapacity);
         Assert.Equal(4096, content.MaxUploadBytes);
     }
 
