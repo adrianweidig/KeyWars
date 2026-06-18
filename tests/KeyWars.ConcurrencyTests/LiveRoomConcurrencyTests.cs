@@ -177,11 +177,117 @@ public sealed class LiveRoomConcurrencyTests
         Assert.Equal(2, corrected.Participants.Single(item => item.ProfileId == first).CorrectCharacters);
     }
 
+    [Fact]
+    public void PresenceKeepsParticipantConnectedWhileSecondTabIsActive()
+    {
+        var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-06-18T12:00:00Z"));
+        var manager = CreateManager(timeProvider: time);
+        var presence = CreatePresence(timeProvider: time);
+        var profileId = Guid.CreateVersion7();
+        var room = manager.CreateRoom(new CreateLiveRoomRequest(profileId, "A", "Raum", "Text", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 8));
+        presence.EnterRoom(profileId, "tab-1", room.RoomId);
+        presence.EnterRoom(profileId, "tab-2", room.RoomId);
+
+        var firstLeave = presence.RemoveConnection("tab-1");
+        if (firstLeave is { RoomLostLastConnection: true })
+        {
+            manager.Disconnect(firstLeave.RoomId, firstLeave.ProfileId);
+        }
+
+        var afterFirstLeave = manager.Snapshot(room.RoomId);
+        Assert.Equal(ParticipantStatus.Joined, afterFirstLeave.Participants.Single().Status);
+
+        var secondLeave = presence.RemoveConnection("tab-2");
+        if (secondLeave is { RoomLostLastConnection: true })
+        {
+            manager.Disconnect(secondLeave.RoomId, secondLeave.ProfileId);
+        }
+
+        Assert.Equal(ParticipantStatus.Disconnected, manager.Snapshot(room.RoomId).Participants.Single().Status);
+    }
+
+    [Fact]
+    public void PresenceEnforcesConnectionLimit()
+    {
+        var presence = CreatePresence(new LiveOptions { MaxConnectionsPerUser = 1 });
+        var profileId = Guid.CreateVersion7();
+        var roomId = Guid.CreateVersion7();
+        presence.EnterRoom(profileId, "tab-1", roomId);
+
+        var error = Assert.Throws<InvalidOperationException>(() => presence.EnsureCanConnect(profileId, "tab-2"));
+
+        Assert.Contains("maximal 1", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void PresenceRoomSwitchLeavesPreviousRoomWhenLastConnectionMoves()
+    {
+        var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-06-18T12:00:00Z"));
+        var manager = CreateManager(timeProvider: time);
+        var presence = CreatePresence(timeProvider: time);
+        var first = Guid.CreateVersion7();
+        var second = Guid.CreateVersion7();
+        var roomA = manager.CreateRoom(new CreateLiveRoomRequest(first, "A", "Raum A", "Text", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 8));
+        var roomB = manager.CreateRoom(new CreateLiveRoomRequest(second, "B", "Raum B", "Text", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 8));
+        presence.EnterRoom(first, "tab-1", roomA.RoomId);
+        manager.Join(roomB.RoomId, first, "A");
+
+        var roomSwitch = presence.EnterRoom(first, "tab-1", roomB.RoomId);
+        if (roomSwitch is { PreviousRoomId: { } previousRoomId, PreviousRoomLostLastConnection: true })
+        {
+            manager.Disconnect(previousRoomId, first);
+        }
+
+        Assert.Equal(ParticipantStatus.Disconnected, manager.Snapshot(roomA.RoomId).Participants.Single(item => item.ProfileId == first).Status);
+        Assert.Equal(ParticipantStatus.Joined, manager.Snapshot(roomB.RoomId).Participants.Single(item => item.ProfileId == first).Status);
+    }
+
+    [Fact]
+    public void LobbyHostTransfersToOldestActiveParticipantWhenCreatorDisconnects()
+    {
+        var manager = CreateManager();
+        var creator = Guid.CreateVersion7();
+        var second = Guid.CreateVersion7();
+        var third = Guid.CreateVersion7();
+        var room = manager.CreateRoom(new CreateLiveRoomRequest(creator, "A", "Raum", "Text", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 8));
+        manager.Join(room.RoomId, second, "B");
+        manager.Join(room.RoomId, third, "C");
+
+        var snapshot = manager.Disconnect(room.RoomId, creator);
+
+        Assert.Equal(second, snapshot.CreatorProfileId);
+        Assert.Single(snapshot.Participants, item => item.ProfileId == snapshot.CreatorProfileId);
+    }
+
+    [Fact]
+    public void SweepConvertsExpiredLobbyDisconnectToLeftBeforeStart()
+    {
+        var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-06-18T12:00:00Z"));
+        var manager = CreateManager(new LiveOptions { ReconnectGraceSeconds = 2 }, time);
+        var creator = Guid.CreateVersion7();
+        var second = Guid.CreateVersion7();
+        var room = manager.CreateRoom(new CreateLiveRoomRequest(creator, "A", "Raum", "Text", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 8));
+        manager.Join(room.RoomId, second, "B");
+        manager.SetReady(room.RoomId, second, true);
+        manager.Disconnect(room.RoomId, second);
+
+        time.Advance(TimeSpan.FromSeconds(3));
+        manager.Sweep();
+        var snapshot = manager.Snapshot(room.RoomId);
+
+        Assert.Equal(ParticipantStatus.LeftBeforeStart, snapshot.Participants.Single(item => item.ProfileId == second).Status);
+        Assert.False(snapshot.Participants.Single(item => item.ProfileId == second).Ready);
+    }
+
     private static LiveRoomManager CreateManager(LiveOptions? options = null, TimeProvider? timeProvider = null) => new(
         Options.Create(options ?? new LiveOptions()),
         timeProvider ?? TimeProvider.System,
         new TypingEngine(timeProvider ?? TimeProvider.System),
         NullLogger<LiveRoomManager>.Instance);
+
+    private static LivePresenceTracker CreatePresence(LiveOptions? options = null, TimeProvider? timeProvider = null) => new(
+        Options.Create(options ?? new LiveOptions()),
+        timeProvider ?? TimeProvider.System);
 
     private sealed class ManualTimeProvider(DateTimeOffset utcNow) : TimeProvider
     {

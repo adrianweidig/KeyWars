@@ -10,7 +10,7 @@ Dieser Tracker folgt dem Audit-Paket `2f3379490dcd`.
 | KW-003 | teilweise | offen | Build/Test gruen | Browser-E2E und Container-Smoke fehlen |
 | KW-010 | teilweise | offen | Concurrency-Tests | Zustandsmaschine vertiefen |
 | KW-011 | teilweise | offen | Offizieller lokaler SignalR-Client, Build/Test gruen | Reconnect-E2E fehlt |
-| KW-012 | offen | offen | keine | Presence-Modell fehlt |
+| KW-012 | teilweise | offen | Concurrency-Tests fuer Presence, Limit, Raumwechsel, Hosttransfer und Grace-Sweep | Zwei-Tab-Browser-E2E und Presence-Deltas fehlen |
 | KW-013 | teilweise | offen | Concurrency-Tests | Zwei-Browser-E2E fehlt |
 | KW-014 | teilweise | offen | Concurrency-Tests | Sequenz-/Fuzztests fehlen |
 | KW-015 | offen | offen | keine | Delta-/Queue-Protokoll fehlt |

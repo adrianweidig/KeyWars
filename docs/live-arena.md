@@ -6,11 +6,20 @@ pro Taste in SQLite geschrieben. Ein Host-Start fuehrt zuerst in eine
 serverseitige Countdown-Phase; der Zieltext wird erst zur freigegebenen
 Startzeit im Snapshot ausgeliefert.
 
+Praesenz wird pro Profil und aktiver SignalR-Connection gefuehrt. Mehrere Tabs
+derselben Person erzeugen eine Teilnehmerzeile. Erst wenn die letzte
+Raumverbindung eines Profils verschwindet, startet die Reconnect-Grace. Ein
+periodischer Hintergrund-Sweep setzt abgelaufene Lobby-Verbindungen auf
+`Vor dem Start verlassen` und abgelaufene Rennverbindungen auf `Nicht beendet`.
+Verlaesst die Raumleitung in der Lobby den Raum, geht die Leitung auf die
+aelteste aktive Person ueber.
+
 Grenzen:
 
 - `KEYWARS__LIVE__MAX_PARTICIPANTS_PER_ROOM`
 - `KEYWARS__LIVE__MAX_SPECTATORS_PER_ROOM`
 - `KEYWARS__LIVE__MAX_CONCURRENT_ROOMS`
+- `KEYWARS__LIVE__MAX_CONNECTIONS_PER_USER`
 - `KEYWARS__LIVE__PROGRESS_BROADCAST_HZ`
 - `KEYWARS__LIVE__COUNTDOWN_SECONDS`
 - `KEYWARS__LIVE__RECONNECT_GRACE_SECONDS`

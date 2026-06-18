@@ -64,7 +64,9 @@ builder.Services.AddScoped<BackupService>();
 builder.Services.AddSingleton<TypingEngine>();
 builder.Services.AddSingleton<AttemptSessionStore>();
 builder.Services.AddSingleton<LiveRoomManager>();
+builder.Services.AddSingleton<LivePresenceTracker>();
 builder.Services.AddScoped<DatabaseInitializer>();
+builder.Services.AddHostedService<LiveRoomSweepService>();
 
 var configuredAuthOptions = ConfigurationAliases.GetAuth(builder.Configuration);
 var developmentLogin = builder.Environment.IsDevelopment();

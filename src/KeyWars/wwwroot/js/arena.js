@@ -11,6 +11,7 @@ export function attachArenaPages() {
     const startForm = document.querySelector("[data-arena-start-form]");
     const finishForm = root.querySelector("[data-arena-finish-form]");
     const finishButton = root.querySelector("[data-arena-finish]");
+    const leaveButton = document.querySelector("[data-arena-leave]");
     const connection = new SignalRConnection("/hubs/arena");
 
     let snapshot = null;
@@ -214,6 +215,17 @@ export function attachArenaPages() {
       finish();
     });
 
+    leaveButton?.addEventListener("click", async () => {
+      try {
+        await connection.invoke("LeaveRoom", [roomId]);
+      } catch (error) {
+        showConnectionError(error);
+        return;
+      }
+
+      window.location.href = "/arena";
+    });
+
     input?.addEventListener("keydown", (event) => {
       if (event.key === "Backspace") {
         backspaces += 1;
@@ -243,6 +255,12 @@ export function attachArenaPages() {
       .then(() => connection.invoke("JoinRoom", [roomId]))
       .then(applySnapshot)
       .catch(showConnectionError);
+
+    window.addEventListener("pagehide", () => {
+      if (connection.isConnected()) {
+        connection.invoke("LeaveRoom", [roomId]).catch(() => {});
+      }
+    });
   });
 }
 
@@ -292,6 +310,10 @@ class SignalRConnection {
     }
 
     return this.connection.invoke(target, ...(args || []));
+  }
+
+  isConnected() {
+    return this.connection.state === window.signalR.HubConnectionState.Connected;
   }
 }
 

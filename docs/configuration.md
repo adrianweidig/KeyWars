@@ -35,7 +35,7 @@ anderen Umgebungen wird ausschliesslich LDAP/LDAPS verwendet.
 | `KEYWARS__LIVE__MAX_PARTICIPANTS_PER_ROOM` | `64` | `LiveRoomManager` | mindestens 2 |
 | `KEYWARS__LIVE__MAX_SPECTATORS_PER_ROOM` | `128` | geplant KW-027 | noch nicht verfuegbar |
 | `KEYWARS__LIVE__MAX_CONCURRENT_ROOMS` | `200` | `LiveRoomManager` | mindestens 1 |
-| `KEYWARS__LIVE__MAX_CONNECTIONS_PER_USER` | `3` | geplant KW-012 | noch nicht verfuegbar |
+| `KEYWARS__LIVE__MAX_CONNECTIONS_PER_USER` | `3` | `LivePresenceTracker` | 1 bis 20 aktive Arena-Verbindungen pro Profil |
 | `KEYWARS__LIVE__PROGRESS_BROADCAST_HZ` | `10` | geplant KW-015 | noch nicht vollstaendig umgesetzt |
 | `KEYWARS__LIVE__COUNTDOWN_SECONDS` | `3` | `LiveRoomManager` | 1 bis 10 Sekunden |
 | `KEYWARS__LIVE__RECONNECT_GRACE_SECONDS` | `30` | `LiveRoomManager` | 0 bis 300 Sekunden |

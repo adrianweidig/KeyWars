@@ -17,7 +17,7 @@ Statuswerte:
 | Fehleranalyse | teilweise | Alignment und echte Fehleraggregate KW-031 offen |
 | Textbibliothek | teilweise | strikter UTF-8-Import und CRUD KW-041 offen |
 | Challenges | teilweise | Challenge-Attempt-Binding KW-040 offen |
-| Live-Arena Lobby | teilweise | Phasen/Countdown begonnen |
+| Live-Arena Lobby | teilweise | Phasen, Countdown, Presence und Hosttransfer begonnen |
 | Live-Arena Countdown | teilweise | Serverzeit vorhanden, Browser-E2E fehlt |
 | Live-Arena grafische Strecke | geplant | KW-023 |
 | Live-HUD und Podium | geplant | KW-024, KW-025 |
@@ -30,4 +30,4 @@ Statuswerte:
 | GHCR Multiarch Image | teilweise | Workflow vorhanden, Release-Gate offen |
 | Air-Gap Image-Archiv | teilweise | amd64-Archiv vorhanden, Import-Evidenz offen |
 | Playwright Visual Regression | geplant | KW-051 |
-| SignalR-Lasttest | geplant | KW-052 |
+| SignalR-Lasttest | teilweise | In-process-Lasttest bis 100 Teilnehmende, echte Netzwerk-Last offen |
