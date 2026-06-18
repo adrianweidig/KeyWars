@@ -8,9 +8,7 @@ Security fixes are applied to the current `master` branch. Tagged releases inher
 
 Do not create a public issue for a suspected vulnerability.
 
-Report security concerns through GitHub private vulnerability reporting:
-
-https://github.com/adrianweidig/KeyWars/security/advisories/new
+Report security concerns through [GitHub private vulnerability reporting](https://github.com/adrianweidig/KeyWars/security/advisories/new).
 
 If private vulnerability reporting is unavailable, contact the repository owner directly through GitHub. Include:
 
