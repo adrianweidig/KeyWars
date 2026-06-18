@@ -47,6 +47,6 @@ public sealed class NeuModel(CurrentUser currentUser, TextLibraryService texts, 
         public LiveRoomVisibility Visibility { get; set; } = LiveRoomVisibility.Code;
         public LiveRoomMode Mode { get; set; } = LiveRoomMode.Classic;
         public int RoundCount { get; set; } = 1;
-        public int MaxParticipants { get; set; } = 64;
+        public int MaxParticipants { get; set; } = 16;
     }
 }

@@ -21,16 +21,16 @@
             Bevorzugter Modus
             <select asp-for="Input.PreferredMode" asp-items="Html.GetEnumSelectList<TrainingMode>()"></select>
         </label>
-        <label style="display:flex; gap:8px; align-items:center; font-weight:400;">
-            <input type="checkbox" asp-for="Input.LeaderboardVisible" style="width:auto;" />
+        <label class="checkbox-label">
+            <input type="checkbox" asp-for="Input.LeaderboardVisible" />
             In Ranglisten sichtbar
         </label>
-        <label style="display:flex; gap:8px; align-items:center; font-weight:400;">
-            <input type="checkbox" asp-for="Input.GhostSharingEnabled" style="width:auto;" />
+        <label class="checkbox-label">
+            <input type="checkbox" asp-for="Input.GhostSharingEnabled" />
             Bestleistungen als Rivalen-Geist freigeben
         </label>
-        <label style="display:flex; gap:8px; align-items:center; font-weight:400;">
-            <input type="checkbox" asp-for="Input.ReducedMotion" style="width:auto;" />
+        <label class="checkbox-label">
+            <input type="checkbox" asp-for="Input.ReducedMotion" />
             Reduzierte Bewegung
         </label>
         <button type="submit">Speichern</button>

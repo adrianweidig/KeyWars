@@ -14,11 +14,13 @@ public static class StartupValidator
             return;
         }
 
-        var urls = configuration["KEYWARS:LDAP:URLS"];
-        var baseDn = configuration["KEYWARS:LDAP:BASE_DN"];
-        var upnSuffix = configuration["KEYWARS:LDAP:UPN_SUFFIX"];
-        var developmentAuth = configuration.GetValue<bool>("KEYWARS:AUTH:DEVELOPMENT_LOGIN");
-        var allowStartTls = configuration.GetValue<bool>("KEYWARS:LDAP:ALLOW_STARTTLS");
+        var ldapOptions = ConfigurationAliases.GetLdap(configuration);
+        var authOptions = ConfigurationAliases.GetAuth(configuration);
+        var urls = ldapOptions.Urls;
+        var baseDn = ldapOptions.BaseDn;
+        var upnSuffix = ldapOptions.UpnSuffix;
+        var developmentAuth = authOptions.DevelopmentLogin;
+        var allowStartTls = ldapOptions.AllowStartTls;
 
         if (string.IsNullOrWhiteSpace(urls))
         {

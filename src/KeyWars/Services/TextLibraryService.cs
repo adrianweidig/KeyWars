@@ -65,10 +65,14 @@ public sealed class TextLibraryService(
             throw new InvalidOperationException("Der Sammlungsname darf nicht leer sein.");
         }
 
-        var visibleIds = await db.TrainingTexts
+        var visibleTexts = await db.TrainingTexts
             .Where(text => textIds.Contains(text.Id) && (text.IsStandard || text.Visibility == TrainingTextVisibility.Organization || text.OwnerProfileId == ownerProfileId))
-            .Select(text => text.Id)
             .ToListAsync(cancellationToken);
+
+        if (visibility == TrainingTextVisibility.Organization && visibleTexts.Any(text => !text.IsStandard && text.Visibility != TrainingTextVisibility.Organization))
+        {
+            throw new InvalidOperationException("Organisationsweite Sammlungen dürfen keine privaten Texte enthalten.");
+        }
 
         var collection = new TextCollection
         {
@@ -80,7 +84,7 @@ public sealed class TextLibraryService(
         db.TextCollections.Add(collection);
 
         var order = 0;
-        foreach (var textId in visibleIds.Distinct())
+        foreach (var textId in visibleTexts.Select(text => text.Id).Distinct())
         {
             db.TextCollectionItems.Add(new TextCollectionItem
             {

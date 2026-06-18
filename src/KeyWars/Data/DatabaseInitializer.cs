@@ -12,11 +12,45 @@ public sealed class DatabaseInitializer(
     {
         await using var scope = services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<KeyWarsDbContext>();
-        await db.Database.EnsureCreatedAsync(cancellationToken);
+        await BaselineExistingEnsureCreatedDatabaseAsync(db, cancellationToken);
+        await db.Database.MigrateAsync(cancellationToken);
         await db.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;", cancellationToken);
-        await db.Database.ExecuteSqlRawAsync("PRAGMA busy_timeout=5000;", cancellationToken);
         await SeedStandardTextsAsync(db, cancellationToken);
         logger.LogInformation("KeyWars-Datenbank ist bereit ({Environment}).", environment.EnvironmentName);
+    }
+
+    private async Task BaselineExistingEnsureCreatedDatabaseAsync(KeyWarsDbContext db, CancellationToken cancellationToken)
+    {
+        var userTableCount = await db.Database.SqlQueryRaw<int>(
+            "SELECT COUNT(*) AS Value FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name <> '__EFMigrationsHistory'")
+            .SingleAsync(cancellationToken);
+        if (userTableCount == 0)
+        {
+            return;
+        }
+
+        var historyTableCount = await db.Database.SqlQueryRaw<int>(
+            "SELECT COUNT(*) AS Value FROM sqlite_master WHERE type = 'table' AND name = '__EFMigrationsHistory'")
+            .SingleAsync(cancellationToken);
+        if (historyTableCount > 0)
+        {
+            return;
+        }
+
+        var initialMigration = db.Database.GetMigrations().FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(initialMigration))
+        {
+            return;
+        }
+
+        await db.Database.ExecuteSqlRawAsync(
+            "CREATE TABLE IF NOT EXISTS \"__EFMigrationsHistory\" (\"MigrationId\" TEXT NOT NULL CONSTRAINT \"PK___EFMigrationsHistory\" PRIMARY KEY, \"ProductVersion\" TEXT NOT NULL);",
+            cancellationToken);
+        var productVersion = typeof(DbContext).Assembly.GetName().Version?.ToString(3) ?? "10.0.0";
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"INSERT OR IGNORE INTO \"__EFMigrationsHistory\" (\"MigrationId\", \"ProductVersion\") VALUES ({initialMigration}, {productVersion});",
+            cancellationToken);
+        logger.LogWarning("Bestehende SQLite-Datenbank ohne EF-Migrationshistorie wurde als {MigrationId} baseline-markiert.", initialMigration);
     }
 
     private static async Task SeedStandardTextsAsync(KeyWarsDbContext db, CancellationToken cancellationToken)

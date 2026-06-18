@@ -22,7 +22,7 @@
                     <a asp-page="/Profil/Index">Profil</a>
                 </div>
                 <form class="logout" asp-page="/Abmelden" method="post">
-                    <button type="submit" title="Abmelden" aria-label="Abmelden">Ab</button>
+                    <button type="submit" title="Abmelden" aria-label="Abmelden">Abmelden</button>
                 </form>
             }
         </nav>
@@ -32,11 +32,6 @@
             @RenderBody()
         </main>
     </div>
-
-    <footer class="footer">
-        <span>Ein Container. Lokale Daten. Reale AD-Namen.</span>
-    </footer>
-
     <script type="module" src="~/js/site.js" asp-append-version="true"></script>
     @await RenderSectionAsync("Scripts", required: false)
 </body>

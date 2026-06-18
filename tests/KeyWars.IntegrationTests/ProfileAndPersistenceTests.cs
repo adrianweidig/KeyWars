@@ -1,9 +1,11 @@
 using KeyWars.Auth;
 using KeyWars.Data;
 using KeyWars.Domain;
+using KeyWars.Infrastructure;
 using KeyWars.Services;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 
 namespace KeyWars.IntegrationTests;
 
@@ -87,5 +89,37 @@ public sealed class ProfileAndPersistenceTests
             Assert.Equal(session.Id, attempt.Id);
             Assert.NotNull(attempt.FinishedAt);
         }
+    }
+
+    [Fact]
+    public void ConfigurationAliasesBindComposeStyleEnvironmentNames()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["KEYWARS:LDAP:BASE_DN"] = "DC=example,DC=local",
+                ["KEYWARS:LDAP:UPN_SUFFIX"] = "example.local",
+                ["KEYWARS:LDAP:ALLOW_STARTTLS"] = "true",
+                ["KEYWARS:AUTH:COOKIE_LIFETIME_HOURS"] = "6",
+                ["KEYWARS:LIVE:MAX_PARTICIPANTS_PER_ROOM"] = "12",
+                ["KEYWARS:CONTENT:MAX_UPLOAD_BYTES"] = "4096"
+            })
+            .Build();
+
+        var ldap = new LdapOptions();
+        ConfigurationAliases.BindLdap(configuration, ldap);
+        var auth = new AuthOptions();
+        ConfigurationAliases.BindAuth(configuration, auth);
+        var live = new LiveOptions();
+        ConfigurationAliases.BindLive(configuration, live);
+        var content = new ContentOptions();
+        ConfigurationAliases.BindContent(configuration, content);
+
+        Assert.Equal("DC=example,DC=local", ldap.BaseDn);
+        Assert.Equal("example.local", ldap.UpnSuffix);
+        Assert.True(ldap.AllowStartTls);
+        Assert.Equal(6, auth.CookieLifetimeHours);
+        Assert.Equal(12, live.MaxParticipantsPerRoom);
+        Assert.Equal(4096, content.MaxUploadBytes);
     }
 }

@@ -121,7 +121,7 @@ export function attachTypingApps() {
 
       const typed = splitGraphemes(input.value);
       const expected = splitGraphemes(session.text);
-      const length = Math.max(typed.length, expected.length);
+      const length = typed.length;
       const errors = [];
 
       for (let index = 0; index < length; index += 1) {

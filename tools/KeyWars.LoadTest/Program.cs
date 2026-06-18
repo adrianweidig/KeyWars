@@ -20,9 +20,10 @@ foreach (var count in participantCounts)
         MaxParticipantsPerRoom = Math.Max(128, count),
         RoomCommandQueueCapacity = Math.Max(4096, count * 128)
     });
-    var manager = new LiveRoomManager(options, TimeProvider.System, NullLogger<LiveRoomManager>.Instance);
+    var manager = new LiveRoomManager(options, TimeProvider.System, new TypingEngine(TimeProvider.System), NullLogger<LiveRoomManager>.Instance);
     var creator = Guid.CreateVersion7();
-    var snapshot = manager.CreateRoom(new CreateLiveRoomRequest(creator, "Person 0", $"Lasttest {count}", TypingEngine.BuildWordTest(100), LiveRoomMode.Classic, LiveRoomVisibility.Code, 1, count));
+    var targetText = TypingEngine.BuildWordTest(100);
+    var snapshot = manager.CreateRoom(new CreateLiveRoomRequest(creator, "Person 0", $"Lasttest {count}", targetText, LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, count));
     var participants = Enumerable.Range(1, count - 1).Select(index => (Id: Guid.CreateVersion7(), Name: $"Person {index}")).ToArray();
     foreach (var participant in participants)
     {
@@ -42,7 +43,8 @@ foreach (var count in participantCounts)
         for (var sequence = 1; sequence <= 30; sequence++)
         {
             var iteration = Stopwatch.StartNew();
-            manager.SubmitProgress(snapshot.RoomId, participant.ProfileId, sequence, sequence * 3, 45 + sequence);
+            var length = Math.Min(targetText.Length, sequence * 3);
+            manager.SubmitProgress(snapshot.RoomId, participant.ProfileId, sequence, targetText[..length]);
             iteration.Stop();
             lock (timings)
             {
@@ -52,8 +54,7 @@ foreach (var count in participantCounts)
             await Task.Delay(1);
         }
 
-        var metrics = new TypingMetrics(300, 0, 300, 0, 0, 30_000 + Random.Shared.Next(0, 8_000), 60, 60, 300, 99, 98, true);
-        manager.Finish(snapshot.RoomId, participant.ProfileId, metrics);
+        manager.Finish(snapshot.RoomId, participant.ProfileId, targetText, 0, 0);
     });
     stopwatch.Stop();
 

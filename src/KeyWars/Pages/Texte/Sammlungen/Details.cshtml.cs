@@ -16,8 +16,14 @@ public sealed class DetailsModel(CurrentUser currentUser, KeyWarsDbContext db) :
     {
         var profile = await currentUser.RequireProfileAsync(User, cancellationToken);
         Collection = await db.TextCollections.SingleAsync(item => item.Id == id && (item.OwnerProfileId == profile.Id || item.Visibility == TrainingTextVisibility.Organization), cancellationToken);
-        var ids = await db.TextCollectionItems.Where(item => item.TextCollectionId == id).OrderBy(item => item.SortOrder).Select(item => item.TrainingTextId).ToListAsync(cancellationToken);
-        Texts = await db.TrainingTexts.Where(item => ids.Contains(item.Id)).ToListAsync(cancellationToken);
+        Texts = await (
+            from collectionItem in db.TextCollectionItems
+            join text in db.TrainingTexts on collectionItem.TrainingTextId equals text.Id
+            where collectionItem.TextCollectionId == id &&
+                (text.IsStandard || text.Visibility == TrainingTextVisibility.Organization || text.OwnerProfileId == profile.Id)
+            orderby collectionItem.SortOrder
+            select text
+        ).ToListAsync(cancellationToken);
         return Page();
     }
 }

@@ -43,11 +43,11 @@ public sealed class TypingEngine(TimeProvider timeProvider)
         var inputElements = SplitGraphemes(NormalizeText(input));
         var correct = 0;
         var incorrect = 0;
-        var comparable = Math.Max(targetElements.Count, inputElements.Count);
+        var comparable = inputElements.Count;
 
         for (var index = 0; index < comparable; index++)
         {
-            if (index >= targetElements.Count || index >= inputElements.Count)
+            if (index >= targetElements.Count)
             {
                 incorrect++;
                 continue;
@@ -65,13 +65,13 @@ public sealed class TypingEngine(TimeProvider timeProvider)
 
         var totalInput = inputElements.Count;
         var minutes = Math.Max(duration.TotalMinutes, 1d / 60d);
-        var accuracy = totalInput == 0 ? 0 : (double)correct / Math.Max(totalInput, correct + incorrect) * 100d;
+        var accuracy = totalInput == 0 ? 0 : (double)correct / totalInput * 100d;
         var wpm = correct / 5d / minutes;
         var rawWpm = totalInput / 5d / minutes;
         var cpm = correct / minutes;
         var penalty = (incorrect * 3d) + backspaces + (focusLosses * 2d);
         var consistency = Math.Clamp(100d - penalty / Math.Max(1, targetElements.Count) * 100d, 0d, 100d);
-        var completed = timeMode || (targetElements.Count == inputElements.Count && incorrect == 0);
+        var completed = targetElements.Count == inputElements.Count && incorrect == 0;
 
         return new TypingMetrics(
             correct,
@@ -135,6 +135,11 @@ public sealed class TypingEngine(TimeProvider timeProvider)
         if (wordCount <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(wordCount), "Die Wortzahl muss positiv sein.");
+        }
+
+        if (wordCount > 200)
+        {
+            throw new ArgumentOutOfRangeException(nameof(wordCount), "Die Wortzahl darf maximal 200 betragen.");
         }
 
         var words = new string[wordCount];

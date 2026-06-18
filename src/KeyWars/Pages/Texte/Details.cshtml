@@ -7,7 +7,7 @@
 <section class="page-header">
     <div>
         <h1>@Model.Text.Title</h1>
-        <p class="lead">@Model.Text.CharacterCount Zeichen · @(Model.Text.IsStandard ? "Standardtext" : Model.Text.Visibility)</p>
+        <p class="lead">@Model.Text.CharacterCount Zeichen · @(Model.Text.IsStandard ? "Standardtext" : DisplayNames.For(Model.Text.Visibility))</p>
     </div>
     <div class="action-row">
         <a class="button" asp-page="/Spielen/Text" asp-route-id="@Model.Text.Id">Trainieren</a>
@@ -16,5 +16,5 @@
 </section>
 
 <section class="card">
-    <pre style="white-space: pre-wrap; font: inherit;">@Model.Text.Body</pre>
+    <pre class="preformatted">@Model.Text.Body</pre>
 </section>

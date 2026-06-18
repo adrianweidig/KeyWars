@@ -6,9 +6,26 @@ using Microsoft.AspNetCore.Mvc.RazorPages;
 
 namespace KeyWars.Pages.Arena;
 
-public sealed class RaumModel(CurrentUser currentUser, LiveRoomManager rooms, TypingEngine typingEngine) : PageModel
+public sealed class RaumModel(CurrentUser currentUser, LiveRoomManager rooms) : PageModel
 {
-    public LiveRoomSnapshot Snapshot { get; private set; } = new(Guid.Empty, "", "", "", LiveRoomMode.Classic, LiveRoomVisibility.Code, 1, false, false, []);
+    public LiveRoomSnapshot Snapshot { get; private set; } = new(
+        Guid.Empty,
+        Guid.Empty,
+        "",
+        "",
+        "",
+        0,
+        LiveRoomMode.Classic,
+        LiveRoomVisibility.Code,
+        1,
+        false,
+        false,
+        DateTimeOffset.UtcNow,
+        null,
+        null,
+        []);
+
+    public Guid CurrentProfileId { get; private set; }
 
     [BindProperty]
     public string Input { get; set; } = "";
@@ -16,14 +33,23 @@ public sealed class RaumModel(CurrentUser currentUser, LiveRoomManager rooms, Ty
     public async Task<IActionResult> OnGetAsync(Guid id, CancellationToken cancellationToken)
     {
         var profile = await currentUser.RequireProfileAsync(User, cancellationToken);
-        rooms.Join(id, profile.Id, profile.DisplayName);
-        Snapshot = rooms.Snapshot(id);
+        CurrentProfileId = profile.Id;
+        try
+        {
+            Snapshot = rooms.Join(id, profile.Id, profile.DisplayName);
+        }
+        catch (InvalidOperationException)
+        {
+            return Forbid();
+        }
+
         return Page();
     }
 
     public async Task<IActionResult> OnPostReadyAsync(Guid id, CancellationToken cancellationToken)
     {
         var profile = await currentUser.RequireProfileAsync(User, cancellationToken);
+        CurrentProfileId = profile.Id;
         rooms.SetReady(id, profile.Id, true);
         return RedirectToPage(new { id });
     }
@@ -31,6 +57,7 @@ public sealed class RaumModel(CurrentUser currentUser, LiveRoomManager rooms, Ty
     public async Task<IActionResult> OnPostStartAsync(Guid id, CancellationToken cancellationToken)
     {
         var profile = await currentUser.RequireProfileAsync(User, cancellationToken);
+        CurrentProfileId = profile.Id;
         try
         {
             rooms.Start(id, profile.Id);
@@ -38,6 +65,8 @@ public sealed class RaumModel(CurrentUser currentUser, LiveRoomManager rooms, Ty
         catch (InvalidOperationException ex)
         {
             ModelState.AddModelError(string.Empty, ex.Message);
+            Snapshot = rooms.Snapshot(id);
+            return Page();
         }
 
         return RedirectToPage(new { id });
@@ -46,9 +75,8 @@ public sealed class RaumModel(CurrentUser currentUser, LiveRoomManager rooms, Ty
     public async Task<IActionResult> OnPostFinishAsync(Guid id, CancellationToken cancellationToken)
     {
         var profile = await currentUser.RequireProfileAsync(User, cancellationToken);
-        var snapshot = rooms.Snapshot(id);
-        var metrics = typingEngine.Analyze(snapshot.TargetText, Input, TimeSpan.FromMinutes(1), 0, 0);
-        rooms.Finish(id, profile.Id, metrics);
+        CurrentProfileId = profile.Id;
+        rooms.Finish(id, profile.Id, Input, 0, 0);
         return RedirectToPage(new { id });
     }
 }

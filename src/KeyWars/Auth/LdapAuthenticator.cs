@@ -109,8 +109,13 @@ public sealed class LdapAuthenticator(IOptions<LdapOptions> options, ILogger<Lda
         };
 
         var response = (SearchResponse)await Task.Run(() => connection.SendRequest(request), cancellationToken);
-        var entry = response.Entries.Cast<SearchResultEntry>().SingleOrDefault();
-        if (entry is null || IsDisabled(entry))
+        if (response.Entries.Count != 1)
+        {
+            return null;
+        }
+
+        var entry = response.Entries[0];
+        if (IsDisabled(entry))
         {
             return null;
         }
@@ -119,9 +124,12 @@ public sealed class LdapAuthenticator(IOptions<LdapOptions> options, ILogger<Lda
         var upn = GetString(entry, "userPrincipalName") ?? $"{sam}@{ldapOptions.UpnSuffix}";
         var given = GetString(entry, "givenName");
         var surname = GetString(entry, "sn");
-        var display = GetString(entry, "displayName")
-            ?? string.Join(' ', new[] { given, surname }.Where(value => !string.IsNullOrWhiteSpace(value)))
-            ?? sam;
+        var nameFromParts = string.Join(' ', new[] { given, surname }.Where(value => !string.IsNullOrWhiteSpace(value)));
+        var display = GetString(entry, "displayName");
+        if (string.IsNullOrWhiteSpace(display))
+        {
+            display = string.IsNullOrWhiteSpace(nameFromParts) ? sam : nameFromParts;
+        }
 
         return new DirectoryIdentity(
             GetGuid(entry, "objectGUID"),

@@ -29,12 +29,12 @@
     <div data-result></div>
 </section>
 
-<section class="grid" style="margin-top: 16px;">
+<section class="grid stack-spaced">
     @foreach (var text in Model.Texts)
     {
         <article class="card">
             <h3>@text.Title</h3>
-            <p class="muted">@text.CharacterCount Zeichen · @(text.IsStandard ? "Standardtext" : text.Visibility)</p>
+            <p class="muted">@text.CharacterCount Zeichen · @(text.IsStandard ? "Standardtext" : DisplayNames.For(text.Visibility))</p>
             <a class="button secondary" asp-page="/Spielen/Text" asp-route-id="@text.Id">Text trainieren</a>
         </article>
     }

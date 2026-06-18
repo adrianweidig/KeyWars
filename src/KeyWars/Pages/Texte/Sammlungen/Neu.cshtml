@@ -32,8 +32,8 @@
             <legend>Texte</legend>
             @foreach (var text in Model.Texts)
             {
-                <label style="display:flex; align-items:center; gap:8px; font-weight:400;">
-                    <input type="checkbox" name="Input.TextIds" value="@text.Id" style="width:auto;" />
+                <label class="checkbox-label">
+                    <input type="checkbox" name="Input.TextIds" value="@text.Id" />
                     @text.Title
                 </label>
             }

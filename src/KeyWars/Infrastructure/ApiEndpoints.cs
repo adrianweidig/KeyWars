@@ -10,6 +10,24 @@ public static class ApiEndpoints
     public static void MapKeyWarsApi(this IEndpointRouteBuilder endpoints)
     {
         var api = endpoints.MapGroup("/api").RequireAuthorization();
+        api.AddEndpointFilter(async (context, next) =>
+        {
+            var request = context.HttpContext.Request;
+            if (HttpMethods.IsPost(request.Method) || HttpMethods.IsPut(request.Method) || HttpMethods.IsDelete(request.Method))
+            {
+                if (!IsJsonRequest(request))
+                {
+                    return Results.StatusCode(StatusCodes.Status415UnsupportedMediaType);
+                }
+
+                if (!IsSameOrigin(request))
+                {
+                    return Results.Forbid();
+                }
+            }
+
+            return await next(context);
+        });
 
         api.MapGet("/personen/suche", async (string? q, CurrentUser currentUser, HttpContext httpContext, TextLibraryService texts, CancellationToken cancellationToken) =>
         {
@@ -82,5 +100,27 @@ public static class ApiEndpoints
                 .ToList();
             return Results.Ok(new { profile.DisplayName, profile.Level, profile.ExperiencePoints, profile.ArenaRating, LastAttempts = last });
         });
+    }
+
+    private static bool IsJsonRequest(HttpRequest request)
+    {
+        return request.ContentType?.StartsWith("application/json", StringComparison.OrdinalIgnoreCase) == true;
+    }
+
+    private static bool IsSameOrigin(HttpRequest request)
+    {
+        var origin = request.Headers.Origin.ToString();
+        if (string.IsNullOrWhiteSpace(origin))
+        {
+            return true;
+        }
+
+        if (!Uri.TryCreate(origin, UriKind.Absolute, out var originUri))
+        {
+            return false;
+        }
+
+        return string.Equals(originUri.Scheme, request.Scheme, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(originUri.Authority, request.Host.Value, StringComparison.OrdinalIgnoreCase);
     }
 }

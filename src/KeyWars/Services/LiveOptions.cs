@@ -9,6 +9,8 @@ public sealed class LiveOptions
     public int ProgressBroadcastHz { get; set; } = 10;
     public int ReconnectGraceSeconds { get; set; } = 30;
     public int RoomCommandQueueCapacity { get; set; } = 4096;
+    public int CompletedRoomRetentionMinutes { get; set; } = 60;
+    public int LobbyRoomRetentionMinutes { get; set; } = 720;
 }
 
 public sealed class ChallengeOptions

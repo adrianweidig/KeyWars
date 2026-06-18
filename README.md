@@ -9,47 +9,76 @@
 [![Release](https://github.com/adrianweidig/KeyWars/actions/workflows/release.yml/badge.svg)](https://github.com/adrianweidig/KeyWars/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-KeyWars ist eine deutschsprachige, selbst gehostete Webanwendung für Tipptraining, Gruppenherausforderungen und Live-Rennen mit realen Active-Directory-Identitäten.
+**KeyWars ist ein selbst gehosteter Tipptrainer für Unternehmen, Schulen,
+Ausbildung, IT-Teams und interne Lernplattformen.** Die Anwendung verbindet
+Tipptraining, Team-Challenges und Live-Rennen mit echten Active-Directory- oder
+LDAP-Identitäten.
 
-## Qualitätsstatus
+Keine Fantasienamen. Keine lokale Schatten-Nutzerverwaltung. Keine externe
+Cloud. Ein Container, SQLite-Daten unter `/data`, Login über LDAP oder LDAPS
+und eine deutschsprachige Oberfläche für Menschen, die schneller, sauberer und
+konzentrierter tippen wollen.
 
-Dieses Repository ist als öffentliches Best-Practice-Repository aufgebaut:
+## Warum KeyWars?
 
-- CI mit Restore, Formatcheck, Release-Build, Tests, Coverage-Artefakt, Docker-Build und Compose-Validierung;
-- CodeQL-Analyse für C# und JavaScript/TypeScript;
-- Dependabot für NuGet, GitHub Actions und Docker-Basisimages;
-- Dependency Review für Pull Requests;
-- Secret Scanning per TruffleHog;
-- OpenSSF Scorecard;
-- Container-Scan per Trivy;
-- SBOM-Erzeugung als kostenloses GitHub-Actions-Artefakt;
-- Markdown-, YAML-, GitHub-Actions- und Dockerfile-Linting;
-- Security Policy, Contribution Guide, Code of Conduct, CODEOWNERS sowie Issue- und PR-Vorlagen.
+Viele Tipptrainer sind Einzelspieler-Tools. KeyWars ist anders: Es bringt
+Tipptraining dorthin, wo Menschen bereits zusammenarbeiten. In die Schule, in
+die Ausbildung, ins Intranet, in Helpdesk-Teams, in Verwaltung, Support,
+Entwicklung und alle Bereiche, in denen Tastatursicherheit jeden Tag Zeit spart.
 
-## Architektur
+- **Echte Identitäten:** Anmeldung über Active Directory, LDAPS oder LDAP mit
+  StartTLS. Profile entstehen erst nach dem ersten erfolgreichen Login.
+- **Motivation durch Wettbewerb:** Nutzer trainieren allein, fordern andere
+  heraus oder starten Live-Rennen in gemeinsamen Räumen.
+- **Einfach selbst hosten:** Ein produktiver Container, eine SQLite-Datenbank,
+  keine externen Runtime-Assets, keine CDN-Abhängigkeit.
+- **Datenschutzfreundlich betreiben:** Daten bleiben auf der eigenen
+  Infrastruktur. Reverse Proxy, TLS, DNS und Backups bleiben unter eigener
+  Kontrolle.
+- **Deutschsprachig und fokussiert:** Kein überladener Lernplattform-Baukasten,
+  sondern ein klarer Tipptrainer für messbaren Fortschritt.
 
-- genau ein produktiver Container;
-- ASP.NET Core 10, Razor Pages und SignalR in einem Prozess;
-- SQLite unter `/data/keywars.db`;
-- direkte Formularanmeldung gegen AD per LDAPS oder LDAP mit StartTLS;
-- JIT-Provisionierung lokaler Profile anhand `objectGUID`;
-- keine Adminoberfläche, keine lokale Nutzerverwaltung, keine Nicknames;
-- keine externen Runtime-Assets, CDNs, Fonts oder Zusatzdienste.
+## Funktionen
 
-## Lokal entwickeln
+### Tipptraining
 
-```powershell
-$env:DOTNET_ROOT='F:\KeyWars\.dotnet'
-$env:PATH='F:\KeyWars\.dotnet;' + $env:PATH
-dotnet restore
-dotnet build -c Release
-dotnet test -c Release --no-build
-dotnet run --project src\KeyWars
-```
+KeyWars bietet fokussierte Schreibübungen mit Zeitmessung, Genauigkeit,
+Fehlerauswertung und Verlauf. Trainingseinheiten eignen sich für freies Üben,
+Unterricht, Ausbildung, Onboarding und interne Lernziele.
 
-In Development ist ein lokaler Test-Login für Entwickler-Szenarien aktiv. Production startet nur mit expliziter LDAP-Konfiguration; ohne LDAP-Pflichtvariablen bricht die Startvalidierung ab.
+### Challenges
 
-## Docker Run
+Nutzer können andere Personen suchen und zu Tippduellen herausfordern. Da
+KeyWars keine lokalen Nicknames verwendet, basieren Auswahl, Anzeige und
+Ergebnisse auf den durch LDAP bestätigten Identitäten.
+
+### Live-Arena
+
+Die Live-Arena bringt mehrere Teilnehmende in einen gemeinsamen Raum. Fortschritt
+und Status werden per SignalR aktualisiert, während die dauerhaften Ergebnisse
+in SQLite gespeichert werden. Das eignet sich für Unterrichtsrunden,
+Team-Events, Trainingssessions und kurze interne Wettbewerbe.
+
+### Selbst gehosteter Betrieb
+
+KeyWars läuft als ASP.NET-Core-Webanwendung mit Razor Pages und SignalR in
+einem Prozess. Persistente Daten liegen unter `/data/keywars.db`. Für den
+Produktivbetrieb werden LDAP-Pflichtvariablen validiert; ohne explizite
+LDAP-Konfiguration startet die Anwendung nicht versehentlich offen.
+
+## Für wen ist KeyWars?
+
+KeyWars passt besonders gut, wenn du einen **self-hosted Tipptrainer** suchst
+für:
+
+- Schulen, Berufsschulen und Ausbildungszentren;
+- Unternehmen mit Active Directory oder LDAP;
+- interne IT-, Support-, Verwaltungs- und Office-Teams;
+- Tipptraining im Intranet ohne externe Cloud;
+- Wettbewerbe, Gruppenherausforderungen und Live-Rennen;
+- Umgebungen, in denen echte Namen wichtiger sind als Nicknames.
+
+## Schnellstart mit Docker
 
 ```bash
 docker run -d --name keywars \
@@ -63,18 +92,70 @@ docker run -d --name keywars \
   ghcr.io/adrianweidig/keywars:latest
 ```
 
-Reverse Proxy, DNS, TLS und WebSocket-Weiterleitung bleiben externe Betreiberaufgaben. KeyWars selbst lauscht nur per HTTP auf Port 8080.
+Danach ist KeyWars auf Port `8080` erreichbar. In Produktion sollte die
+Anwendung hinter einem Reverse Proxy mit TLS laufen. WebSocket-Weiterleitung
+muss für SignalR aktiviert sein.
 
-## Pflichtvariablen für LDAP
+## Pflichtkonfiguration
 
-- `KEYWARS__LDAP__URLS`
-- `KEYWARS__LDAP__BASE_DN`
-- `KEYWARS__LDAP__UPN_SUFFIX`
+Für Production sind mindestens diese Variablen erforderlich:
 
-Optional sind `KEYWARS__LDAP__NETBIOS_DOMAIN`, `KEYWARS__LDAP__USER_BASE_DN`, `KEYWARS__LDAP__CA_CERTIFICATE_PATH`, Timeouts und `KEYWARS__LDAP__ALLOW_STARTTLS`.
+| Variable | Zweck |
+| --- | --- |
+| `KEYWARS__LDAP__URLS` | LDAP- oder LDAPS-Endpunkte, zum Beispiel `ldaps://dc01.example.local:636` |
+| `KEYWARS__LDAP__BASE_DN` | Suchbasis des Verzeichnisses, zum Beispiel `DC=example,DC=local` |
+| `KEYWARS__LDAP__UPN_SUFFIX` | UPN-Suffix für Logins, zum Beispiel `example.local` |
 
-Nutzer werden nicht aus AD importiert. Erst nach dem ersten erfolgreichen Login erscheinen sie in KeyWars-Suche und Challenge-Auswahl.
+Optionale Variablen steuern unter anderem NetBIOS-Domain,
+benutzerspezifische Suchbasen, CA-Zertifikate, Timeouts und StartTLS.
+Details stehen in [docs/ldap.md](docs/ldap.md).
+
+## Lokal entwickeln
+
+```powershell
+$env:DOTNET_ROOT='F:\KeyWars\.dotnet'
+$env:PATH='F:\KeyWars\.dotnet;' + $env:PATH
+dotnet restore
+dotnet build -c Release
+dotnet test -c Release --no-build
+dotnet run --project src\KeyWars
+```
+
+In `Development` ist ein lokaler Test-Login für Entwickler-Szenarien aktiv.
+In `Production` zählt nur die explizite LDAP-Konfiguration.
+
+## Betrieb und Dokumentation
+
+- [Architektur](docs/architecture.md): Container, Prozessmodell, SQLite,
+  SignalR und Datenfluss.
+- [LDAP-Anbindung](docs/ldap.md): LDAPS, StartTLS, Suchbasen und
+  Zertifikatsoptionen.
+- [Live-Arena](docs/live-arena.md): Räume, Laufzeitmodell und Kapazitäten.
+- [Reverse Proxy](docs/reverse-proxy.md): TLS, Header und WebSocket-Weiterleitung.
+- [Backup und Restore](docs/backup-restore.md): Sicherung der SQLite-Daten.
+- [Air-Gap-Installation](docs/airgap-install.md): Betrieb in abgeschotteten
+  Umgebungen.
+
+## Was KeyWars bewusst nicht ist
+
+KeyWars ist keine vollständige Lernplattform, kein Cloud-Dienst und keine
+separate Benutzerverwaltung. Es ersetzt keine Identity-Infrastruktur, sondern
+nutzt sie. Genau dadurch bleibt der Betrieb klein, nachvollziehbar und passend
+für interne Umgebungen.
+
+## Qualität
+
+Die CI-, Security- und Container-Prüfungen sind nicht der Zweck dieses
+Repositories, sondern das Fundament für einen verlässlichen Betrieb. KeyWars
+soll installierbar, wartbar und nachvollziehbar bleiben: Restore, Build, Tests,
+Docker-Build, CodeQL, Dependency Review, Secret Scanning, Trivy und SBOM helfen
+dabei, ohne das Produktziel zu überdecken.
 
 ## Sicherheit melden
 
-Bitte melde Sicherheitsprobleme nicht als öffentliches Issue. Nutze die Hinweise in [SECURITY.md](SECURITY.md).
+Bitte melde Sicherheitsprobleme nicht als öffentliches Issue. Nutze die
+Hinweise in [SECURITY.md](SECURITY.md).
+
+## Lizenz
+
+KeyWars steht unter der [MIT-Lizenz](LICENSE).

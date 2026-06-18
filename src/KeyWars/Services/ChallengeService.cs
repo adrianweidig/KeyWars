@@ -14,6 +14,11 @@ public sealed class ChallengeService(
 {
     public async Task<Challenge> CreateAsync(Guid creatorProfileId, CreateChallengeRequest request, CancellationToken cancellationToken = default)
     {
+        if (request.Mode != ChallengeMode.Classic)
+        {
+            throw new InvalidOperationException("Aktuell ist nur der Challenge-Modus \"Klassisches Rennen\" implementiert.");
+        }
+
         var participants = request.ParticipantIds.Append(creatorProfileId).Distinct().ToArray();
         if (participants.Length < 2)
         {
@@ -25,14 +30,16 @@ public sealed class ChallengeService(
             throw new InvalidOperationException($"Maximal {options.Value.MaxParticipants} Personen sind erlaubt.");
         }
 
-        var text = await db.TrainingTexts.SingleAsync(item => item.Id == request.TrainingTextId, cancellationToken);
+        var text = await db.TrainingTexts.SingleAsync(item =>
+            item.Id == request.TrainingTextId &&
+            (item.IsStandard || item.Visibility == TrainingTextVisibility.Organization || item.OwnerProfileId == creatorProfileId), cancellationToken);
         var challenge = new Challenge
         {
             CreatorProfileId = creatorProfileId,
             TrainingTextId = text.Id,
             Title = string.IsNullOrWhiteSpace(request.Title) ? text.Title : request.Title.Trim(),
             Mode = request.Mode,
-            RoundCount = Math.Clamp(request.RoundCount, 1, 7),
+            RoundCount = 1,
             RatingEligible = text.RatingEligible && request.Mode is ChallengeMode.Classic or ChallengeMode.BestOf,
             ExpiresAt = timeProvider.GetUtcNow().AddDays(Math.Clamp(request.ExpiryDays, 1, 30))
         };
@@ -99,6 +106,24 @@ public sealed class ChallengeService(
         }
 
         var participant = await db.ChallengeParticipants.SingleAsync(item => item.ChallengeId == challengeId && item.UserProfileId == profileId, cancellationToken);
+        if (participant.Status is ParticipantStatus.Finished or ParticipantStatus.Dnf or ParticipantStatus.Declined)
+        {
+            return;
+        }
+
+        if (attempt.TrainingTextId != challenge.TrainingTextId || attempt.UserProfileId != profileId)
+        {
+            throw new InvalidOperationException("Der Versuch gehört nicht zu dieser Herausforderung.");
+        }
+
+        var duplicateResult = await db.ChallengeRoundResults.AnyAsync(item =>
+            item.UserProfileId == profileId &&
+            db.ChallengeRounds.Any(round => round.Id == item.ChallengeRoundId && round.ChallengeId == challengeId), cancellationToken);
+        if (duplicateResult)
+        {
+            return;
+        }
+
         var round = await db.ChallengeRounds.SingleAsync(item => item.ChallengeId == challengeId && item.RoundNumber == 1, cancellationToken);
         participant.Status = attempt.Completed ? ParticipantStatus.Finished : ParticipantStatus.Dnf;
         participant.FinishedAt = timeProvider.GetUtcNow();

@@ -31,9 +31,6 @@
             Modus
             <select asp-for="Input.Mode">
                 <option value="Classic">Klassisches Rennen</option>
-                <option value="TimeDuel">Zeitduell</option>
-                <option value="Precision">Präzisionsduell</option>
-                <option value="BestOf">Best-of-Serie</option>
             </select>
         </label>
         <label>
@@ -44,8 +41,8 @@
             <legend>Personen</legend>
             @foreach (var person in Model.People)
             {
-                <label style="display:flex; align-items:center; gap:8px; font-weight:400;">
-                    <input type="checkbox" name="Input.ParticipantIds" value="@person.Id" style="width:auto;" />
+                <label class="checkbox-label">
+                    <input type="checkbox" name="Input.ParticipantIds" value="@person.Id" />
                     @person.DisplayName <span class="muted">(@person.SamAccountName)</span>
                 </label>
             }

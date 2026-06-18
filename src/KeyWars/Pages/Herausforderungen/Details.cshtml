@@ -7,7 +7,7 @@
 <section class="page-header">
     <div>
         <h1>@Model.CurrentChallenge.Title</h1>
-        <p class="lead">@Model.Text.Title · @Model.CurrentChallenge.Mode · Ablauf @Model.CurrentChallenge.ExpiresAt.LocalDateTime.ToString("g")</p>
+        <p class="lead">@Model.Text.Title · @DisplayNames.For(Model.CurrentChallenge.Mode) · Ablauf @Model.CurrentChallenge.ExpiresAt.LocalDateTime.ToString("g")</p>
     </div>
     <div class="action-row">
         <form method="post" asp-page-handler="Join">
@@ -23,12 +23,12 @@
         <tbody>
         @foreach (var row in Model.Rows)
         {
-            <tr>
-                <td>@row.DisplayName</td>
-                <td><span class="pill">@row.Status</span></td>
-                <td>@(row.Placement?.ToString() ?? "-")</td>
-                <td>@row.RatingDelta.ToString("+0;-0;0")</td>
-            </tr>
+                <tr>
+                    <td>@row.DisplayName</td>
+                <td><span class="pill">@DisplayNames.For(row.Status)</span></td>
+                    <td>@(row.Placement?.ToString() ?? "-")</td>
+                    <td>@row.RatingDelta.ToString("+0;-0;0")</td>
+                </tr>
         }
         </tbody>
     </table>

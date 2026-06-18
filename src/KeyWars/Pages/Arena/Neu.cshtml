@@ -30,21 +30,17 @@
             Sichtbarkeit
             <select asp-for="Input.Visibility">
                 <option value="Code">Codebasiert</option>
-                <option value="InvitationOnly">Einladungsbasiert</option>
                 <option value="InternalOpen">Intern offen</option>
             </select>
         </label>
         <label>
             Maximal Personen
-            <input asp-for="Input.MaxParticipants" type="number" min="2" max="256" />
+            <input asp-for="Input.MaxParticipants" type="number" min="2" max="64" />
         </label>
         <label>
             Modus
             <select asp-for="Input.Mode">
                 <option value="Classic">Klassisches Rennen</option>
-                <option value="TimeDuel">Zeitduell</option>
-                <option value="Precision">Präzisionsduell</option>
-                <option value="BestOf">Best-of-Serie</option>
             </select>
         </label>
         <button type="submit">Raum erstellen</button>

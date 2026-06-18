@@ -15,6 +15,9 @@ public sealed class AnmeldenModel(ILdapAuthenticator authenticator, ProfileProvi
     [BindProperty]
     public LoginInput Input { get; set; } = new();
 
+    [BindProperty(SupportsGet = true)]
+    public string? ReturnUrl { get; set; }
+
     public void OnGet()
     {
     }
@@ -48,7 +51,7 @@ public sealed class AnmeldenModel(ILdapAuthenticator authenticator, ProfileProvi
             new ClaimsPrincipal(identity),
             new AuthenticationProperties { IsPersistent = false });
 
-        return LocalRedirect("/");
+        return LocalRedirect(Url.IsLocalUrl(ReturnUrl) ? ReturnUrl : "/");
     }
 
     public sealed class LoginInput

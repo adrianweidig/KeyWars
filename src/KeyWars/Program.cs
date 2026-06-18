@@ -10,8 +10,10 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using System.Net;
 
 if (args is ["healthcheck", ..])
 {
@@ -29,15 +31,20 @@ StartupValidator.Validate(builder.Configuration, builder.Environment, startupLog
 var dataDirectory = DataPaths.Resolve(builder.Configuration, builder.Environment);
 var databasePath = DataPaths.DatabasePath(dataDirectory);
 
-builder.Services.Configure<LdapOptions>(builder.Configuration.GetSection("KEYWARS:LDAP"));
-builder.Services.Configure<AuthOptions>(builder.Configuration.GetSection("KEYWARS:AUTH"));
-builder.Services.Configure<LiveOptions>(builder.Configuration.GetSection("KEYWARS:LIVE"));
-builder.Services.Configure<ChallengeOptions>(builder.Configuration.GetSection("KEYWARS:CHALLENGES"));
-builder.Services.Configure<ContentOptions>(builder.Configuration.GetSection("KEYWARS:CONTENT"));
+builder.Services.Configure<LdapOptions>(options => ConfigurationAliases.BindLdap(builder.Configuration, options));
+builder.Services.Configure<AuthOptions>(options => ConfigurationAliases.BindAuth(builder.Configuration, options));
+builder.Services.Configure<LiveOptions>(options => ConfigurationAliases.BindLive(builder.Configuration, options));
+builder.Services.Configure<ChallengeOptions>(options => ConfigurationAliases.BindChallenges(builder.Configuration, options));
+builder.Services.Configure<ContentOptions>(options => ConfigurationAliases.BindContent(builder.Configuration, options));
 
 builder.Services.AddDbContext<KeyWarsDbContext>(options =>
 {
-    options.UseSqlite($"Data Source={databasePath}");
+    var connectionString = new SqliteConnectionStringBuilder
+    {
+        DataSource = databasePath,
+        DefaultTimeout = 5
+    }.ToString();
+    options.UseSqlite(connectionString);
 });
 
 builder.Services.AddDataProtection()
@@ -57,7 +64,8 @@ builder.Services.AddSingleton<AttemptSessionStore>();
 builder.Services.AddSingleton<LiveRoomManager>();
 builder.Services.AddScoped<DatabaseInitializer>();
 
-var developmentLogin = builder.Environment.IsDevelopment() || builder.Configuration.GetValue<bool>("KEYWARS:AUTH:DEVELOPMENT_LOGIN");
+var configuredAuthOptions = ConfigurationAliases.GetAuth(builder.Configuration);
+var developmentLogin = builder.Environment.IsDevelopment() || configuredAuthOptions.DevelopmentLogin;
 if (developmentLogin)
 {
     builder.Services.AddScoped<ILdapAuthenticator, DevelopmentDirectoryAuthenticator>();
@@ -70,7 +78,7 @@ else
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
     {
-        var authOptions = builder.Configuration.GetSection("KEYWARS:AUTH").Get<AuthOptions>() ?? new AuthOptions();
+        var authOptions = ConfigurationAliases.GetAuth(builder.Configuration);
         options.Cookie.Name = builder.Environment.IsProduction() ? "__Host-KeyWars.Auth" : "KeyWars.Dev.Auth";
         options.Cookie.HttpOnly = true;
         options.Cookie.SameSite = SameSiteMode.Lax;
@@ -85,12 +93,14 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         {
             OnRedirectToLogin = context =>
             {
-                context.Response.Redirect("/anmelden");
+                var returnUrl = Uri.EscapeDataString(context.Request.PathBase + context.Request.Path + context.Request.QueryString);
+                context.Response.Redirect($"/anmelden?ReturnUrl={returnUrl}");
                 return Task.CompletedTask;
             },
             OnRedirectToAccessDenied = context =>
             {
-                context.Response.Redirect("/anmelden");
+                var returnUrl = Uri.EscapeDataString(context.Request.PathBase + context.Request.Path + context.Request.QueryString);
+                context.Response.Redirect($"/anmelden?ReturnUrl={returnUrl}");
                 return Task.CompletedTask;
             },
             OnRedirectToLogout = context =>
@@ -126,13 +136,42 @@ builder.Services.AddSignalR(options =>
 {
     options.MaximumReceiveMessageSize = 16 * 1024;
     options.EnableDetailedErrors = builder.Environment.IsDevelopment();
-}).AddMessagePackProtocol();
+})
+    .AddJsonProtocol(options =>
+    {
+        options.PayloadSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+    })
+    .AddMessagePackProtocol();
 
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
     options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
-    options.KnownIPNetworks.Clear();
-    options.KnownProxies.Clear();
+    options.ForwardLimit = 1;
+    var knownProxies = builder.Configuration["KEYWARS:PROXY:KNOWN_PROXIES"];
+    if (!string.IsNullOrWhiteSpace(knownProxies))
+    {
+        options.KnownProxies.Clear();
+        foreach (var value in knownProxies.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (IPAddress.TryParse(value, out var address))
+            {
+                options.KnownProxies.Add(address);
+            }
+        }
+    }
+
+    var knownNetworks = builder.Configuration["KEYWARS:PROXY:KNOWN_NETWORKS"];
+    if (!string.IsNullOrWhiteSpace(knownNetworks))
+    {
+        options.KnownIPNetworks.Clear();
+        foreach (var value in knownNetworks.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (System.Net.IPNetwork.TryParse(value, out var network))
+            {
+                options.KnownIPNetworks.Add(network);
+            }
+        }
+    }
 });
 
 var app = builder.Build();

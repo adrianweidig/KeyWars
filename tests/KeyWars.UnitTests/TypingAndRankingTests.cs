@@ -31,6 +31,31 @@ public sealed class TypingAndRankingTests
     }
 
     [Fact]
+    public void TypingEngineDoesNotCountUnwrittenRemainderAsError()
+    {
+        var engine = new TypingEngine(TimeProvider.System);
+
+        var metrics = engine.Analyze("Schlüssel und Straße", "Schlüssel", TimeSpan.FromSeconds(10), 0, 0);
+
+        Assert.False(metrics.Completed);
+        Assert.Equal(TypingEngine.SplitGraphemes("Schlüssel").Count, metrics.CorrectCharacters);
+        Assert.Equal(0, metrics.IncorrectCharacters);
+        Assert.Equal(100, metrics.Accuracy);
+    }
+
+    [Fact]
+    public void TimeModeDoesNotMarkEmptyInputAsCompleted()
+    {
+        var engine = new TypingEngine(TimeProvider.System);
+
+        var metrics = engine.Analyze("Schlüssel", "", TimeSpan.FromSeconds(15), 0, 0, timeMode: true);
+
+        Assert.False(metrics.Completed);
+        Assert.Equal(0, metrics.CorrectCharacters);
+        Assert.Equal(0, metrics.IncorrectCharacters);
+    }
+
+    [Fact]
     public void ClassicRankingWorksForMoreThanTwoPeople()
     {
         var ids = Enumerable.Range(0, 5).Select(_ => Guid.CreateVersion7()).ToArray();
