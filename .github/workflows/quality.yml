@@ -46,7 +46,7 @@ jobs:
         uses: reviewdog/action-actionlint@v1
 
       - name: Dockerfile lint
-        uses: hadolint/hadolint-action@v3.2.0
+        uses: hadolint/hadolint-action@v3.3.0
         with:
           dockerfile: Dockerfile
 
