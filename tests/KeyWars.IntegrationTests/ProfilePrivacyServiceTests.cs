@@ -78,7 +78,10 @@ public sealed class ProfilePrivacyServiceTests
         {
             UserProfileId = other.Id,
             Mode = TrainingMode.Words10,
+            Phase = AttemptPhase.Finished,
+            PreparedAt = context.Time.GetUtcNow(),
             StartedAt = context.Time.GetUtcNow(),
+            FinishedAt = context.Time.GetUtcNow().AddSeconds(15),
             Completed = true
         });
         await context.Db.SaveChangesAsync();
@@ -155,6 +158,8 @@ public sealed class ProfilePrivacyServiceTests
             {
                 UserProfileId = Profile.Id,
                 Mode = TrainingMode.Words10,
+                Phase = AttemptPhase.Finished,
+                PreparedAt = Time.GetUtcNow(),
                 StartedAt = Time.GetUtcNow(),
                 FinishedAt = Time.GetUtcNow().AddSeconds(30),
                 Completed = true,

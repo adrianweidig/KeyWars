@@ -1,3 +1,6 @@
+using KeyWars.Data;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -5,6 +8,8 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace KeyWars.Data.Migrations
 {
     /// <inheritdoc />
+    [DbContext(typeof(KeyWarsDbContext))]
+    [Migration("20260618193000_AddLiveRoomCompletionIdempotency")]
     public partial class AddLiveRoomCompletionIdempotency : Migration
     {
         /// <inheritdoc />

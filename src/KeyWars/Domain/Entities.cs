@@ -97,13 +97,18 @@ public sealed class TypingAttempt
     public Guid UserProfileId { get; set; }
     public Guid? TrainingTextId { get; set; }
     public TrainingMode Mode { get; set; }
+    public AttemptPhase Phase { get; set; } = AttemptPhase.Prepared;
     [MaxLength(64)]
     public string StandardTextKey { get; set; } = "";
     [MaxLength(32)]
     public string Nonce { get; set; } = "";
+    [MaxLength(96)]
+    public string TextHash { get; set; } = "";
+    public DateTimeOffset PreparedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset StartedAt { get; set; }
     public DateTimeOffset? FinishedAt { get; set; }
     public int DurationMilliseconds { get; set; }
+    public int ClientDurationMilliseconds { get; set; }
     public int CorrectCharacters { get; set; }
     public int IncorrectCharacters { get; set; }
     public int Backspaces { get; set; }

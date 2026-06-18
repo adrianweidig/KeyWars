@@ -24,6 +24,8 @@ export function attachTypingApps() {
     let finishing = false;
     let finished = false;
     let prepared = false;
+    let serverStarted = false;
+    let beginPromise = null;
     const mistakeMap = new Map();
 
     const request = () => ({
@@ -101,6 +103,46 @@ export function attachTypingApps() {
       startedAt = null;
       timerValue.textContent = isTimed() ? formatDuration(timedSeconds() * 1000) : "00:00.0";
       timerLabel.textContent = "Bereit";
+    };
+
+    const beginAttempt = async () => {
+      if (!session || serverStarted) {
+        return true;
+      }
+
+      if (!beginPromise) {
+        beginPromise = fetch("/api/spielen/begin", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            attemptId: session.id,
+            nonce: session.nonce
+          })
+        }).then(async (response) => {
+          if (!response.ok) {
+            throw new Error("begin failed");
+          }
+
+          await response.json();
+          serverStarted = true;
+          return true;
+        }).finally(() => {
+          beginPromise = null;
+        });
+      }
+
+      try {
+        await beginPromise;
+        return true;
+      } catch {
+        result.textContent = "Der Versuch konnte nicht gestartet werden.";
+        prepared = false;
+        finished = true;
+        input.disabled = true;
+        startButton.disabled = false;
+        startButton.textContent = "Erneut versuchen";
+        return false;
+      }
     };
 
     const stopTimer = () => {
@@ -195,8 +237,14 @@ export function attachTypingApps() {
       finished = true;
       stopTimer();
       input.disabled = true;
+      if (input.value.length > 0 && !(await beginAttempt())) {
+        finishing = false;
+        return;
+      }
+
       const payload = {
         attemptId: session.id,
+        nonce: session.nonce,
         input: input.value,
         backspaces,
         focusLosses,
@@ -238,6 +286,8 @@ export function attachTypingApps() {
       finishing = false;
       finished = false;
       session = null;
+      serverStarted = false;
+      beginPromise = null;
       input.value = "";
       input.disabled = true;
       result.textContent = "";
@@ -284,13 +334,17 @@ export function attachTypingApps() {
     input.addEventListener("paste", (event) => event.preventDefault());
     input.addEventListener("drop", (event) => event.preventDefault());
     input.addEventListener("blur", () => { focusLosses += 1; });
-    input.addEventListener("input", () => {
+    input.addEventListener("input", async () => {
       if (!prepared || !session || finishing || finished) {
         return;
       }
 
       if (input.value.length > 0) {
         startTimer();
+        if (!(await beginAttempt())) {
+          return;
+        }
+
         noteMistake();
       }
 

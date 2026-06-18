@@ -54,6 +54,13 @@ public static class ApiEndpoints
             return Results.Ok(session);
         });
 
+        api.MapPost("/spielen/begin", async (BeginAttemptRequest request, CurrentUser currentUser, HttpContext httpContext, AttemptService attempts, CancellationToken cancellationToken) =>
+        {
+            var profile = await currentUser.RequireProfileAsync(httpContext.User, cancellationToken);
+            var start = await attempts.BeginAsync(profile.Id, request, cancellationToken);
+            return Results.Ok(start);
+        });
+
         api.MapPost("/spielen/abschliessen", async (FinishAttemptRequest request, CurrentUser currentUser, HttpContext httpContext, AttemptService attempts, CancellationToken cancellationToken) =>
         {
             var profile = await currentUser.RequireProfileAsync(httpContext.User, cancellationToken);

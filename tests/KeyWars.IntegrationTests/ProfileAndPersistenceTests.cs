@@ -57,41 +57,136 @@ public sealed class ProfileAndPersistenceTests
     [Fact]
     public async Task AttemptSessionSurvivesRequestScopedServiceInstances()
     {
-        await using var connection = new SqliteConnection("Data Source=:memory:");
-        await connection.OpenAsync();
-        var options = new DbContextOptionsBuilder<KeyWarsDbContext>().UseSqlite(connection).Options;
-        var sessionStore = new AttemptSessionStore();
-        var engine = new TypingEngine(TimeProvider.System);
-
-        Guid profileId;
+        await using var context = await AttemptTestContext.CreateAsync();
         AttemptSession session;
-        await using (var db = new KeyWarsDbContext(options))
+        await using (var db = new KeyWarsDbContext(context.Options))
         {
-            await db.Database.EnsureCreatedAsync();
-            var profile = new UserProfile
-            {
-                DisplayName = "Carla Test",
-                SamAccountName = "ctest",
-                DirectoryObjectGuid = Guid.NewGuid().ToString(),
-                DirectorySid = "S-3"
-            };
-            db.UserProfiles.Add(profile);
-            await db.SaveChangesAsync();
-            profileId = profile.Id;
-
-            var starter = new AttemptService(db, engine, new MotivationService(db, TimeProvider.System), TimeProvider.System, sessionStore);
-            session = await starter.StartAsync(profileId, new StartAttemptRequest(TrainingMode.Words10, null, null, 10));
+            var starter = context.CreateService(db);
+            session = await starter.StartAsync(context.ProfileId, new StartAttemptRequest(TrainingMode.Words10, null, null, 10));
         }
 
-        await using (var db = new KeyWarsDbContext(options))
+        await using (var db = new KeyWarsDbContext(context.Options))
         {
-            var finisher = new AttemptService(db, engine, new MotivationService(db, TimeProvider.System), TimeProvider.System, sessionStore);
-            var attempt = await finisher.FinishAsync(profileId, new FinishAttemptRequest(session.Id, session.Text, 0, 0, 5000));
+            var finisher = context.CreateService(db);
+            await finisher.BeginAsync(context.ProfileId, new BeginAttemptRequest(session.Id, session.Nonce));
+            context.Time.Advance(TimeSpan.FromSeconds(5));
+            var attempt = await finisher.FinishAsync(
+                context.ProfileId,
+                new FinishAttemptRequest(session.Id, session.Text, 0, 0, 5000) { Nonce = session.Nonce });
 
             Assert.True(attempt.Completed);
             Assert.Equal(session.Id, attempt.Id);
             Assert.NotNull(attempt.FinishedAt);
+            Assert.Equal(AttemptPhase.Finished, attempt.Phase);
         }
+    }
+
+    [Fact]
+    public async Task PreparedDelayDoesNotCountTowardAuthoritativeDuration()
+    {
+        await using var context = await AttemptTestContext.CreateAsync();
+        await using var db = new KeyWarsDbContext(context.Options);
+        var service = context.CreateService(db);
+
+        var session = await service.StartAsync(context.ProfileId, new StartAttemptRequest(TrainingMode.Words10, null, null, 10));
+        var preparedAt = context.Time.GetUtcNow();
+        context.Time.Advance(TimeSpan.FromSeconds(30));
+        var begin = await service.BeginAsync(context.ProfileId, new BeginAttemptRequest(session.Id, session.Nonce));
+        context.Time.Advance(TimeSpan.FromSeconds(5));
+
+        var attempt = await service.FinishAsync(
+            context.ProfileId,
+            new FinishAttemptRequest(session.Id, session.Text, 0, 0, 35000) { Nonce = session.Nonce });
+
+        Assert.Equal(preparedAt, attempt.PreparedAt);
+        Assert.Equal(begin.StartedAt, attempt.StartedAt);
+        Assert.Equal(5000, attempt.DurationMilliseconds);
+        Assert.Equal(35000, attempt.ClientDurationMilliseconds);
+        Assert.StartsWith("sha256:", attempt.TextHash, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task InvalidNonceDoesNotConsumeActiveSession()
+    {
+        await using var context = await AttemptTestContext.CreateAsync();
+        await using var db = new KeyWarsDbContext(context.Options);
+        var service = context.CreateService(db);
+
+        var session = await service.StartAsync(context.ProfileId, new StartAttemptRequest(TrainingMode.Words10, null, null, 10));
+        await service.BeginAsync(context.ProfileId, new BeginAttemptRequest(session.Id, session.Nonce));
+        context.Time.Advance(TimeSpan.FromSeconds(4));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.FinishAsync(
+                context.ProfileId,
+                new FinishAttemptRequest(session.Id, session.Text, 0, 0, 4000) { Nonce = "bad-nonce" }));
+
+        var attempt = await service.FinishAsync(
+            context.ProfileId,
+            new FinishAttemptRequest(session.Id, session.Text, 0, 0, 4000) { Nonce = session.Nonce });
+
+        Assert.True(attempt.Completed);
+        Assert.Equal(AttemptPhase.Finished, attempt.Phase);
+    }
+
+    [Fact]
+    public async Task FinishedAttemptReplayReturnsPersistedResultWithoutDuplicateXp()
+    {
+        await using var context = await AttemptTestContext.CreateAsync();
+        await using var db = new KeyWarsDbContext(context.Options);
+        var service = context.CreateService(db);
+
+        var session = await service.StartAsync(context.ProfileId, new StartAttemptRequest(TrainingMode.Words10, null, null, 10));
+        await service.BeginAsync(context.ProfileId, new BeginAttemptRequest(session.Id, session.Nonce));
+        context.Time.Advance(TimeSpan.FromSeconds(8));
+        var request = new FinishAttemptRequest(session.Id, session.Text, 0, 0, 8000) { Nonce = session.Nonce };
+
+        var first = await service.FinishAsync(context.ProfileId, request);
+        var xpAfterFirstFinish = await db.UserProfiles.Where(profile => profile.Id == context.ProfileId).Select(profile => profile.ExperiencePoints).SingleAsync();
+        var replay = await service.FinishAsync(context.ProfileId, request);
+        var xpAfterReplay = await db.UserProfiles.Where(profile => profile.Id == context.ProfileId).Select(profile => profile.ExperiencePoints).SingleAsync();
+
+        Assert.Equal(first.Id, replay.Id);
+        Assert.Equal(first.Wpm, replay.Wpm);
+        Assert.Equal(xpAfterFirstFinish, xpAfterReplay);
+    }
+
+    [Fact]
+    public async Task TimedSprintPartialInputCompletesAfterServerDurationLimit()
+    {
+        await using var context = await AttemptTestContext.CreateAsync();
+        await using var db = new KeyWarsDbContext(context.Options);
+        var service = context.CreateService(db);
+
+        var session = await service.StartAsync(context.ProfileId, new StartAttemptRequest(TrainingMode.Sprint60, null, 60, 80));
+        await service.BeginAsync(context.ProfileId, new BeginAttemptRequest(session.Id, session.Nonce));
+        context.Time.Advance(TimeSpan.FromSeconds(60));
+        var partialInput = string.Concat(TypingEngine.SplitGraphemes(session.Text).Take(20));
+
+        var attempt = await service.FinishAsync(
+            context.ProfileId,
+            new FinishAttemptRequest(session.Id, partialInput, 0, 0, 60000) { Nonce = session.Nonce });
+        var profileXp = await db.UserProfiles.Where(profile => profile.Id == context.ProfileId).Select(profile => profile.ExperiencePoints).SingleAsync();
+
+        Assert.True(attempt.Completed);
+        Assert.Equal(60000, attempt.DurationMilliseconds);
+        Assert.True(profileXp > 0);
+    }
+
+    [Fact]
+    public async Task ExpiredPreparedAttemptIsCleanedAndMarkedExpired()
+    {
+        await using var context = await AttemptTestContext.CreateAsync();
+        await using var db = new KeyWarsDbContext(context.Options);
+        var service = context.CreateService(db);
+
+        var session = await service.StartAsync(context.ProfileId, new StartAttemptRequest(TrainingMode.Words10, null, null, 10));
+        context.Time.Advance(TimeSpan.FromHours(2).Add(TimeSpan.FromSeconds(1)));
+        await service.StartAsync(context.ProfileId, new StartAttemptRequest(TrainingMode.Words10, null, null, 10));
+        var attempt = await db.TypingAttempts.SingleAsync(item => item.Id == session.Id);
+
+        Assert.Equal(AttemptPhase.Expired, attempt.Phase);
+        Assert.Null(attempt.FinishedAt);
     }
 
     [Fact]
@@ -200,5 +295,56 @@ public sealed class ProfileAndPersistenceTests
         public string ApplicationName { get; set; } = "KeyWars.Tests";
         public string ContentRootPath { get; set; } = Directory.GetCurrentDirectory();
         public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
+    }
+
+    private sealed class AttemptTestContext : IAsyncDisposable
+    {
+        private AttemptTestContext(SqliteConnection connection, DbContextOptions<KeyWarsDbContext> options, ManualTimeProvider time, Guid profileId)
+        {
+            Connection = connection;
+            Options = options;
+            Time = time;
+            ProfileId = profileId;
+        }
+
+        public SqliteConnection Connection { get; }
+        public DbContextOptions<KeyWarsDbContext> Options { get; }
+        public AttemptSessionStore SessionStore { get; } = new();
+        public ManualTimeProvider Time { get; }
+        public Guid ProfileId { get; }
+
+        public static async Task<AttemptTestContext> CreateAsync()
+        {
+            var connection = new SqliteConnection("Data Source=:memory:");
+            await connection.OpenAsync();
+            var options = new DbContextOptionsBuilder<KeyWarsDbContext>().UseSqlite(connection).Options;
+            var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-06-18T12:00:00Z"));
+            await using var db = new KeyWarsDbContext(options);
+            await db.Database.EnsureCreatedAsync();
+            var profile = new UserProfile
+            {
+                DisplayName = "Carla Test",
+                SamAccountName = "ctest",
+                DirectoryObjectGuid = Guid.NewGuid().ToString(),
+                DirectorySid = "S-3"
+            };
+            db.UserProfiles.Add(profile);
+            await db.SaveChangesAsync();
+            return new AttemptTestContext(connection, options, time, profile.Id);
+        }
+
+        public AttemptService CreateService(KeyWarsDbContext db) =>
+            new(db, new TypingEngine(Time), new MotivationService(db, Time), Time, SessionStore);
+
+        public async ValueTask DisposeAsync() => await Connection.DisposeAsync();
+    }
+
+    private sealed class ManualTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        private DateTimeOffset utcNow = utcNow;
+
+        public override DateTimeOffset GetUtcNow() => utcNow;
+
+        public void Advance(TimeSpan value) => utcNow += value;
     }
 }

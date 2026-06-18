@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using System.Security.Cryptography;
+using System.Text;
 using KeyWars.Data;
 using KeyWars.Domain;
 using Microsoft.EntityFrameworkCore;
@@ -6,8 +8,22 @@ using Microsoft.EntityFrameworkCore;
 namespace KeyWars.Services;
 
 public sealed record StartAttemptRequest(TrainingMode Mode, Guid? TrainingTextId, int? SprintSeconds, int? WordCount);
-public sealed record FinishAttemptRequest(Guid AttemptId, string Input, int Backspaces, int FocusLosses, int ClientDurationMilliseconds);
-public sealed record AttemptSession(Guid Id, Guid UserProfileId, string Text, TrainingMode Mode, DateTimeOffset StartedAt, string Nonce);
+public sealed record BeginAttemptRequest(Guid AttemptId, string Nonce);
+public sealed record AttemptBeginResponse(Guid AttemptId, DateTimeOffset StartedAt);
+public sealed record FinishAttemptRequest(Guid AttemptId, string Input, int Backspaces, int FocusLosses, int ClientDurationMilliseconds)
+{
+    public string Nonce { get; init; } = "";
+}
+
+public sealed record AttemptSession(
+    Guid Id,
+    Guid UserProfileId,
+    string Text,
+    TrainingMode Mode,
+    DateTimeOffset PreparedAt,
+    DateTimeOffset? StartedAt,
+    string Nonce,
+    AttemptPhase Phase);
 
 public sealed class AttemptSessionStore
 {
@@ -15,17 +31,25 @@ public sealed class AttemptSessionStore
 
     public void Add(AttemptSession session) => sessions[session.Id] = session;
 
+    public bool TryGet(Guid id, out AttemptSession? session) => sessions.TryGetValue(id, out session);
+
+    public bool TryUpdate(AttemptSession current, AttemptSession updated) => sessions.TryUpdate(current.Id, updated, current);
+
     public bool TryRemove(Guid id, out AttemptSession? session) => sessions.TryRemove(id, out session);
 
-    public void RemoveExpired(DateTimeOffset now, TimeSpan lifetime)
+    public IReadOnlyList<AttemptSession> RemoveExpired(DateTimeOffset now, TimeSpan lifetime)
     {
+        var expired = new List<AttemptSession>();
         foreach (var item in sessions)
         {
-            if (now - item.Value.StartedAt > lifetime)
+            var reference = item.Value.StartedAt ?? item.Value.PreparedAt;
+            if (now - reference > lifetime && sessions.TryRemove(item.Key, out var session))
             {
-                sessions.TryRemove(item.Key, out _);
+                expired.Add(session);
             }
         }
+
+        return expired;
     }
 }
 
@@ -37,37 +61,87 @@ public sealed class AttemptService(
     AttemptSessionStore sessionStore)
 {
     private static readonly TimeSpan SessionLifetime = TimeSpan.FromHours(2);
+    private static readonly TimeSpan MinimumDuration = TimeSpan.FromSeconds(1);
+    private const int MaxInputOverrunCharacters = 20;
 
     public async Task<AttemptSession> StartAsync(Guid profileId, StartAttemptRequest request, CancellationToken cancellationToken = default)
     {
-        sessionStore.RemoveExpired(timeProvider.GetUtcNow(), SessionLifetime);
+        var now = timeProvider.GetUtcNow();
+        await ExpireSessionsAsync(now, cancellationToken);
+        ValidateStartRequest(request);
         var text = await ResolveTextAsync(profileId, request, cancellationToken);
         var start = typingEngine.Start(text);
-        var session = new AttemptSession(start.AttemptId, profileId, start.Text, request.Mode, start.StartedAt, start.Nonce);
-        sessionStore.Add(session);
-
+        var session = new AttemptSession(start.AttemptId, profileId, start.Text, request.Mode, start.StartedAt, null, start.Nonce, AttemptPhase.Prepared);
         db.TypingAttempts.Add(new TypingAttempt
         {
             Id = session.Id,
             UserProfileId = profileId,
             TrainingTextId = request.TrainingTextId,
             Mode = request.Mode,
+            Phase = AttemptPhase.Prepared,
             Nonce = session.Nonce,
-            StartedAt = session.StartedAt,
+            TextHash = ComputeTextHash(session.Text),
+            PreparedAt = session.PreparedAt,
+            StartedAt = session.PreparedAt,
             Official = request.Mode != TrainingMode.Endless,
             LeaderboardEligible = request.Mode is not TrainingMode.Endless && request.TrainingTextId is not null
         });
         await db.SaveChangesAsync(cancellationToken);
+        sessionStore.Add(session);
         return session;
+    }
+
+    public async Task<AttemptBeginResponse> BeginAsync(Guid profileId, BeginAttemptRequest request, CancellationToken cancellationToken = default)
+    {
+        var now = timeProvider.GetUtcNow();
+        await ExpireSessionsAsync(now, cancellationToken);
+        var attempt = await db.TypingAttempts.SingleAsync(item => item.Id == request.AttemptId && item.UserProfileId == profileId, cancellationToken);
+        ValidateNonce(attempt.Nonce, request.Nonce);
+
+        if (attempt.FinishedAt is not null)
+        {
+            return new AttemptBeginResponse(attempt.Id, attempt.StartedAt);
+        }
+
+        while (true)
+        {
+            if (!sessionStore.TryGet(request.AttemptId, out var session) || session is null)
+            {
+                throw new InvalidOperationException("Dieser Versuch ist nicht mehr aktiv.");
+            }
+
+            ValidateSession(profileId, request.Nonce, session);
+            if (session.Phase == AttemptPhase.Started && session.StartedAt is { } existingStartedAt)
+            {
+                return new AttemptBeginResponse(session.Id, existingStartedAt);
+            }
+
+            if (session.Phase != AttemptPhase.Prepared)
+            {
+                throw new InvalidOperationException("Dieser Versuch kann nicht mehr gestartet werden.");
+            }
+
+            var started = session with { Phase = AttemptPhase.Started, StartedAt = now };
+            if (!sessionStore.TryUpdate(session, started))
+            {
+                continue;
+            }
+
+            attempt.Phase = AttemptPhase.Started;
+            attempt.StartedAt = now;
+            await db.SaveChangesAsync(cancellationToken);
+            return new AttemptBeginResponse(started.Id, now);
+        }
     }
 
     public async Task<TypingAttempt> FinishAsync(Guid profileId, FinishAttemptRequest request, CancellationToken cancellationToken = default)
     {
         var now = timeProvider.GetUtcNow();
-        sessionStore.RemoveExpired(now, SessionLifetime);
-        sessionStore.TryRemove(request.AttemptId, out var session);
+        await ExpireSessionsAsync(now, cancellationToken);
         var attempt = await db.TypingAttempts.SingleAsync(item => item.Id == request.AttemptId && item.UserProfileId == profileId, cancellationToken);
-        if (session is null)
+        ValidateNonce(attempt.Nonce, request.Nonce);
+
+        if (!sessionStore.TryGet(request.AttemptId, out var session) || session is null)
         {
             if (attempt.FinishedAt is not null)
             {
@@ -77,18 +151,35 @@ public sealed class AttemptService(
             throw new InvalidOperationException("Dieser Versuch ist nicht mehr aktiv.");
         }
 
-        var serverDuration = now - session.StartedAt;
+        ValidateSession(profileId, request.Nonce, session);
+        if (session.Phase != AttemptPhase.Started || session.StartedAt is not { } startedAt)
+        {
+            throw new InvalidOperationException("Dieser Versuch wurde noch nicht gestartet.");
+        }
+
+        var serverDuration = now - startedAt;
         if (serverDuration > SessionLifetime)
         {
+            attempt.Phase = AttemptPhase.Expired;
+            await db.SaveChangesAsync(cancellationToken);
+            sessionStore.TryRemove(request.AttemptId, out _);
             throw new InvalidOperationException("Dieser Versuch ist abgelaufen.");
         }
 
         var timeMode = session.Mode is TrainingMode.Sprint15 or TrainingMode.Sprint30 or TrainingMode.Sprint60 or TrainingMode.Sprint120;
         var duration = NormalizeServerDuration(serverDuration, session.Mode);
-        var metrics = typingEngine.Analyze(session.Text, request.Input, duration, request.Backspaces, request.FocusLosses, timeMode);
+        var input = NormalizeBoundedInput(session.Text, request.Input);
+        var metrics = typingEngine.Analyze(session.Text, input, duration, request.Backspaces, request.FocusLosses, timeMode);
+        if (!timeMode && !metrics.Completed)
+        {
+            throw new InvalidOperationException("Der Zieltext ist noch nicht fehlerfrei abgeschlossen.");
+        }
 
+        attempt.Phase = AttemptPhase.Finished;
+        attempt.StartedAt = startedAt;
         attempt.FinishedAt = now;
         attempt.DurationMilliseconds = metrics.DurationMilliseconds;
+        attempt.ClientDurationMilliseconds = NormalizeClientDuration(request.ClientDurationMilliseconds);
         attempt.CorrectCharacters = metrics.CorrectCharacters;
         attempt.IncorrectCharacters = metrics.IncorrectCharacters;
         attempt.Backspaces = metrics.Backspaces;
@@ -103,6 +194,7 @@ public sealed class AttemptService(
 
         await motivationService.ApplyAttemptAsync(profileId, attempt, session.Text, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
+        sessionStore.TryRemove(request.AttemptId, out _);
         return attempt;
     }
 
@@ -138,8 +230,7 @@ public sealed class AttemptService(
 
     private static TimeSpan NormalizeServerDuration(TimeSpan serverDuration, TrainingMode mode)
     {
-        var minimum = TimeSpan.FromSeconds(1);
-        var bounded = serverDuration < minimum ? minimum : serverDuration;
+        var bounded = serverDuration < MinimumDuration ? MinimumDuration : serverDuration;
         var sprintLimit = mode switch
         {
             TrainingMode.Sprint15 => TimeSpan.FromSeconds(15),
@@ -150,5 +241,111 @@ public sealed class AttemptService(
         };
 
         return sprintLimit is { } limit && bounded > limit ? limit : bounded;
+    }
+
+    private async Task ExpireSessionsAsync(DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var expired = sessionStore.RemoveExpired(now, SessionLifetime);
+        if (expired.Count == 0)
+        {
+            return;
+        }
+
+        var ids = expired.Select(session => session.Id).ToArray();
+        var attempts = await db.TypingAttempts
+            .Where(attempt => ids.Contains(attempt.Id) && attempt.FinishedAt == null)
+            .ToListAsync(cancellationToken);
+        foreach (var attempt in attempts)
+        {
+            attempt.Phase = AttemptPhase.Expired;
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private static void ValidateStartRequest(StartAttemptRequest request)
+    {
+        if (!Enum.IsDefined(request.Mode))
+        {
+            throw new InvalidOperationException("Der Trainingsmodus ist ungültig.");
+        }
+
+        if (request.SprintSeconds is < 0 or > 120)
+        {
+            throw new InvalidOperationException("Die Sprintdauer ist ungültig.");
+        }
+
+        var expectedSprintSeconds = request.Mode switch
+        {
+            TrainingMode.Sprint15 => 15,
+            TrainingMode.Sprint30 => 30,
+            TrainingMode.Sprint60 => 60,
+            TrainingMode.Sprint120 => 120,
+            _ => 0
+        };
+        if (expectedSprintSeconds > 0 && request.SprintSeconds is { } sprintSeconds && sprintSeconds != expectedSprintSeconds)
+        {
+            throw new InvalidOperationException("Die Sprintdauer passt nicht zum Trainingsmodus.");
+        }
+
+        if (request.WordCount is < 1 or > 200)
+        {
+            throw new InvalidOperationException("Die Wortzahl muss zwischen 1 und 200 liegen.");
+        }
+    }
+
+    private static string NormalizeBoundedInput(string targetText, string input)
+    {
+        var normalized = TypingEngine.NormalizeText(input);
+        var targetLength = TypingEngine.SplitGraphemes(targetText).Count;
+        var inputLength = TypingEngine.SplitGraphemes(normalized).Count;
+        if (inputLength > targetLength + MaxInputOverrunCharacters)
+        {
+            throw new InvalidOperationException("Die Eingabe ist zu lang.");
+        }
+
+        return normalized;
+    }
+
+    private static int NormalizeClientDuration(int clientDurationMilliseconds)
+    {
+        if (clientDurationMilliseconds <= 0)
+        {
+            return 0;
+        }
+
+        return Math.Min(clientDurationMilliseconds, (int)SessionLifetime.TotalMilliseconds);
+    }
+
+    private static void ValidateSession(Guid profileId, string nonce, AttemptSession session)
+    {
+        if (session.UserProfileId != profileId)
+        {
+            throw new InvalidOperationException("Dieser Versuch ist nicht mehr aktiv.");
+        }
+
+        ValidateNonce(session.Nonce, nonce);
+    }
+
+    private static void ValidateNonce(string expected, string actual)
+    {
+        if (string.IsNullOrWhiteSpace(expected) || string.IsNullOrWhiteSpace(actual))
+        {
+            throw new InvalidOperationException("Der Versuchsschlüssel ist ungültig.");
+        }
+
+        var expectedBytes = Encoding.UTF8.GetBytes(expected);
+        var actualBytes = Encoding.UTF8.GetBytes(actual);
+        if (!CryptographicOperations.FixedTimeEquals(expectedBytes, actualBytes))
+        {
+            throw new InvalidOperationException("Der Versuchsschlüssel ist ungültig.");
+        }
+    }
+
+    private static string ComputeTextHash(string text)
+    {
+        var normalized = TypingEngine.NormalizeText(text);
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(normalized));
+        return $"sha256:{Convert.ToHexString(hash).ToLowerInvariant()}";
     }
 }

@@ -27,6 +27,8 @@ public sealed class MotivationServiceTests
         {
             UserProfileId = profile.Id,
             Mode = TrainingMode.Sprint60,
+            Phase = AttemptPhase.Finished,
+            PreparedAt = DateTimeOffset.Parse("2026-06-18T12:00:00Z"),
             StartedAt = DateTimeOffset.Parse("2026-06-18T12:00:00Z"),
             FinishedAt = DateTimeOffset.Parse("2026-06-18T12:01:00Z"),
             DurationMilliseconds = 60_000,

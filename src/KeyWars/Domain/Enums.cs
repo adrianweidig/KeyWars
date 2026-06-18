@@ -21,6 +21,15 @@ public enum TrainingMode
     RivalGhost
 }
 
+public enum AttemptPhase
+{
+    Prepared,
+    Started,
+    Finished,
+    Expired,
+    Aborted
+}
+
 public enum TrainingTextVisibility
 {
     Private,

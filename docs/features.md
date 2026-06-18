@@ -12,8 +12,8 @@ Statuswerte:
 | LDAP/LDAPS-Login | teilweise | Real-AD-E2E ist KW-050 und derzeit blockiert |
 | JIT-Provisionierung | verfuegbar | per Directory-GUID getestet |
 | Lokaler Development-Login | verfuegbar | nur in `Development` |
-| Training Classic/Woerter | teilweise | Attempt-Lebenszyklus KW-030 offen |
-| Zeit-Sprints | teilweise | Serverabschlussregeln KW-030 offen |
+| Training Classic/Woerter | teilweise | Serverseitiger Attempt-Lebenszyklus mit Prepare/Begin/Finish vorhanden; Browser-Eingabe-E2E offen |
+| Zeit-Sprints | teilweise | Serverdauer startet beim Begin-Signal; Teiltext nach Zeitablauf zaehlt, Browser-Eingabe-E2E offen |
 | Fehleranalyse | teilweise | Alignment und echte Fehleraggregate KW-031 offen |
 | Textbibliothek | teilweise | strikter UTF-8-Import und CRUD KW-041 offen |
 | Challenges | teilweise | Challenge-Attempt-Binding KW-040 offen |

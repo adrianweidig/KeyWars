@@ -468,6 +468,9 @@ namespace KeyWars.Data.Migrations
                     b.Property<double>("CharactersPerMinute")
                         .HasColumnType("REAL");
 
+                    b.Property<int>("ClientDurationMilliseconds")
+                        .HasColumnType("INTEGER");
+
                     b.Property<bool>("Completed")
                         .HasColumnType("INTEGER");
 
@@ -510,6 +513,13 @@ namespace KeyWars.Data.Migrations
                     b.Property<bool>("Official")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("Phase")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("PreparedAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<double>("RawWpm")
                         .HasColumnType("REAL");
 
@@ -519,6 +529,11 @@ namespace KeyWars.Data.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<DateTimeOffset>("StartedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TextHash")
+                        .IsRequired()
+                        .HasMaxLength(96)
                         .HasColumnType("TEXT");
 
                     b.Property<int>("TotalCharacters")

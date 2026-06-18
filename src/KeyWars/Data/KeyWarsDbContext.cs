@@ -70,6 +70,7 @@ public sealed class KeyWarsDbContext(DbContextOptions<KeyWarsDbContext> options)
             entity.HasIndex(attempt => new { attempt.UserProfileId, attempt.Mode, attempt.CreatedAt });
             entity.HasIndex(attempt => attempt.TrainingTextId);
             entity.Property(attempt => attempt.Mode).HasConversion<string>();
+            entity.Property(attempt => attempt.Phase).HasConversion<string>();
             entity.HasOne<UserProfile>()
                 .WithMany()
                 .HasForeignKey(attempt => attempt.UserProfileId)
