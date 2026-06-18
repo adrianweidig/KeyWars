@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"] - KeyWars</title>
+    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+</head>
+<body>
+    <header>
+        <nav class="topbar" aria-label="Hauptnavigation">
+            <a class="brand" asp-page="/Index" aria-label="KeyWars Startseite">
+                <span class="brand-mark" aria-hidden="true">KW</span>
+                <span>KeyWars</span>
+            </a>
+            @if (User.Identity?.IsAuthenticated == true)
+            {
+                <div class="nav-links">
+                    <a asp-page="/Spielen/Index">Spielen</a>
+                    <a asp-page="/Arena/Index">Arena</a>
+                    <a asp-page="/Texte/Index">Texte</a>
+                    <a asp-page="/Profil/Index">Profil</a>
+                </div>
+                <form class="logout" asp-page="/Abmelden" method="post">
+                    <button type="submit" title="Abmelden" aria-label="Abmelden">Ab</button>
+                </form>
+            }
+        </nav>
+    </header>
+    <div class="shell">
+        <main role="main">
+            @RenderBody()
+        </main>
+    </div>
+
+    <footer class="footer">
+        <span>Ein Container. Lokale Daten. Reale AD-Namen.</span>
+    </footer>
+
+    <script type="module" src="~/js/site.js" asp-append-version="true"></script>
+    @await RenderSectionAsync("Scripts", required: false)
+</body>
+</html>

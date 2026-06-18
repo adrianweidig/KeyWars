@@ -1,0 +1,52 @@
+@page "/arena/neu"
+@model KeyWars.Pages.Arena.NeuModel
+@{
+    ViewData["Title"] = "Live-Raum starten";
+}
+
+<section class="page-header">
+    <div>
+        <h1>Live-Raum starten</h1>
+        <p class="lead">Erstelle einen Raum für zwei bis n Personen. Einladungen laufen intern über Raumcode oder offene Räume.</p>
+    </div>
+</section>
+
+<section class="card">
+    <form method="post" class="form-grid">
+        <label>
+            Titel
+            <input asp-for="Input.Title" />
+        </label>
+        <label>
+            Text
+            <select asp-for="Input.TrainingTextId">
+                @foreach (var text in Model.Texts)
+                {
+                    <option value="@text.Id">@text.Title</option>
+                }
+            </select>
+        </label>
+        <label>
+            Sichtbarkeit
+            <select asp-for="Input.Visibility">
+                <option value="Code">Codebasiert</option>
+                <option value="InvitationOnly">Einladungsbasiert</option>
+                <option value="InternalOpen">Intern offen</option>
+            </select>
+        </label>
+        <label>
+            Maximal Personen
+            <input asp-for="Input.MaxParticipants" type="number" min="2" max="256" />
+        </label>
+        <label>
+            Modus
+            <select asp-for="Input.Mode">
+                <option value="Classic">Klassisches Rennen</option>
+                <option value="TimeDuel">Zeitduell</option>
+                <option value="Precision">Präzisionsduell</option>
+                <option value="BestOf">Best-of-Serie</option>
+            </select>
+        </label>
+        <button type="submit">Raum erstellen</button>
+    </form>
+</section>

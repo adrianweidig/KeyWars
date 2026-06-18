@@ -1,0 +1,16 @@
+@page "/profil/{id:guid}"
+@model KeyWars.Pages.Profil.PublicModel
+@{
+    ViewData["Title"] = Model.Profile.DisplayName;
+}
+
+<section class="page-header">
+    <div>
+        <h1>@Model.Profile.DisplayName</h1>
+        <p class="lead">@Model.Profile.SamAccountName · Arena @Model.Profile.ArenaRating</p>
+    </div>
+</section>
+
+<section class="card">
+    <p>@(Model.Profile.Motto ?? "Noch kein Motto.")</p>
+</section>

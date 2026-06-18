@@ -1,0 +1,63 @@
+@page
+@model KeyWars.Pages.IndexModel
+@{
+    ViewData["Title"] = "Start";
+}
+
+<section class="page-header">
+    <div>
+        <h1>Hallo, @Model.Profile.DisplayName</h1>
+        <p class="lead">@Model.Recommendation.Text</p>
+    </div>
+    <div class="action-row">
+        <a class="button" asp-page="/Spielen/Index">Sofort tippen</a>
+        <a class="button secondary" asp-page="/Arena/Neu">Live-Raum starten</a>
+        <a class="button secondary" asp-page="/Herausforderungen/Neu">Gruppe herausfordern</a>
+        <a class="button secondary" asp-page="/Texte/Neu">Eigenen Text verwenden</a>
+    </div>
+</section>
+
+<section class="dashboard-grid">
+    <div class="card">
+        <h2>Heute</h2>
+        <div class="metric-row">
+            <div class="metric"><span>Letzte WPM</span><strong>@Model.LastWpm</strong></div>
+            <div class="metric"><span>Genauigkeit</span><strong>@Model.LastAccuracy %</strong></div>
+            <div class="metric"><span>Serie</span><strong>@Model.Profile.CurrentStreakDays Tage</strong></div>
+            <div class="metric"><span>Arena</span><strong>@Model.Profile.ArenaRating</strong></div>
+        </div>
+        <h3>Tagesmissionen</h3>
+        <div class="grid">
+            @foreach (var mission in Model.Missions)
+            {
+                <div class="metric">
+                    <strong>@mission.Title</strong>
+                    <span>@mission.CurrentValue / @mission.TargetValue</span>
+                    <p class="muted">@mission.Description</p>
+                </div>
+            }
+        </div>
+    </div>
+    <aside class="card">
+        <h2>Offene Wettbewerbe</h2>
+        @if (Model.Challenges.Count == 0)
+        {
+            <p class="muted">Aktuell warten keine Gruppenherausforderungen.</p>
+        }
+        else
+        {
+            <table class="table">
+                <thead><tr><th>Titel</th><th>Status</th></tr></thead>
+                <tbody>
+                @foreach (var challenge in Model.Challenges)
+                {
+                    <tr>
+                        <td><a asp-page="/Herausforderungen/Details" asp-route-id="@challenge.Id">@challenge.Title</a></td>
+                        <td><span class="pill">@challenge.Status</span></td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        }
+    </aside>
+</section>

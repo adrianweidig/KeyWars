@@ -1,0 +1,10 @@
+@page "/texte/{id:guid}/kopieren"
+@model KeyWars.Pages.Texte.KopierenModel
+@{
+    ViewData["Title"] = "Text kopieren";
+}
+
+<section class="card">
+    <p>Der Text wurde in deine Bibliothek kopiert.</p>
+    <a class="button" asp-page="/Texte/Details" asp-route-id="@Model.NewId">Öffnen</a>
+</section>

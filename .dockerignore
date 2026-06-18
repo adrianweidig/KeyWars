@@ -1,0 +1,15 @@
+.git
+.dotnet
+.dotnet-install
+**/bin
+**/obj
+App_Data
+TestResults
+coverage
+*.log
+*.db
+*.db-wal
+*.db-shm
+*.7z
+*.tar
+*.tar.gz

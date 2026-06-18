@@ -1,0 +1,37 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Restore
+        run: dotnet restore --locked-mode
+      - name: Format
+        run: dotnet format --verify-no-changes --no-restore
+      - name: Build
+        run: dotnet build -c Release --no-restore
+      - name: Test
+        run: dotnet test -c Release --no-build --collect:"XPlat Code Coverage"
+      - name: Docker build smoke
+        run: docker build -t keywars:ci .
+      - name: Compose config
+        run: docker compose --env-file .env.example config
+      - name: Runtime asset check
+        shell: bash
+        run: |
+          if grep -RInE 'https?://|//cdn|fonts.googleapis|unpkg|jsdelivr' src/KeyWars/Pages src/KeyWars/wwwroot; then
+            echo "External runtime asset reference found"
+            exit 1
+          fi

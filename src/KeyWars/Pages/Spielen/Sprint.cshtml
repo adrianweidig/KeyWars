@@ -1,0 +1,28 @@
+@page "/spielen/sprint"
+@model KeyWars.Pages.Spielen.SprintModel
+@{
+    ViewData["Title"] = "Sprint";
+}
+
+<section class="page-header">
+    <div>
+        <h1>Sprint</h1>
+        <p class="lead">Zeitmodus mit deutschen Wörtern. Wähle die Dauer und starte die Runde.</p>
+    </div>
+</section>
+
+<section class="grid">
+@foreach (var item in Model.Modes)
+{
+    <article class="card" data-typing-app data-mode="@item.Mode" data-seconds="@item.Seconds" data-words="120">
+        <h2>@item.Seconds Sekunden</h2>
+        <div class="typing-target" data-target></div>
+        <label>
+            Eingabe
+            <textarea class="typing-input" data-input disabled autocapitalize="off" autocomplete="off" spellcheck="false"></textarea>
+        </label>
+        <button type="button" data-start>Starten</button>
+        <div data-result></div>
+    </article>
+}
+</section>

@@ -1,0 +1,23 @@
+@page "/arena/beitreten"
+@model KeyWars.Pages.Arena.BeitretenModel
+@{
+    ViewData["Title"] = "Raum beitreten";
+}
+
+<section class="page-header">
+    <div>
+        <h1>Mit Raumcode beitreten</h1>
+        <p class="lead">Gib den sechsstelligen Raumcode ein.</p>
+    </div>
+</section>
+
+<section class="card">
+    <form method="post" class="form-grid">
+        <div asp-validation-summary="ModelOnly"></div>
+        <label>
+            Raumcode
+            <input asp-for="Code" maxlength="12" />
+        </label>
+        <button type="submit">Beitreten</button>
+    </form>
+</section>

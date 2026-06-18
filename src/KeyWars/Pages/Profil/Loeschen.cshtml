@@ -1,0 +1,13 @@
+@page "/profil/loeschen"
+@model KeyWars.Pages.Profil.LoeschenModel
+@{
+    ViewData["Title"] = "Profil löschen";
+}
+
+<section class="card">
+    <h1>Profil löschen</h1>
+    <p>Dein lokales Profil wird anonymisiert. Historische Gruppenergebnisse bleiben ohne personenbezogene Bearbeitbarkeit erhalten.</p>
+    <form method="post">
+        <button type="submit" class="warning">Profil löschen und abmelden</button>
+    </form>
+</section>

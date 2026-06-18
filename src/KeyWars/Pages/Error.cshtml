@@ -1,0 +1,14 @@
+@page
+@model ErrorModel
+@{
+    ViewData["Title"] = "Fehler";
+}
+
+<section class="card">
+    <h1>Etwas ist schiefgelaufen.</h1>
+    <p>Der Vorgang konnte nicht abgeschlossen werden. Bitte versuche es erneut oder starte die betroffene Runde neu, falls sie nicht offiziell gewertet wurde.</p>
+    @if (Model.ShowRequestId)
+    {
+        <p class="muted">Korrelations-ID: <code>@Model.RequestId</code></p>
+    }
+</section>

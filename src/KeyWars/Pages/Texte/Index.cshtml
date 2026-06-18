@@ -1,0 +1,30 @@
+@page "/texte"
+@model KeyWars.Pages.Texte.IndexModel
+@{
+    ViewData["Title"] = "Texte";
+}
+
+<section class="page-header">
+    <div>
+        <h1>Texte</h1>
+        <p class="lead">Eigene Texte bleiben privat oder werden organisationsweit für Training und Herausforderungen freigegeben.</p>
+    </div>
+    <div class="action-row">
+        <a class="button" asp-page="/Texte/Neu">Neuer Text</a>
+        <a class="button secondary" asp-page="/Texte/Sammlungen/Neu">Sammlung anlegen</a>
+    </div>
+</section>
+
+<section class="grid">
+    @foreach (var text in Model.Texts)
+    {
+        <article class="card">
+            <h2>@text.Title</h2>
+            <p class="muted">@text.CharacterCount Zeichen · @(text.IsStandard ? "Standard" : text.Visibility)</p>
+            <div class="action-row">
+                <a class="button secondary" asp-page="/Texte/Details" asp-route-id="@text.Id">Ansehen</a>
+                <a class="button secondary" asp-page="/Spielen/Text" asp-route-id="@text.Id">Trainieren</a>
+            </div>
+        </article>
+    }
+</section>

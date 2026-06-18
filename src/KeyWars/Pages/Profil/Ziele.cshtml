@@ -1,0 +1,23 @@
+@page "/profil/ziele"
+@model KeyWars.Pages.Profil.ZieleModel
+@{
+    ViewData["Title"] = "Ziele";
+}
+
+<section class="page-header">
+    <div>
+        <h1>Ziele</h1>
+        <p class="lead">Tagesmissionen und Wochenziele stärken kurze, wiederholbare Trainingsschleifen.</p>
+    </div>
+</section>
+
+<section class="grid">
+@foreach (var mission in Model.Missions)
+{
+    <article class="card">
+        <h2>@mission.Title</h2>
+        <p>@mission.Description</p>
+        <p class="muted">@mission.CurrentValue / @mission.TargetValue · @mission.XpReward XP</p>
+    </article>
+}
+</section>

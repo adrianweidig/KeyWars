@@ -1,0 +1,22 @@
+@page "/texte/sammlungen/{id:guid}"
+@model KeyWars.Pages.Texte.Sammlungen.DetailsModel
+@{
+    ViewData["Title"] = Model.Collection.Name;
+}
+
+<section class="page-header">
+    <div>
+        <h1>@Model.Collection.Name</h1>
+        <p class="lead">@Model.Collection.Description</p>
+    </div>
+</section>
+
+<section class="grid">
+@foreach (var text in Model.Texts)
+{
+    <article class="card">
+        <h2>@text.Title</h2>
+        <a class="button secondary" asp-page="/Spielen/Text" asp-route-id="@text.Id">Trainieren</a>
+    </article>
+}
+</section>

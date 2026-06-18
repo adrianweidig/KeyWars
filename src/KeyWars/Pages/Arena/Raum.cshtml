@@ -1,0 +1,53 @@
+@page "/arena/{id:guid}"
+@model KeyWars.Pages.Arena.RaumModel
+@{
+    ViewData["Title"] = Model.Snapshot.Title;
+}
+
+<section class="page-header">
+    <div>
+        <h1>@Model.Snapshot.Title</h1>
+        <p class="lead">Code @Model.Snapshot.Code · @Model.Snapshot.Mode · @Model.Snapshot.Participants.Count Personen</p>
+    </div>
+    <div class="action-row">
+        <form method="post" asp-page-handler="Ready">
+            <button type="submit" class="secondary">Bereit</button>
+        </form>
+        <form method="post" asp-page-handler="Start">
+            <button type="submit">Starten</button>
+        </form>
+        <button type="button" class="secondary" data-refresh-room>Aktualisieren</button>
+    </div>
+</section>
+
+<section class="dashboard-grid" data-room-snapshot>
+    <div class="card">
+        <h2>Rennen</h2>
+        <p class="muted">Zieltext</p>
+        <div class="typing-target">@Model.Snapshot.TargetText</div>
+        <form method="post" asp-page-handler="Finish" class="form-grid" style="margin-top: 12px;">
+            <label>
+                Eingabe
+                <textarea asp-for="Input" class="typing-input" autocapitalize="off" autocomplete="off" spellcheck="false"></textarea>
+            </label>
+            <button type="submit">Zieleinlauf speichern</button>
+        </form>
+    </div>
+    <aside class="card">
+        <h2>Teilnehmende</h2>
+        <table class="table">
+            <thead><tr><th>Name</th><th>Status</th><th>Fortschritt</th><th>Platz</th></tr></thead>
+            <tbody>
+            @foreach (var participant in Model.Snapshot.Participants)
+            {
+                <tr>
+                    <td>@participant.DisplayName</td>
+                    <td><span class="pill">@participant.Status</span></td>
+                    <td>@participant.CorrectCharacters</td>
+                    <td>@(participant.Placement?.ToString() ?? "-")</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </aside>
+</section>

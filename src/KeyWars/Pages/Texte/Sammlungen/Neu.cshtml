@@ -1,0 +1,43 @@
+@page "/texte/sammlungen/neu"
+@model KeyWars.Pages.Texte.Sammlungen.NeuModel
+@{
+    ViewData["Title"] = "Sammlung anlegen";
+}
+
+<section class="page-header">
+    <div>
+        <h1>Sammlung anlegen</h1>
+        <p class="lead">Wähle sichtbare Texte aus und entscheide, ob die Sammlung privat bleibt.</p>
+    </div>
+</section>
+
+<section class="card">
+    <form method="post" class="form-grid">
+        <label>
+            Name
+            <input asp-for="Input.Name" />
+        </label>
+        <label>
+            Beschreibung
+            <input asp-for="Input.Description" />
+        </label>
+        <label>
+            Sichtbarkeit
+            <select asp-for="Input.Visibility">
+                <option value="Private">Privat</option>
+                <option value="Organization">Organisationsweit freigeben</option>
+            </select>
+        </label>
+        <fieldset>
+            <legend>Texte</legend>
+            @foreach (var text in Model.Texts)
+            {
+                <label style="display:flex; align-items:center; gap:8px; font-weight:400;">
+                    <input type="checkbox" name="Input.TextIds" value="@text.Id" style="width:auto;" />
+                    @text.Title
+                </label>
+            }
+        </fieldset>
+        <button type="submit">Sammlung speichern</button>
+    </form>
+</section>

@@ -1,0 +1,55 @@
+@page "/herausforderungen/neu"
+@model KeyWars.Pages.Herausforderungen.NeuModel
+@{
+    ViewData["Title"] = "Neue Herausforderung";
+}
+
+<section class="page-header">
+    <div>
+        <h1>Gruppe herausfordern</h1>
+        <p class="lead">Wähle mindestens eine weitere Person. Noch nie angemeldete AD-Konten erscheinen hier bewusst nicht.</p>
+    </div>
+</section>
+
+<section class="card">
+    <form method="post" class="form-grid">
+        <div asp-validation-summary="ModelOnly"></div>
+        <label>
+            Titel
+            <input asp-for="Input.Title" />
+        </label>
+        <label>
+            Text
+            <select asp-for="Input.TrainingTextId">
+                @foreach (var text in Model.Texts)
+                {
+                    <option value="@text.Id" selected="@(text.Id == Model.Input.TrainingTextId)">@text.Title</option>
+                }
+            </select>
+        </label>
+        <label>
+            Modus
+            <select asp-for="Input.Mode">
+                <option value="Classic">Klassisches Rennen</option>
+                <option value="TimeDuel">Zeitduell</option>
+                <option value="Precision">Präzisionsduell</option>
+                <option value="BestOf">Best-of-Serie</option>
+            </select>
+        </label>
+        <label>
+            Ablauf in Tagen
+            <input asp-for="Input.ExpiryDays" type="number" min="1" max="30" />
+        </label>
+        <fieldset>
+            <legend>Personen</legend>
+            @foreach (var person in Model.People)
+            {
+                <label style="display:flex; align-items:center; gap:8px; font-weight:400;">
+                    <input type="checkbox" name="Input.ParticipantIds" value="@person.Id" style="width:auto;" />
+                    @person.DisplayName <span class="muted">(@person.SamAccountName)</span>
+                </label>
+            }
+        </fieldset>
+        <button type="submit">Herausforderung senden</button>
+    </form>
+</section>

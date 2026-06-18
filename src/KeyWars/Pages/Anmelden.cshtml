@@ -1,0 +1,27 @@
+@page "/anmelden"
+@model KeyWars.Pages.AnmeldenModel
+@{
+    ViewData["Title"] = "Anmelden";
+}
+
+<section class="page-header">
+    <div>
+        <h1>Anmelden</h1>
+        <p class="lead">Melde dich mit deinem Active-Directory-Benutzernamen und Passwort an. Dein lokales KeyWars-Profil entsteht automatisch beim ersten erfolgreichen Login.</p>
+    </div>
+</section>
+
+<section class="card">
+    <form method="post" class="form-grid" autocomplete="off">
+        <div asp-validation-summary="ModelOnly"></div>
+        <label>
+            Benutzername
+            <input asp-for="Input.Username" autocomplete="username" autofocus />
+        </label>
+        <label>
+            Passwort
+            <input asp-for="Input.Password" type="password" autocomplete="current-password" />
+        </label>
+        <button type="submit">Anmelden</button>
+    </form>
+</section>

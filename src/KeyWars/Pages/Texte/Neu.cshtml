@@ -1,0 +1,51 @@
+@page "/texte/neu"
+@model KeyWars.Pages.Texte.NeuModel
+@{
+    ViewData["Title"] = "Neuer Text";
+}
+
+<section class="page-header">
+    <div>
+        <h1>Neuer Text</h1>
+        <p class="lead">Füge einen Text per Eingabe ein oder lade eine `.txt`-Datei hoch. Nutzertexte sind nicht global ratingfähig.</p>
+    </div>
+</section>
+
+<section class="card">
+    <form method="post" class="form-grid">
+        <div asp-validation-summary="ModelOnly"></div>
+        <label>
+            Titel
+            <input asp-for="Input.Title" />
+        </label>
+        <label>
+            Sichtbarkeit
+            <select asp-for="Input.Visibility">
+                <option value="Private">Privat</option>
+                <option value="Organization">Organisationsweit freigeben</option>
+            </select>
+        </label>
+        <label>
+            Text
+            <textarea asp-for="Input.Body"></textarea>
+        </label>
+        <button type="submit">Text speichern</button>
+    </form>
+</section>
+
+<section class="card" style="margin-top: 16px;">
+    <form method="post" enctype="multipart/form-data" asp-page-handler="Upload" class="form-grid">
+        <label>
+            `.txt`-Datei
+            <input type="file" asp-for="Upload" accept=".txt,text/plain" />
+        </label>
+        <label>
+            Sichtbarkeit
+            <select asp-for="UploadVisibility">
+                <option value="Private">Privat</option>
+                <option value="Organization">Organisationsweit freigeben</option>
+            </select>
+        </label>
+        <button type="submit">Datei hochladen</button>
+    </form>
+</section>

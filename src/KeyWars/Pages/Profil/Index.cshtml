@@ -1,0 +1,44 @@
+@page "/profil"
+@model KeyWars.Pages.Profil.IndexModel
+@{
+    ViewData["Title"] = "Profil";
+}
+
+<section class="page-header">
+    <div>
+        <h1>@Model.Profile.DisplayName</h1>
+        <p class="lead">@Model.Profile.SamAccountName · @Model.Profile.Department · @Model.Profile.Title</p>
+    </div>
+    <div class="action-row">
+        <a class="button secondary" asp-page="/Profil/Einstellungen">Einstellungen</a>
+        <a class="button secondary" asp-page="/Profil/Erfolge">Erfolge</a>
+    </div>
+</section>
+
+<section class="grid">
+    <article class="card">
+        <h2>Fortschritt</h2>
+        <div class="metric-row">
+            <div class="metric"><span>Level</span><strong>@Model.Profile.Level</strong></div>
+            <div class="metric"><span>XP</span><strong>@Model.Profile.ExperiencePoints</strong></div>
+            <div class="metric"><span>Rating</span><strong>@Model.Profile.ArenaRating</strong></div>
+            <div class="metric"><span>Serie</span><strong>@Model.Profile.CurrentStreakDays</strong></div>
+        </div>
+    </article>
+    <article class="card">
+        <h2>Letzte Versuche</h2>
+        <table class="table">
+            <thead><tr><th>Modus</th><th>WPM</th><th>Genauigkeit</th></tr></thead>
+            <tbody>
+            @foreach (var attempt in Model.Attempts)
+            {
+                <tr>
+                    <td>@attempt.Mode</td>
+                    <td>@attempt.Wpm.ToString("0.0")</td>
+                    <td>@attempt.Accuracy.ToString("0.0") %</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </article>
+</section>

@@ -1,0 +1,38 @@
+@page "/profil/einstellungen"
+@model KeyWars.Pages.Profil.EinstellungenModel
+@{
+    ViewData["Title"] = "Einstellungen";
+}
+
+<section class="page-header">
+    <div>
+        <h1>Einstellungen</h1>
+        <p class="lead">AD-Stammdaten sind unveränderlich. Du kannst nur KeyWars-Vorlieben bearbeiten.</p>
+    </div>
+</section>
+
+<section class="card">
+    <form method="post" class="form-grid">
+        <label>
+            Motto
+            <input asp-for="Input.Motto" maxlength="120" />
+        </label>
+        <label>
+            Bevorzugter Modus
+            <select asp-for="Input.PreferredMode" asp-items="Html.GetEnumSelectList<TrainingMode>()"></select>
+        </label>
+        <label style="display:flex; gap:8px; align-items:center; font-weight:400;">
+            <input type="checkbox" asp-for="Input.LeaderboardVisible" style="width:auto;" />
+            In Ranglisten sichtbar
+        </label>
+        <label style="display:flex; gap:8px; align-items:center; font-weight:400;">
+            <input type="checkbox" asp-for="Input.GhostSharingEnabled" style="width:auto;" />
+            Bestleistungen als Rivalen-Geist freigeben
+        </label>
+        <label style="display:flex; gap:8px; align-items:center; font-weight:400;">
+            <input type="checkbox" asp-for="Input.ReducedMotion" style="width:auto;" />
+            Reduzierte Bewegung
+        </label>
+        <button type="submit">Speichern</button>
+    </form>
+</section>

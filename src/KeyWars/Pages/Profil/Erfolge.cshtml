@@ -1,0 +1,23 @@
+@page "/profil/erfolge"
+@model KeyWars.Pages.Profil.ErfolgeModel
+@{
+    ViewData["Title"] = "Erfolge";
+}
+
+<section class="page-header">
+    <div>
+        <h1>Erfolge</h1>
+        <p class="lead">Erfolge würdigen Lernleistung, ohne Shop, Währung oder künstliche Knappheit.</p>
+    </div>
+</section>
+
+<section class="grid">
+@foreach (var achievement in Model.Achievements)
+{
+    <article class="card">
+        <h2>@achievement.Title</h2>
+        <p>@achievement.Description</p>
+        <p class="muted">@achievement.UnlockedAt.LocalDateTime.ToString("g")</p>
+    </article>
+}
+</section>

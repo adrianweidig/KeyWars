@@ -1,0 +1,16 @@
+@page "/profil/export"
+@model KeyWars.Pages.Profil.ExportModel
+@{
+    ViewData["Title"] = "Selbstexport";
+}
+
+<section class="page-header">
+    <div>
+        <h1>Selbstexport</h1>
+        <p class="lead">Der Export enthält dein lokales Profil, Versuche, Missionen und Erfolge.</p>
+    </div>
+</section>
+
+<section class="card">
+    <pre style="white-space: pre-wrap; font: inherit;">@Model.Json</pre>
+</section>

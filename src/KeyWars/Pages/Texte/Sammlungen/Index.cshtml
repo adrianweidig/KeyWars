@@ -1,0 +1,24 @@
+@page "/texte/sammlungen"
+@model KeyWars.Pages.Texte.Sammlungen.IndexModel
+@{
+    ViewData["Title"] = "Sammlungen";
+}
+
+<section class="page-header">
+    <div>
+        <h1>Textsammlungen</h1>
+        <p class="lead">Sammlungen bündeln wiederverwendbare Texte für Training und Herausforderungen.</p>
+    </div>
+    <a class="button" asp-page="/Texte/Sammlungen/Neu">Sammlung anlegen</a>
+</section>
+
+<section class="grid">
+@foreach (var collection in Model.Collections)
+{
+    <article class="card">
+        <h2>@collection.Name</h2>
+        <p class="muted">@collection.Visibility</p>
+        <a class="button secondary" asp-page="/Texte/Sammlungen/Details" asp-route-id="@collection.Id">Öffnen</a>
+    </article>
+}
+</section>

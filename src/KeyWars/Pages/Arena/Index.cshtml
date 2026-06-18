@@ -1,0 +1,27 @@
+@page "/arena"
+@model KeyWars.Pages.Arena.IndexModel
+@{
+    ViewData["Title"] = "Arena";
+}
+
+<section class="page-header">
+    <div>
+        <h1>Live-Arena</h1>
+        <p class="lead">Räume laufen in dieser KeyWars-Instanz im Arbeitsspeicher. Ein Neustart bricht laufende Runden ohne Ratingänderung ab.</p>
+    </div>
+    <div class="action-row">
+        <a class="button" asp-page="/Arena/Neu">Raum starten</a>
+        <a class="button secondary" asp-page="/Arena/Beitreten">Mit Code beitreten</a>
+    </div>
+</section>
+
+<section class="grid">
+@foreach (var room in Model.Rooms)
+{
+    <article class="card">
+        <h2>@room.Title</h2>
+        <p class="muted">@room.Participants.Count Personen · Code @room.Code</p>
+        <a class="button secondary" asp-page="/Arena/Raum" asp-route-id="@room.RoomId">Öffnen</a>
+    </article>
+}
+</section>

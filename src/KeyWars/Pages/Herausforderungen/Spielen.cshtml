@@ -1,0 +1,22 @@
+@page "/herausforderungen/{id:guid}/spielen"
+@model KeyWars.Pages.Herausforderungen.SpielenModel
+@{
+    ViewData["Title"] = "Herausforderung spielen";
+}
+
+<section class="page-header">
+    <div>
+        <h1>@Model.CurrentChallenge.Title</h1>
+        <p class="lead">Ein offizieller Challenge-Versuch kann nicht freiwillig neu gestartet werden.</p>
+    </div>
+</section>
+
+<section class="card" data-typing-app data-mode="Text" data-text-id="@Model.Text.Id" data-challenge-id="@Model.CurrentChallenge.Id">
+    <div class="typing-target" data-target></div>
+    <label>
+        Eingabe
+        <textarea class="typing-input" data-input disabled autocapitalize="off" autocomplete="off" spellcheck="false"></textarea>
+    </label>
+    <button type="button" data-start>Starten</button>
+    <div data-result></div>
+</section>

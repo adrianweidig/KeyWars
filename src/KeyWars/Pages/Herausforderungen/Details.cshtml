@@ -1,0 +1,35 @@
+@page "/herausforderungen/{id:guid}"
+@model KeyWars.Pages.Herausforderungen.DetailsModel
+@{
+    ViewData["Title"] = Model.CurrentChallenge.Title;
+}
+
+<section class="page-header">
+    <div>
+        <h1>@Model.CurrentChallenge.Title</h1>
+        <p class="lead">@Model.Text.Title · @Model.CurrentChallenge.Mode · Ablauf @Model.CurrentChallenge.ExpiresAt.LocalDateTime.ToString("g")</p>
+    </div>
+    <div class="action-row">
+        <form method="post" asp-page-handler="Join">
+            <button type="submit" class="secondary">Annehmen</button>
+        </form>
+        <a class="button" asp-page="/Herausforderungen/Spielen" asp-route-id="@Model.CurrentChallenge.Id">Runde spielen</a>
+    </div>
+</section>
+
+<section class="card">
+    <table class="table">
+        <thead><tr><th>Person</th><th>Status</th><th>Platz</th><th>Rating</th></tr></thead>
+        <tbody>
+        @foreach (var row in Model.Rows)
+        {
+            <tr>
+                <td>@row.DisplayName</td>
+                <td><span class="pill">@row.Status</span></td>
+                <td>@(row.Placement?.ToString() ?? "-")</td>
+                <td>@row.RatingDelta.ToString("+0;-0;0")</td>
+            </tr>
+        }
+        </tbody>
+    </table>
+</section>

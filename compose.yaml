@@ -1,0 +1,44 @@
+services:
+  keywars:
+    image: ${KEYWARS_IMAGE:-ghcr.io/theheadless/keywars}:${KEYWARS_VERSION:-latest}
+    container_name: keywars
+    restart: unless-stopped
+    ports:
+      - "${KEYWARS_BIND_ADDRESS:-0.0.0.0}:${KEYWARS_PORT:-8080}:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_HTTP_PORTS: "8080"
+      KEYWARS__DATA__DIRECTORY: /data
+      KEYWARS__LDAP__URLS: ${KEYWARS_LDAP_URLS:?LDAP URLs required}
+      KEYWARS__LDAP__BASE_DN: ${KEYWARS_LDAP_BASE_DN:?LDAP Base DN required}
+      KEYWARS__LDAP__UPN_SUFFIX: ${KEYWARS_LDAP_UPN_SUFFIX:?LDAP UPN suffix required}
+      KEYWARS__LDAP__NETBIOS_DOMAIN: ${KEYWARS_LDAP_NETBIOS_DOMAIN:-}
+      KEYWARS__LDAP__CA_CERTIFICATE_PATH: ${KEYWARS_LDAP_CA_CERTIFICATE_PATH:-}
+      KEYWARS__APP__INSTANCE_NAME: ${KEYWARS_INSTANCE_NAME:-KeyWars}
+      KEYWARS__APP__TIME_ZONE: ${KEYWARS_TIME_ZONE:-Europe/Berlin}
+      KEYWARS__CHALLENGES__MAX_PARTICIPANTS: ${KEYWARS_MAX_CHALLENGE_PARTICIPANTS:-64}
+      KEYWARS__LIVE__MAX_PARTICIPANTS_PER_ROOM: ${KEYWARS_MAX_LIVE_PARTICIPANTS:-64}
+      KEYWARS__LIVE__MAX_SPECTATORS_PER_ROOM: ${KEYWARS_MAX_LIVE_SPECTATORS:-128}
+      KEYWARS__LIVE__MAX_CONCURRENT_ROOMS: ${KEYWARS_MAX_LIVE_ROOMS:-200}
+      KEYWARS__LIVE__PROGRESS_BROADCAST_HZ: ${KEYWARS_LIVE_BROADCAST_HZ:-10}
+      KEYWARS__LIVE__RECONNECT_GRACE_SECONDS: ${KEYWARS_LIVE_RECONNECT_SECONDS:-30}
+      KEYWARS__BACKUP__ENABLED: ${KEYWARS_BACKUP_ENABLED:-true}
+      KEYWARS__BACKUP__RETENTION_DAYS: ${KEYWARS_BACKUP_RETENTION_DAYS:-14}
+    volumes:
+      - keywars-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "dotnet", "KeyWars.dll", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  keywars-data:

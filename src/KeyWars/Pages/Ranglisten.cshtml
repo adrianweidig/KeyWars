@@ -1,0 +1,30 @@
+@page "/ranglisten"
+@model KeyWars.Pages.RanglistenModel
+@{
+    ViewData["Title"] = "Ranglisten";
+}
+
+<section class="page-header">
+    <div>
+        <h1>Ranglisten</h1>
+        <p class="lead">Sichtbar sind nur Profile, die Ranglisten nicht deaktiviert haben.</p>
+    </div>
+</section>
+
+<section class="card">
+    <table class="table">
+        <thead><tr><th>Platz</th><th>Person</th><th>Arena</th><th>Saisonpunkte</th><th>Level</th></tr></thead>
+        <tbody>
+        @for (var i = 0; i < Model.Rows.Count; i++)
+        {
+            <tr>
+                <td>@(i + 1)</td>
+                <td>@Model.Rows[i].DisplayName</td>
+                <td>@Model.Rows[i].ArenaRating</td>
+                <td>@Model.Rows[i].SeasonPoints</td>
+                <td>@Model.Rows[i].Level</td>
+            </tr>
+        }
+        </tbody>
+    </table>
+</section>

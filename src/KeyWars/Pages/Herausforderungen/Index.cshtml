@@ -1,0 +1,30 @@
+@page "/herausforderungen"
+@model KeyWars.Pages.Herausforderungen.IndexModel
+@{
+    ViewData["Title"] = "Herausforderungen";
+}
+
+<section class="page-header">
+    <div>
+        <h1>Herausforderungen</h1>
+        <p class="lead">Asynchrone Gruppenrennen mit zwei bis vielen Personen aus bereits angemeldeten KeyWars-Profilen.</p>
+    </div>
+    <a class="button" asp-page="/Herausforderungen/Neu">Neue Herausforderung</a>
+</section>
+
+<section class="card">
+    <table class="table">
+        <thead><tr><th>Titel</th><th>Modus</th><th>Status</th><th>Ende</th></tr></thead>
+        <tbody>
+        @foreach (var challenge in Model.Challenges)
+        {
+            <tr>
+                <td><a asp-page="/Herausforderungen/Details" asp-route-id="@challenge.Id">@challenge.Title</a></td>
+                <td>@challenge.Mode</td>
+                <td><span class="pill">@challenge.Status</span></td>
+                <td>@challenge.ExpiresAt.LocalDateTime.ToString("g")</td>
+            </tr>
+        }
+        </tbody>
+    </table>
+</section>
