@@ -10,6 +10,11 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
 {
     public async Task ApplyAttemptAsync(Guid profileId, TypingAttempt attempt, string targetText, CancellationToken cancellationToken = default)
     {
+        await ApplyAttemptAsync(profileId, attempt, [], cancellationToken);
+    }
+
+    public async Task ApplyAttemptAsync(Guid profileId, TypingAttempt attempt, IReadOnlyList<TypingError> errors, CancellationToken cancellationToken = default)
+    {
         if (!attempt.Completed || attempt.ExperienceAwarded)
         {
             return;
@@ -48,7 +53,12 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
             await UnlockAchievementAsync(profileId, "praezise", "Präzise Hände", "Ein gültiger Versuch mit mindestens 98 % Genauigkeit.", cancellationToken);
         }
 
-        var patterns = ExtractPatterns(targetText).Take(80).ToList();
+        var patterns = ExtractErrorPatterns(errors).Distinct(StringComparer.Ordinal).Take(80).ToList();
+        if (patterns.Count == 0)
+        {
+            return;
+        }
+
         var observations = await db.WeaknessObservations
             .Where(item => item.UserProfileId == profileId && patterns.Contains(item.Pattern))
             .ToDictionaryAsync(item => item.Pattern, cancellationToken);
@@ -63,12 +73,8 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
             }
 
             observation.Attempts++;
-            if (attempt.IncorrectCharacters > 0 && pattern.Length > 1)
-            {
-                observation.Errors++;
-            }
-
-            observation.AverageMilliseconds = observation.AverageMilliseconds == 0 ? 350 : (observation.AverageMilliseconds * 0.9d) + 35d;
+            observation.Errors++;
+            observation.AverageMilliseconds = observation.AverageMilliseconds == 0 ? attempt.MeanWordMilliseconds : (observation.AverageMilliseconds * 0.8d) + (attempt.MeanWordMilliseconds * 0.2d);
             observation.LastSeenAt = timeProvider.GetUtcNow();
         }
     }
@@ -147,23 +153,23 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
         }
     }
 
-    private static IEnumerable<string> ExtractPatterns(string text)
+    private static IEnumerable<string> ExtractErrorPatterns(IReadOnlyList<TypingError> errors)
     {
-        var elements = TypingEngine.SplitGraphemes(text);
-        foreach (var element in elements)
+        foreach (var error in errors)
         {
-            if (!string.IsNullOrWhiteSpace(element))
+            if (!string.IsNullOrWhiteSpace(error.Expected))
             {
-                yield return element;
+                yield return error.Expected;
             }
-        }
 
-        for (var index = 0; index < elements.Count - 1; index++)
-        {
-            var pattern = elements[index] + elements[index + 1];
-            if (!string.IsNullOrWhiteSpace(pattern))
+            if (error.Kind == TypingErrorKind.Insertion && !string.IsNullOrWhiteSpace(error.Actual))
             {
-                yield return pattern;
+                yield return error.Actual;
+            }
+
+            if (!string.IsNullOrWhiteSpace(error.Pattern))
+            {
+                yield return error.Pattern;
             }
         }
     }

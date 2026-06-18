@@ -174,6 +174,48 @@ public sealed class ProfileAndPersistenceTests
     }
 
     [Fact]
+    public async Task FinishPersistsWordTimingAndActualErrorPatternsOnly()
+    {
+        await using var context = await AttemptTestContext.CreateAsync();
+        await using var db = new KeyWarsDbContext(context.Options);
+        const string textBody = "eins zwei drei";
+        var text = new TrainingText
+        {
+            OwnerProfileId = context.ProfileId,
+            Title = "Test",
+            Body = textBody,
+            CharacterCount = TypingEngine.SplitGraphemes(textBody).Count
+        };
+        db.TrainingTexts.Add(text);
+        await db.SaveChangesAsync();
+        var service = context.CreateService(db);
+
+        var session = await service.StartAsync(context.ProfileId, new StartAttemptRequest(TrainingMode.Sprint60, text.Id, 60, null));
+        await service.BeginAsync(context.ProfileId, new BeginAttemptRequest(session.Id, session.Nonce));
+        context.Time.Advance(TimeSpan.FromSeconds(10));
+        var attempt = await service.FinishAsync(
+            context.ProfileId,
+            new FinishAttemptRequest(session.Id, "eins xwei drei", 0, 0, 10_000)
+            {
+                Nonce = session.Nonce,
+                WordDurationsMilliseconds = [1000, 1500, 800]
+            });
+
+        var error = await db.TypingAttemptErrors.SingleAsync(item => item.TypingAttemptId == attempt.Id);
+        var observations = await db.WeaknessObservations.Where(item => item.UserProfileId == context.ProfileId).ToListAsync();
+
+        Assert.Equal(1, attempt.IncorrectCharacters);
+        Assert.Equal(3, attempt.ConsistencySampleCount);
+        Assert.True(attempt.WordTimingVariation > 0);
+        Assert.Equal(TypingErrorKind.Substitution, error.Kind);
+        Assert.Equal("z", error.Expected);
+        Assert.Equal("x", error.Actual);
+        Assert.Contains(observations, item => item.Pattern == "z" && item.Errors == 1);
+        Assert.Contains(observations, item => item.Pattern == "zw" && item.Errors == 1);
+        Assert.DoesNotContain(observations, item => item.Pattern == "dr");
+    }
+
+    [Fact]
     public async Task ExpiredPreparedAttemptIsCleanedAndMarkedExpired()
     {
         await using var context = await AttemptTestContext.CreateAsync();

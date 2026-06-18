@@ -228,6 +228,12 @@ button:disabled {
   font-size: 1.45rem;
 }
 
+.metric-note {
+  color: var(--muted);
+  font-size: 0.92rem;
+  margin: 0 0 16px;
+}
+
 .muted {
   color: var(--muted);
 }

@@ -13,6 +13,7 @@ public sealed record AttemptBeginResponse(Guid AttemptId, DateTimeOffset Started
 public sealed record FinishAttemptRequest(Guid AttemptId, string Input, int Backspaces, int FocusLosses, int ClientDurationMilliseconds)
 {
     public string Nonce { get; init; } = "";
+    public IReadOnlyList<int>? WordDurationsMilliseconds { get; init; } = [];
 }
 
 public sealed record AttemptSession(
@@ -63,6 +64,8 @@ public sealed class AttemptService(
     private static readonly TimeSpan SessionLifetime = TimeSpan.FromHours(2);
     private static readonly TimeSpan MinimumDuration = TimeSpan.FromSeconds(1);
     private const int MaxInputOverrunCharacters = 20;
+    private const int MaxTimingSamples = 200;
+    private const int MaxPersistedErrors = 200;
 
     public async Task<AttemptSession> StartAsync(Guid profileId, StartAttemptRequest request, CancellationToken cancellationToken = default)
     {
@@ -169,7 +172,8 @@ public sealed class AttemptService(
         var timeMode = session.Mode is TrainingMode.Sprint15 or TrainingMode.Sprint30 or TrainingMode.Sprint60 or TrainingMode.Sprint120;
         var duration = NormalizeServerDuration(serverDuration, session.Mode);
         var input = NormalizeBoundedInput(session.Text, request.Input);
-        var metrics = typingEngine.Analyze(session.Text, input, duration, request.Backspaces, request.FocusLosses, timeMode);
+        var wordDurations = NormalizeTimingSamples(request.WordDurationsMilliseconds);
+        var metrics = typingEngine.Analyze(session.Text, input, duration, request.Backspaces, request.FocusLosses, timeMode, wordDurations);
         if (!timeMode && !metrics.Completed)
         {
             throw new InvalidOperationException("Der Zieltext ist noch nicht fehlerfrei abgeschlossen.");
@@ -190,9 +194,13 @@ public sealed class AttemptService(
         attempt.CharactersPerMinute = metrics.CharactersPerMinute;
         attempt.Accuracy = metrics.Accuracy;
         attempt.Consistency = metrics.Consistency;
+        attempt.ConsistencySampleCount = metrics.ConsistencySampleCount;
+        attempt.MeanWordMilliseconds = metrics.MeanWordMilliseconds;
+        attempt.WordTimingVariation = metrics.WordTimingVariation;
         attempt.Completed = metrics.Completed;
 
-        await motivationService.ApplyAttemptAsync(profileId, attempt, session.Text, cancellationToken);
+        PersistErrors(profileId, attempt.Id, metrics.Errors);
+        await motivationService.ApplyAttemptAsync(profileId, attempt, metrics.Errors, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         sessionStore.TryRemove(request.AttemptId, out _);
         return attempt;
@@ -315,6 +323,33 @@ public sealed class AttemptService(
         }
 
         return Math.Min(clientDurationMilliseconds, (int)SessionLifetime.TotalMilliseconds);
+    }
+
+    private static IReadOnlyList<int> NormalizeTimingSamples(IReadOnlyList<int>? samples)
+    {
+        return (samples ?? [])
+            .Where(value => value > 0)
+            .Take(MaxTimingSamples)
+            .Select(value => Math.Min(value, (int)SessionLifetime.TotalMilliseconds))
+            .ToArray();
+    }
+
+    private void PersistErrors(Guid profileId, Guid attemptId, IReadOnlyList<TypingError> errors)
+    {
+        foreach (var error in errors.Take(MaxPersistedErrors))
+        {
+            db.TypingAttemptErrors.Add(new TypingAttemptError
+            {
+                TypingAttemptId = attemptId,
+                UserProfileId = profileId,
+                Position = error.Position,
+                Kind = error.Kind,
+                Expected = error.Expected,
+                Actual = error.Actual,
+                Pattern = error.Pattern,
+                CreatedAt = timeProvider.GetUtcNow()
+            });
+        }
     }
 
     private static void ValidateSession(Guid profileId, string nonce, AttemptSession session)

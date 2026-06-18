@@ -119,10 +119,29 @@ public sealed class TypingAttempt
     public double CharactersPerMinute { get; set; }
     public double Accuracy { get; set; }
     public double Consistency { get; set; }
+    public int ConsistencySampleCount { get; set; }
+    public double MeanWordMilliseconds { get; set; }
+    public double WordTimingVariation { get; set; }
     public bool Completed { get; set; }
     public bool Official { get; set; }
     public bool LeaderboardEligible { get; set; }
     public bool ExperienceAwarded { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public sealed class TypingAttemptError
+{
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public Guid TypingAttemptId { get; set; }
+    public Guid UserProfileId { get; set; }
+    public int Position { get; set; }
+    public TypingErrorKind Kind { get; set; }
+    [MaxLength(32)]
+    public string Expected { get; set; } = "";
+    [MaxLength(32)]
+    public string Actual { get; set; } = "";
+    [MaxLength(32)]
+    public string Pattern { get; set; } = "";
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 

@@ -6,6 +6,7 @@ Wichtige Tabellen:
 - `TrainingTexts`
 - `TextCollections`
 - `TypingAttempts`
+- `TypingAttemptErrors`
 - `Challenges`
 - `ChallengeParticipants`
 - `ChallengeRounds`
@@ -32,3 +33,13 @@ Beginn fuer die Wertung. `ClientDurationMilliseconds` ist nur Diagnose; WPM und
 Abschlussregeln verwenden die Serverdauer. `TextHash` bindet den verwendeten
 Zieltext nachvollziehbar an den Versuch, ohne den kompletten Text im Versuch zu
 duplizieren.
+
+`ConsistencySampleCount`, `MeanWordMilliseconds` und `WordTimingVariation`
+speichern minimale Wortzeit-Aggregate ohne vollstaendiges Keystroke-Replay.
+
+## TypingAttemptErrors
+
+`TypingAttemptErrors` speichert echte, per Alignment zugeordnete Fehler pro
+Versuch: Position, Fehlerart, erwartetes Graphem, tatsaechliches Graphem und
+betroffenes Muster. Die Tabelle ist Teil von Profil-Export und
+Statistik-Reset/Loeschung.

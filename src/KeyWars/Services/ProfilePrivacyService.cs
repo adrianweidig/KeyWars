@@ -9,6 +9,7 @@ public sealed record ProfileExportPayload(
     DateTimeOffset GeneratedAt,
     UserProfile Profile,
     IReadOnlyList<TypingAttempt> Attempts,
+    IReadOnlyList<TypingAttemptError> AttemptErrors,
     IReadOnlyList<Mission> Missions,
     IReadOnlyList<Achievement> Achievements,
     IReadOnlyList<WeaknessObservation> WeaknessObservations,
@@ -28,6 +29,7 @@ public sealed class ProfilePrivacyService(KeyWarsDbContext db, LiveRoomManager l
             timeProvider.GetUtcNow(),
             profile,
             await db.TypingAttempts.Where(item => item.UserProfileId == profileId).ToListAsync(cancellationToken),
+            await db.TypingAttemptErrors.Where(item => item.UserProfileId == profileId).ToListAsync(cancellationToken),
             await db.Missions.Where(item => item.UserProfileId == profileId).ToListAsync(cancellationToken),
             await db.Achievements.Where(item => item.UserProfileId == profileId).ToListAsync(cancellationToken),
             await db.WeaknessObservations.Where(item => item.UserProfileId == profileId).ToListAsync(cancellationToken),
@@ -97,6 +99,7 @@ public sealed class ProfilePrivacyService(KeyWarsDbContext db, LiveRoomManager l
 
     private async Task DeleteDerivedStatisticsAsync(Guid profileId, CancellationToken cancellationToken)
     {
+        await db.TypingAttemptErrors.Where(item => item.UserProfileId == profileId).ExecuteDeleteAsync(cancellationToken);
         await db.TypingAttempts.Where(item => item.UserProfileId == profileId).ExecuteDeleteAsync(cancellationToken);
         await db.Missions.Where(item => item.UserProfileId == profileId).ExecuteDeleteAsync(cancellationToken);
         await db.Achievements.Where(item => item.UserProfileId == profileId).ExecuteDeleteAsync(cancellationToken);

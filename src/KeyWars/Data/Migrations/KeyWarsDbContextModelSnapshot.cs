@@ -477,6 +477,9 @@ namespace KeyWars.Data.Migrations
                     b.Property<double>("Consistency")
                         .HasColumnType("REAL");
 
+                    b.Property<int>("ConsistencySampleCount")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int>("CorrectCharacters")
                         .HasColumnType("INTEGER");
 
@@ -500,6 +503,9 @@ namespace KeyWars.Data.Migrations
 
                     b.Property<bool>("LeaderboardEligible")
                         .HasColumnType("INTEGER");
+
+                    b.Property<double>("MeanWordMilliseconds")
+                        .HasColumnType("REAL");
 
                     b.Property<string>("Mode")
                         .IsRequired()
@@ -548,6 +554,9 @@ namespace KeyWars.Data.Migrations
                     b.Property<double>("Wpm")
                         .HasColumnType("REAL");
 
+                    b.Property<double>("WordTimingVariation")
+                        .HasColumnType("REAL");
+
                     b.HasKey("Id");
 
                     b.HasIndex("TrainingTextId");
@@ -555,6 +564,52 @@ namespace KeyWars.Data.Migrations
                     b.HasIndex("UserProfileId", "Mode", "CreatedAt");
 
                     b.ToTable("TypingAttempts");
+                });
+
+            modelBuilder.Entity("KeyWars.Domain.TypingAttemptError", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Actual")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Expected")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Pattern")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Position")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("TypingAttemptId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("UserProfileId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TypingAttemptId");
+
+                    b.HasIndex("UserProfileId", "Pattern");
+
+                    b.ToTable("TypingAttemptErrors");
                 });
 
             modelBuilder.Entity("KeyWars.Domain.UserProfile", b =>
@@ -874,6 +929,21 @@ namespace KeyWars.Data.Migrations
                         .WithMany()
                         .HasForeignKey("TrainingTextId")
                         .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("KeyWars.Domain.UserProfile", null)
+                        .WithMany()
+                        .HasForeignKey("UserProfileId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("KeyWars.Domain.TypingAttemptError", b =>
+                {
+                    b.HasOne("KeyWars.Domain.TypingAttempt", null)
+                        .WithMany()
+                        .HasForeignKey("TypingAttemptId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
 
                     b.HasOne("KeyWars.Domain.UserProfile", null)
                         .WithMany()

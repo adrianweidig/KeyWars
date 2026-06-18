@@ -30,6 +30,13 @@ public enum AttemptPhase
     Aborted
 }
 
+public enum TypingErrorKind
+{
+    Insertion,
+    Deletion,
+    Substitution
+}
+
 public enum TrainingTextVisibility
 {
     Private,

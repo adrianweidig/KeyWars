@@ -10,4 +10,7 @@ KeyWars speichert zusammengefasste Metriken, aber keine vollständigen Keystroke
 
 ## Konsequenzen
 
-Analysen nutzen aggregierte Schwächenbeobachtungen.
+Analysen nutzen aggregierte Schwächenbeobachtungen, Wortdauer-Samples und per
+Alignment abgeleitete Fehlerpositionen. Diese Daten enthalten keine vollständige
+zeitliche Tastenfolge und reichen nicht aus, eine Eingabesession als Replay
+nachzubilden.

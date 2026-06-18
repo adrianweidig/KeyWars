@@ -22,6 +22,7 @@ public sealed class ProfilePrivacyServiceTests
         await service.ResetStatisticsAsync(profile.Id);
 
         Assert.Empty(await context.Db.TypingAttempts.Where(item => item.UserProfileId == profile.Id).ToListAsync());
+        Assert.Empty(await context.Db.TypingAttemptErrors.Where(item => item.UserProfileId == profile.Id).ToListAsync());
         Assert.Empty(await context.Db.Missions.Where(item => item.UserProfileId == profile.Id).ToListAsync());
         Assert.Empty(await context.Db.Achievements.Where(item => item.UserProfileId == profile.Id).ToListAsync());
         Assert.Empty(await context.Db.WeaknessObservations.Where(item => item.UserProfileId == profile.Id).ToListAsync());
@@ -74,7 +75,7 @@ public sealed class ProfilePrivacyServiceTests
         var other = PrivacyTestContext.CreateProfile("other", "Andere Person", "22222222-2222-2222-2222-222222222222");
         context.Db.UserProfiles.Add(other);
         await context.SeedStatisticsAsync();
-        context.Db.TypingAttempts.Add(new TypingAttempt
+        var otherAttempt = new TypingAttempt
         {
             UserProfileId = other.Id,
             Mode = TrainingMode.Words10,
@@ -83,6 +84,17 @@ public sealed class ProfilePrivacyServiceTests
             StartedAt = context.Time.GetUtcNow(),
             FinishedAt = context.Time.GetUtcNow().AddSeconds(15),
             Completed = true
+        };
+        context.Db.TypingAttempts.Add(otherAttempt);
+        context.Db.TypingAttemptErrors.Add(new TypingAttemptError
+        {
+            TypingAttemptId = otherAttempt.Id,
+            UserProfileId = other.Id,
+            Position = 1,
+            Kind = TypingErrorKind.Substitution,
+            Expected = "a",
+            Actual = "x",
+            Pattern = "an"
         });
         await context.Db.SaveChangesAsync();
         var service = context.CreatePrivacyService();
@@ -95,7 +107,9 @@ public sealed class ProfilePrivacyServiceTests
         Assert.All(export.Missions, item => Assert.Equal(context.Profile.Id, item.UserProfileId));
         Assert.All(export.Achievements, item => Assert.Equal(context.Profile.Id, item.UserProfileId));
         Assert.All(export.WeaknessObservations, item => Assert.Equal(context.Profile.Id, item.UserProfileId));
+        Assert.All(export.AttemptErrors, item => Assert.Equal(context.Profile.Id, item.UserProfileId));
         Assert.DoesNotContain(export.Attempts, item => item.UserProfileId == other.Id);
+        Assert.DoesNotContain(export.AttemptErrors, item => item.UserProfileId == other.Id);
     }
 
     private sealed class PrivacyTestContext : IAsyncDisposable
@@ -154,7 +168,7 @@ public sealed class ProfilePrivacyServiceTests
             Profile.LastActivityDate = DateOnly.FromDateTime(Time.GetUtcNow().Date);
             Profile.ArenaRating = 1240;
             Profile.RatedMatchCount = 12;
-            Db.TypingAttempts.Add(new TypingAttempt
+            var attempt = new TypingAttempt
             {
                 UserProfileId = Profile.Id,
                 Mode = TrainingMode.Words10,
@@ -165,6 +179,17 @@ public sealed class ProfilePrivacyServiceTests
                 Completed = true,
                 Wpm = 50,
                 Accuracy = 99
+            };
+            Db.TypingAttempts.Add(attempt);
+            Db.TypingAttemptErrors.Add(new TypingAttemptError
+            {
+                TypingAttemptId = attempt.Id,
+                UserProfileId = Profile.Id,
+                Position = 1,
+                Kind = TypingErrorKind.Substitution,
+                Expected = "t",
+                Actual = "z",
+                Pattern = "te"
             });
             Db.Missions.Add(new Mission { UserProfileId = Profile.Id, MissionDate = DateOnly.FromDateTime(Time.GetUtcNow().Date), Title = "Test", Description = "Test", TargetValue = 1, CurrentValue = 1, Completed = true });
             Db.Achievements.Add(new Achievement { UserProfileId = Profile.Id, Key = "test", Title = "Test", Description = "Test" });

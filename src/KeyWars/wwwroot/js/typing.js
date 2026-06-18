@@ -26,7 +26,11 @@ export function attachTypingApps() {
     let prepared = false;
     let serverStarted = false;
     let beginPromise = null;
+    let lastCompletedWordCount = 0;
+    let lastWordBoundaryAt = null;
+    const wordDurationsMilliseconds = [];
     const mistakeMap = new Map();
+    const numberFormat = new Intl.NumberFormat("de-DE", { maximumFractionDigits: 1 });
 
     const request = () => ({
       mode: root.dataset.mode || "Sprint60",
@@ -94,6 +98,7 @@ export function attachTypingApps() {
       }
 
       startedAt = performance.now();
+      lastWordBoundaryAt = startedAt;
       timerLabel.textContent = isTimed() ? "verbleibend" : "vergangen";
       timerFrame = requestAnimationFrame(updateTimer);
     };
@@ -161,6 +166,44 @@ export function attachTypingApps() {
       }
 
       return Array.from(normalized);
+    };
+
+    const countCompletedWords = (value) => {
+      const normalized = String(value || "").normalize("NFC");
+      const words = normalized.trim().split(/\s+/u).filter(Boolean);
+      if (words.length === 0) {
+        return 0;
+      }
+
+      return /\s$/u.test(normalized) ? words.length : Math.max(0, words.length - 1);
+    };
+
+    const noteCompletedWords = () => {
+      if (startedAt === null || wordDurationsMilliseconds.length >= 200) {
+        return;
+      }
+
+      const completedWords = countCompletedWords(input.value);
+      const now = performance.now();
+      while (lastCompletedWordCount < completedWords && wordDurationsMilliseconds.length < 200) {
+        wordDurationsMilliseconds.push(Math.max(1, Math.round(now - (lastWordBoundaryAt ?? startedAt))));
+        lastWordBoundaryAt = now;
+        lastCompletedWordCount += 1;
+      }
+    };
+
+    const completePendingWord = () => {
+      if (startedAt === null || wordDurationsMilliseconds.length >= 200) {
+        return;
+      }
+
+      const words = String(input.value || "").trim().split(/\s+/u).filter(Boolean);
+      if (words.length > lastCompletedWordCount) {
+        const now = performance.now();
+        wordDurationsMilliseconds.push(Math.max(1, Math.round(now - (lastWordBoundaryAt ?? startedAt))));
+        lastWordBoundaryAt = now;
+        lastCompletedWordCount = words.length;
+      }
     };
 
     const collectFinalErrors = () => {
@@ -242,13 +285,15 @@ export function attachTypingApps() {
         return;
       }
 
+      completePendingWord();
       const payload = {
         attemptId: session.id,
         nonce: session.nonce,
         input: input.value,
         backspaces,
         focusLosses,
-        clientDurationMilliseconds: Math.max(1, Math.round(performance.now() - (startedAt ?? performance.now())))
+        clientDurationMilliseconds: Math.max(1, Math.round(performance.now() - (startedAt ?? performance.now()))),
+        wordDurationsMilliseconds
       };
       const endpoint = challengeId ? `/api/herausforderungen/${challengeId}/abschliessen` : "/api/spielen/abschliessen";
       const response = await fetch(endpoint, {
@@ -266,11 +311,12 @@ export function attachTypingApps() {
 
       const data = await response.json();
       result.innerHTML = `<div class="metric-row">
-        <div class="metric"><span>WPM</span><strong>${data.wpm}</strong></div>
-        <div class="metric"><span>Genauigkeit</span><strong>${data.accuracy} %</strong></div>
-        <div class="metric"><span>Konsistenz</span><strong>${data.consistency} %</strong></div>
+        <div class="metric"><span>WPM</span><strong>${numberFormat.format(data.wpm)}</strong></div>
+        <div class="metric"><span>Genauigkeit</span><strong>${numberFormat.format(data.accuracy)} %</strong></div>
+        <div class="metric"><span>Konsistenz</span><strong>${numberFormat.format(data.consistency)} %</strong></div>
         <div class="metric"><span>Korrekte Zeichen</span><strong>${data.correctCharacters}</strong></div>
-      </div>`;
+      </div>
+      <p class="metric-note">WPM basiert auf korrekten Zeichen, Roh-WPM auf allen Eingaben. Konsistenz misst die Schwankung der abgeschlossenen Wortzeiten.</p>`;
       result.append(analysis);
       renderAnalysis(data);
       session = null;
@@ -288,6 +334,9 @@ export function attachTypingApps() {
       session = null;
       serverStarted = false;
       beginPromise = null;
+      lastCompletedWordCount = 0;
+      lastWordBoundaryAt = null;
+      wordDurationsMilliseconds.length = 0;
       input.value = "";
       input.disabled = true;
       result.textContent = "";
@@ -346,6 +395,7 @@ export function attachTypingApps() {
         }
 
         noteMistake();
+        noteCompletedWords();
       }
 
       render();

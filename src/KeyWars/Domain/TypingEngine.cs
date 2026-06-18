@@ -4,6 +4,13 @@ using System.Text;
 
 namespace KeyWars.Domain;
 
+public sealed record TypingError(
+    int Position,
+    TypingErrorKind Kind,
+    string Expected,
+    string Actual,
+    string Pattern);
+
 public sealed record TypingMetrics(
     int CorrectCharacters,
     int IncorrectCharacters,
@@ -16,7 +23,11 @@ public sealed record TypingMetrics(
     double CharactersPerMinute,
     double Accuracy,
     double Consistency,
-    bool Completed);
+    int ConsistencySampleCount,
+    double MeanWordMilliseconds,
+    double WordTimingVariation,
+    bool Completed,
+    IReadOnlyList<TypingError> Errors);
 
 public sealed record AttemptStart(Guid AttemptId, string Nonce, string Text, DateTimeOffset StartedAt);
 
@@ -37,43 +48,46 @@ public sealed class TypingEngine(TimeProvider timeProvider)
         TimeSpan duration,
         int backspaces,
         int focusLosses,
-        bool timeMode = false)
+        bool timeMode = false,
+        IReadOnlyList<int>? wordDurationsMilliseconds = null)
     {
         var targetElements = SplitGraphemes(NormalizeText(target));
         var inputElements = SplitGraphemes(NormalizeText(input));
+        var alignment = Align(targetElements, inputElements);
+        var lastInputStepIndex = alignment.FindLastIndex(step => step.Operation != AlignmentOperation.Delete);
         var correct = 0;
         var incorrect = 0;
-        var comparable = inputElements.Count;
+        var errors = new List<TypingError>();
 
-        for (var index = 0; index < comparable; index++)
+        for (var index = 0; index < alignment.Count; index++)
         {
-            if (index >= targetElements.Count)
+            var step = alignment[index];
+            if (step.Operation == AlignmentOperation.Match)
             {
-                incorrect++;
+                correct++;
                 continue;
             }
 
-            if (StringComparer.Ordinal.Equals(targetElements[index], inputElements[index]))
+            if (step.Operation == AlignmentOperation.Delete && index > lastInputStepIndex)
             {
-                correct++;
+                continue;
             }
-            else
-            {
-                incorrect++;
-            }
+
+            incorrect++;
+            errors.Add(ToError(step, targetElements, inputElements));
         }
 
+        var timing = CalculateConsistency(wordDurationsMilliseconds);
         var totalInput = inputElements.Count;
+        var attempted = correct + incorrect;
         var minutes = Math.Max(duration.TotalMinutes, 1d / 60d);
-        var accuracy = totalInput == 0 ? 0 : (double)correct / totalInput * 100d;
+        var accuracy = attempted == 0 ? 0 : (double)correct / attempted * 100d;
         var wpm = correct / 5d / minutes;
         var rawWpm = totalInput / 5d / minutes;
         var cpm = correct / minutes;
-        var penalty = (incorrect * 3d) + backspaces + (focusLosses * 2d);
-        var consistency = Math.Clamp(100d - penalty / Math.Max(1, targetElements.Count) * 100d, 0d, 100d);
         var completed = timeMode
             ? totalInput > 0 && correct > 0
-            : targetElements.Count == inputElements.Count && incorrect == 0;
+            : targetElements.Count == correct && incorrect == 0 && inputElements.Count == targetElements.Count;
 
         return new TypingMetrics(
             correct,
@@ -86,8 +100,161 @@ public sealed class TypingEngine(TimeProvider timeProvider)
             Math.Round(rawWpm, 2),
             Math.Round(cpm, 2),
             Math.Round(accuracy, 2),
-            Math.Round(consistency, 2),
-            completed);
+            Math.Round(timing.Consistency, 2),
+            timing.SampleCount,
+            Math.Round(timing.MeanMilliseconds, 2),
+            Math.Round(timing.CoefficientOfVariation, 4),
+            completed,
+            errors);
+    }
+
+    private static List<AlignmentStep> Align(IReadOnlyList<string> targetElements, IReadOnlyList<string> inputElements)
+    {
+        var targetCount = targetElements.Count;
+        var inputCount = inputElements.Count;
+        var distance = new int[targetCount + 1, inputCount + 1];
+        var operation = new AlignmentOperation[targetCount + 1, inputCount + 1];
+
+        for (var index = 1; index <= targetCount; index++)
+        {
+            distance[index, 0] = index;
+            operation[index, 0] = AlignmentOperation.Delete;
+        }
+
+        for (var index = 1; index <= inputCount; index++)
+        {
+            distance[0, index] = index;
+            operation[0, index] = AlignmentOperation.Insert;
+        }
+
+        for (var targetIndex = 1; targetIndex <= targetCount; targetIndex++)
+        {
+            for (var inputIndex = 1; inputIndex <= inputCount; inputIndex++)
+            {
+                var matches = StringComparer.Ordinal.Equals(targetElements[targetIndex - 1], inputElements[inputIndex - 1]);
+                var substituteCost = distance[targetIndex - 1, inputIndex - 1] + (matches ? 0 : 1);
+                var deleteCost = distance[targetIndex - 1, inputIndex] + 1;
+                var insertCost = distance[targetIndex, inputIndex - 1] + 1;
+
+                var bestCost = substituteCost;
+                var bestOperation = matches ? AlignmentOperation.Match : AlignmentOperation.Substitute;
+                if (deleteCost < bestCost)
+                {
+                    bestCost = deleteCost;
+                    bestOperation = AlignmentOperation.Delete;
+                }
+
+                if (insertCost < bestCost)
+                {
+                    bestCost = insertCost;
+                    bestOperation = AlignmentOperation.Insert;
+                }
+
+                distance[targetIndex, inputIndex] = bestCost;
+                operation[targetIndex, inputIndex] = bestOperation;
+            }
+        }
+
+        var steps = new List<AlignmentStep>();
+        var targetCursor = targetCount;
+        var inputCursor = inputCount;
+        while (targetCursor > 0 || inputCursor > 0)
+        {
+            var current = operation[targetCursor, inputCursor];
+            switch (current)
+            {
+                case AlignmentOperation.Match:
+                case AlignmentOperation.Substitute:
+                    targetCursor--;
+                    inputCursor--;
+                    steps.Add(new AlignmentStep(current, targetCursor, inputCursor));
+                    break;
+                case AlignmentOperation.Delete:
+                    targetCursor--;
+                    steps.Add(new AlignmentStep(current, targetCursor, -1));
+                    break;
+                case AlignmentOperation.Insert:
+                    inputCursor--;
+                    steps.Add(new AlignmentStep(current, targetCursor, inputCursor));
+                    break;
+            }
+        }
+
+        steps.Reverse();
+        return steps;
+    }
+
+    private static TypingError ToError(AlignmentStep step, IReadOnlyList<string> targetElements, IReadOnlyList<string> inputElements)
+    {
+        var actual = step.InputIndex >= 0 && step.InputIndex < inputElements.Count ? inputElements[step.InputIndex] : "";
+        var kind = step.Operation switch
+        {
+            AlignmentOperation.Insert => TypingErrorKind.Insertion,
+            AlignmentOperation.Delete => TypingErrorKind.Deletion,
+            _ => TypingErrorKind.Substitution
+        };
+        var expected = kind == TypingErrorKind.Insertion
+            ? ""
+            : step.TargetIndex >= 0 && step.TargetIndex < targetElements.Count ? targetElements[step.TargetIndex] : "";
+        var pattern = step.Operation == AlignmentOperation.Insert
+            ? BuildInsertionPattern(targetElements, step.TargetIndex, actual)
+            : BuildExpectedPattern(targetElements, step.TargetIndex);
+
+        return new TypingError(Math.Max(0, step.TargetIndex), kind, expected, actual, pattern);
+    }
+
+    private static string BuildExpectedPattern(IReadOnlyList<string> targetElements, int index)
+    {
+        if (targetElements.Count == 0)
+        {
+            return "";
+        }
+
+        if (index >= 0 && index < targetElements.Count - 1)
+        {
+            return targetElements[index] + targetElements[index + 1];
+        }
+
+        if (index > 0 && index < targetElements.Count)
+        {
+            return targetElements[index - 1] + targetElements[index];
+        }
+
+        return index >= 0 && index < targetElements.Count ? targetElements[index] : "";
+    }
+
+    private static string BuildInsertionPattern(IReadOnlyList<string> targetElements, int index, string actual)
+    {
+        if (index > 0 && index <= targetElements.Count)
+        {
+            return targetElements[index - 1] + actual;
+        }
+
+        return actual;
+    }
+
+    private static ConsistencyScore CalculateConsistency(IReadOnlyList<int>? wordDurationsMilliseconds)
+    {
+        var samples = (wordDurationsMilliseconds ?? [])
+            .Where(value => value > 0)
+            .Take(200)
+            .Select(value => (double)value)
+            .ToArray();
+        if (samples.Length == 0)
+        {
+            return new ConsistencyScore(100, 0, 0, 0);
+        }
+
+        var mean = samples.Average();
+        if (samples.Length == 1)
+        {
+            return new ConsistencyScore(100, 1, mean, 0);
+        }
+
+        var variance = samples.Sum(value => Math.Pow(value - mean, 2)) / samples.Length;
+        var coefficientOfVariation = mean <= 0 ? 0 : Math.Sqrt(variance) / mean;
+        var consistency = Math.Clamp(100d - coefficientOfVariation * 100d, 0d, 100d);
+        return new ConsistencyScore(consistency, samples.Length, mean, coefficientOfVariation);
     }
 
     public string BuildWeaknessText(IReadOnlyCollection<WeaknessObservation> observations, int wordTarget = 60)
@@ -157,6 +324,18 @@ public sealed class TypingEngine(TimeProvider timeProvider)
     {
         return NormalizeText(text).Split(WordSeparators, StringSplitOptions.RemoveEmptyEntries).Length;
     }
+
+    private enum AlignmentOperation
+    {
+        Match,
+        Substitute,
+        Insert,
+        Delete
+    }
+
+    private readonly record struct AlignmentStep(AlignmentOperation Operation, int TargetIndex, int InputIndex);
+
+    private readonly record struct ConsistencyScore(double Consistency, int SampleCount, double MeanMilliseconds, double CoefficientOfVariation);
 }
 
 public static class GermanWordBank

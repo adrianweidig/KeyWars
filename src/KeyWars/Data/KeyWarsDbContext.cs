@@ -10,6 +10,7 @@ public sealed class KeyWarsDbContext(DbContextOptions<KeyWarsDbContext> options)
     public DbSet<TextCollection> TextCollections => Set<TextCollection>();
     public DbSet<TextCollectionItem> TextCollectionItems => Set<TextCollectionItem>();
     public DbSet<TypingAttempt> TypingAttempts => Set<TypingAttempt>();
+    public DbSet<TypingAttemptError> TypingAttemptErrors => Set<TypingAttemptError>();
     public DbSet<Challenge> Challenges => Set<Challenge>();
     public DbSet<ChallengeParticipant> ChallengeParticipants => Set<ChallengeParticipant>();
     public DbSet<ChallengeRound> ChallengeRounds => Set<ChallengeRound>();
@@ -79,6 +80,21 @@ public sealed class KeyWarsDbContext(DbContextOptions<KeyWarsDbContext> options)
                 .WithMany()
                 .HasForeignKey(attempt => attempt.TrainingTextId)
                 .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<TypingAttemptError>(entity =>
+        {
+            entity.HasIndex(error => error.TypingAttemptId);
+            entity.HasIndex(error => new { error.UserProfileId, error.Pattern });
+            entity.Property(error => error.Kind).HasConversion<string>();
+            entity.HasOne<TypingAttempt>()
+                .WithMany()
+                .HasForeignKey(error => error.TypingAttemptId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<UserProfile>()
+                .WithMany()
+                .HasForeignKey(error => error.UserProfileId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<Challenge>(entity =>
