@@ -7,7 +7,7 @@ public sealed class LiveRoomSweepService(LiveRoomManager rooms, TimeProvider tim
         var abortedRooms = rooms.AbortActiveRooms();
         if (abortedRooms > 0)
         {
-            logger.LogWarning("{Count} laufende Arena-Raeume wurden beim Shutdown ohne Rating abgebrochen.", abortedRooms);
+            logger.LogWarning("{Count} laufende Arena-Räume wurden beim Shutdown ohne Rating abgebrochen.", abortedRooms);
         }
 
         await base.StopAsync(cancellationToken);

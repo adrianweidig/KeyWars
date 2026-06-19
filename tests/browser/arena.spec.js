@@ -28,7 +28,7 @@ test("Dashboard und Einstellungen rendern im echten Browser", async ({ page }) =
   await expect(page.locator("html")).toHaveAttribute("lang", "de");
 });
 
-test("Arena laeuft mit zwei getrennten Browserkontexten ueber SignalR", async ({ browser, baseURL }, testInfo) => {
+test("Arena läuft mit zwei getrennten Browserkontexten über SignalR", async ({ browser, baseURL }, testInfo) => {
   const hostContext = await browser.newContext({ baseURL, colorScheme: "dark", reducedMotion: "reduce" });
   const guestContext = await browser.newContext({ baseURL, colorScheme: "dark", reducedMotion: "reduce" });
   const suffix = testInfo.workerIndex.toString();

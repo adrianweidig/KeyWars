@@ -17,7 +17,7 @@ const dotnet = dotnetCandidates.find((candidate) => candidate.includes(path.sep)
   : true);
 
 if (!fs.existsSync(appDll)) {
-  console.error(`KeyWars.dll fehlt unter ${appDll}. Fuehre zuerst dotnet build -c Release aus.`);
+  console.error(`KeyWars.dll fehlt unter ${appDll}. Führe zuerst dotnet build -c Release aus.`);
   process.exit(1);
 }
 

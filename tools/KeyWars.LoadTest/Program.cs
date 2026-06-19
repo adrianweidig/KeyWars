@@ -332,7 +332,7 @@ internal sealed class LoadClient : IAsyncDisposable
         if (response.StatusCode != HttpStatusCode.Redirect)
         {
             var body = await response.Content.ReadAsStringAsync();
-            throw new InvalidOperationException($"Login fuer {username} fehlgeschlagen: {(int)response.StatusCode} {body}");
+            throw new InvalidOperationException($"Login für {username} fehlgeschlagen: {(int)response.StatusCode} {body}");
         }
 
         return new LoadClient(baseUrl, username, cookies, http);
@@ -391,7 +391,7 @@ internal static class LoadToolHtml
     public static string ExtractFirstTrainingTextId(string html)
     {
         var match = Regex.Match(html, "<option\\s+value=\"(?<value>[0-9a-fA-F-]{36})\"", RegexOptions.IgnoreCase);
-        return match.Success ? match.Groups["value"].Value : throw new InvalidOperationException("Kein Trainingstext fuer den Live-Raum gefunden.");
+        return match.Success ? match.Groups["value"].Value : throw new InvalidOperationException("Kein Trainingstext für den Live-Raum gefunden.");
     }
 
     public static string ToDisplayName(string username)

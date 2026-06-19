@@ -2,8 +2,8 @@
 
 KeyWars wertet Ziel- und Eingabetext als normalisierte Unicode-Grapheme aus.
 Ein Levenshtein-Alignment ordnet Treffer, Ersetzungen, Einfuegungen und
-Auslassungen zu. Nicht getippter Zieltext am Ende eines unvollstaendigen
-Textversuchs wird nicht als Fehler gezaehlt.
+Auslassungen zu. Nicht getippter Zieltext am Ende eines unvollständigen
+Textversuchs wird nicht als Fehler gezählt.
 
 ## Formeln
 
@@ -26,8 +26,8 @@ Pro Versuch werden nur aggregierte Fehlerbeobachtungen gespeichert:
 
 - Position im Zieltext;
 - Fehlerart `Insertion`, `Deletion` oder `Substitution`;
-- erwartetes und tatsaechliches Graphem;
+- erwartetes und tatsächliches Graphem;
 - ein betroffenes Zeichen-/Bigramm-Muster.
 
-Vollstaendige Keystroke-Replays werden nicht gespeichert. Die
-Schwaechenanalyse aktualisiert nur Muster aus tatsaechlichen Fehlern.
+Vollständige Keystroke-Replays werden nicht gespeichert. Die
+Schwächenanalyse aktualisiert nur Muster aus tatsaechlichen Fehlern.

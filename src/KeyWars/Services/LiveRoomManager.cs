@@ -927,7 +927,7 @@ public sealed class LiveRoomManager(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Live-Raum {RoomId} konnte nicht fuer die Persistenz eingereiht werden.", record.Id);
+            logger.LogError(ex, "Live-Raum {RoomId} konnte nicht für die Persistenz eingereiht werden.", record.Id);
             throw new InvalidOperationException("Das Arena-Ergebnis konnte nicht zur Speicherung vorgemerkt werden.", ex);
         }
     }

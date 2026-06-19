@@ -45,7 +45,7 @@ public sealed class LiveRoomCompletionQueue(
     {
         if (string.IsNullOrWhiteSpace(record.IdempotencyKey))
         {
-            throw new InvalidOperationException("Arena-Abschlussdaten enthalten keinen Idempotenzschluessel.");
+            throw new InvalidOperationException("Arena-Abschlussdaten enthalten keinen Idempotenzschlüssel.");
         }
 
         if (!records.Writer.TryWrite(record))
@@ -202,7 +202,7 @@ public sealed class SqliteLiveRoomCompletionWriter(IServiceScopeFactory scopeFac
         var profiles = await db.UserProfiles.Where(item => participantIds.Contains(item.Id)).ToListAsync(cancellationToken);
         if (profiles.Count != participantIds.Length)
         {
-            throw new InvalidOperationException("Mindestens ein Arena-Teilnehmerprofil fehlt fuer die Ergebnispersistenz.");
+            throw new InvalidOperationException("Mindestens ein Arena-Teilnehmerprofil fehlt für die Ergebnispersistenz.");
         }
 
         var ratingChanges = profiles.ToDictionary(profile => profile.Id, profile => new RatingChange(profile.Id, profile.ArenaRating, 0, profile.ArenaRating));

@@ -2,23 +2,23 @@
 
 KeyWars nutzt Ziele, Missionen, XP, Level, Erfolge, Serien, Rivalen, Ranglisten und konkrete Empfehlungen. Es gibt keinen Shop, keine Währung, keine Lootboxen und keine künstliche Knappheit.
 
-XP werden ueber ein Reward-Ledger gebucht. Pro Profil kann jede Quelle
+XP werden über ein Reward-Ledger gebucht. Pro Profil kann jede Quelle
 (`attempt`, `arena`, `mission`) mit ihrer `SourceId` genau einmal XP vergeben.
 Wiederholte Finish-Requests, doppelt persistierte Arena-Jobs oder bereits
 ausgezahlte Missionen erzeugen dadurch keine zweite Auszahlung.
 
 Die XP-Formel begrenzt Farmen: abgebrochene, inoffizielle, sehr kurze oder sehr
 schnelle Ultrakurz-Versuche geben keine XP. Gueltige Versuche erhalten eine
-gedeckelte WPM-Basis, Genauigkeitsboni, optional einen Bonus fuer persoenliche
-Verbesserung und einen Bonus fuer anspruchsvollere gespeicherte Texte. Arena-
+gedeckelte WPM-Basis, Genauigkeitsboni, optional einen Bonus für persönliche
+Verbesserung und einen Bonus für anspruchsvollere gespeicherte Texte. Arena-
 Ergebnisse nutzen denselben Buchungspfad mit eigener Quelle.
 
-Arena- und Challenge-Rating nutzen eine paarweise Elo-Berechnung fuer 2 bis n
+Arena- und Challenge-Rating nutzen eine paarweise Elo-Berechnung für 2 bis n
 Teilnehmende. Die Platzierung entsteht aus Status, Dauer, Genauigkeit,
 Fehlerzahl, Konsistenz und Roh-WPM; echte Gleichstaende erhalten denselben
-Score. DNFs werden hinter beendeten Ergebnissen gewertet, Serverabbrueche
-veraendern kein Rating. Pro Ergebniszeile werden `RatingBefore`, `RatingDelta`
-und `RatingAfter` persistiert, damit die transaktionale Aenderung auditierbar
+Score. DNFs werden hinter beendeten Ergebnissen gewertet, Serverabbrüche
+verändern kein Rating. Pro Ergebniszeile werden `RatingBefore`, `RatingDelta`
+und `RatingAfter` persistiert, damit die transaktionale Änderung auditierbar
 bleibt.
 
 Level verwenden eine steigende Kurve. Level 2 beginnt bei 200 XP, Level 3 bei
@@ -36,4 +36,4 @@ Definition umfasst Training, Praezision, Tempo, Serien, Arena, Texte, Team und
 Missionen.
 
 Der Coach ist deterministisch und lokal. Er betrachtet Genauigkeit, letzte
-Versuche, Schwaechenbeobachtungen und aktuelle Missionen.
+Versuche, Schwächenbeobachtungen und aktuelle Missionen.

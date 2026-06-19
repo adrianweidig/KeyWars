@@ -25,22 +25,22 @@ public static class StartupValidator
 
         if (string.IsNullOrWhiteSpace(urls))
         {
-            throw new InvalidOperationException("KEYWARS__LDAP__URLS ist ausserhalb von Development erforderlich.");
+            throw new InvalidOperationException("KEYWARS__LDAP__URLS ist außerhalb von Development erforderlich.");
         }
 
         if (string.IsNullOrWhiteSpace(baseDn))
         {
-            throw new InvalidOperationException("KEYWARS__LDAP__BASE_DN ist ausserhalb von Development erforderlich.");
+            throw new InvalidOperationException("KEYWARS__LDAP__BASE_DN ist außerhalb von Development erforderlich.");
         }
 
         if (string.IsNullOrWhiteSpace(upnSuffix))
         {
-            throw new InvalidOperationException("KEYWARS__LDAP__UPN_SUFFIX ist ausserhalb von Development erforderlich.");
+            throw new InvalidOperationException("KEYWARS__LDAP__UPN_SUFFIX ist außerhalb von Development erforderlich.");
         }
 
         if (developmentAuth)
         {
-            throw new InvalidOperationException("Development-Auth darf ausserhalb von Development nicht aktiviert sein.");
+            throw new InvalidOperationException("Development-Auth darf außerhalb von Development nicht aktiviert sein.");
         }
 
         if (ldapOptions.ConnectTimeoutSeconds is < 1 or > 60)
@@ -75,9 +75,9 @@ public static class StartupValidator
                 continue;
             }
 
-            throw new InvalidOperationException("KeyWars erlaubt ausserhalb von Development nur ldaps:// oder ldap:// mit KEYWARS__LDAP__ALLOW_STARTTLS=true.");
+            throw new InvalidOperationException("KeyWars erlaubt außerhalb von Development nur ldaps:// oder ldap:// mit KEYWARS__LDAP__ALLOW_STARTTLS=true.");
         }
 
-        logger.LogInformation("Startvalidierung fuer nicht-lokale Umgebung abgeschlossen.");
+        logger.LogInformation("Startvalidierung für nicht-lokale Umgebung abgeschlossen.");
     }
 }
