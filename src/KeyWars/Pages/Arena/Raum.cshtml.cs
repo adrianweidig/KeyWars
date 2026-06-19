@@ -34,13 +34,19 @@ public sealed class RaumModel(CurrentUser currentUser, LiveRoomManager rooms) : 
         []);
 
     public Guid CurrentProfileId { get; private set; }
+    public bool ShowLiveWpm { get; private set; } = true;
+    public bool ShowLiveRankChanges { get; private set; } = true;
+    public bool SoundEnabled { get; private set; }
+    public int SoundVolumePercent { get; private set; } = 35;
+    public bool ReactionsEnabled { get; private set; } = true;
+    public bool ReducedMotion { get; private set; }
 
     public string Input { get; set; } = "";
 
     public async Task<IActionResult> OnGetAsync(Guid id, CancellationToken cancellationToken)
     {
         var profile = await currentUser.RequireProfileAsync(User, cancellationToken);
-        CurrentProfileId = profile.Id;
+        ApplyProfile(profile);
         try
         {
             Snapshot = rooms.Join(id, profile.Id, profile.DisplayName);
@@ -56,7 +62,7 @@ public sealed class RaumModel(CurrentUser currentUser, LiveRoomManager rooms) : 
     public async Task<IActionResult> OnPostReadyAsync(Guid id, CancellationToken cancellationToken)
     {
         var profile = await currentUser.RequireProfileAsync(User, cancellationToken);
-        CurrentProfileId = profile.Id;
+        ApplyProfile(profile);
         try
         {
             var snapshot = rooms.Snapshot(id);
@@ -73,7 +79,7 @@ public sealed class RaumModel(CurrentUser currentUser, LiveRoomManager rooms) : 
     public async Task<IActionResult> OnPostStartAsync(Guid id, CancellationToken cancellationToken)
     {
         var profile = await currentUser.RequireProfileAsync(User, cancellationToken);
-        CurrentProfileId = profile.Id;
+        ApplyProfile(profile);
         try
         {
             rooms.Start(id, profile.Id);
@@ -86,6 +92,17 @@ public sealed class RaumModel(CurrentUser currentUser, LiveRoomManager rooms) : 
         }
 
         return RedirectToPage(new { id });
+    }
+
+    private void ApplyProfile(UserProfile profile)
+    {
+        CurrentProfileId = profile.Id;
+        ShowLiveWpm = profile.ShowLiveWpm;
+        ShowLiveRankChanges = profile.ShowLiveRankChanges;
+        SoundEnabled = profile.SoundEnabled;
+        SoundVolumePercent = Math.Clamp(profile.SoundVolumePercent, 0, 100);
+        ReactionsEnabled = profile.ReactionsEnabled;
+        ReducedMotion = profile.ReducedMotion;
     }
 
     private IActionResult ArenaError(InvalidOperationException exception)

@@ -20,6 +20,14 @@ Wichtige Tabellen:
 
 Gruppenwettbewerbe werden über Teilnehmerlisten modelliert, nicht über ein Opponent-Feld.
 
+## UserProfiles
+
+`UserProfiles` speichert neben den aus LDAP uebernommenen Stammdaten auch
+KeyWars-spezifische Vorlieben. Dazu gehoeren Sichtbarkeit in Ranglisten,
+Live-WPM-/Ranghinweise, Sound-Opt-in, `SoundVolumePercent`, Reaktionen und
+Reduced-Motion. Sounds bleiben standardmaessig deaktiviert; die Lautstaerke ist
+eine getrennte Profileinstellung.
+
 ## TypingAttempts
 
 Ein Tippversuch durchlaeuft serverseitig eine klare Lebenszyklusphase:

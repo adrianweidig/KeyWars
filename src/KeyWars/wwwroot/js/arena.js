@@ -18,11 +18,21 @@ export function attachArenaPages() {
     const hiddenCountLabel = root.querySelector("[data-arena-hidden-count]");
     const windowNote = root.querySelector("[data-arena-window-note]");
     const participantList = participants?.closest("table");
+    const reactionPanel = root.querySelector("[data-arena-reactions]");
+    const reactionStream = root.querySelector("[data-arena-reaction-stream]");
     const readyForm = document.querySelector("[data-arena-ready-form]");
     const startForm = document.querySelector("[data-arena-start-form]");
     const dnfButton = root.querySelector("[data-arena-dnf]");
     const leaveButton = document.querySelector("[data-arena-leave]");
     const connection = new SignalRConnection("/hubs/arena");
+    const showLiveWpm = root.dataset.showLiveWpm === "true";
+    const showLiveRankChanges = root.dataset.showLiveRankChanges === "true";
+    const soundEnabled = root.dataset.soundEnabled === "true";
+    const soundVolume = Math.max(0, Math.min(1, Number(root.dataset.soundVolume || 0) / 100));
+    const reactionsEnabled = root.dataset.reactionsEnabled === "true";
+    const reducedMotion = root.dataset.reducedMotion === "true" ||
+      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+    root.dataset.motionReduced = reducedMotion ? "true" : "false";
 
     let snapshot = null;
     let sequence = 0;
@@ -34,6 +44,9 @@ export function attachArenaPages() {
     let finishedLocally = false;
     let previousCurrentRank = null;
     let lastRankAnnouncementAt = 0;
+    let previousPhase = null;
+    let audioUnlocked = false;
+    let audioContext = null;
 
     const renderTarget = () => {
       if (!snapshot || !target || !input) {
@@ -84,6 +97,64 @@ export function attachArenaPages() {
       }
 
       return Math.max(0, Math.min(100, participant.correctCharacters * 100 / snapshot.targetCharacterCount));
+    };
+
+    const unlockAudio = () => {
+      if (!soundEnabled || audioUnlocked || soundVolume <= 0) {
+        return;
+      }
+
+      const AudioContextType = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextType) {
+        return;
+      }
+
+      audioUnlocked = true;
+      audioContext = audioContext || new AudioContextType();
+      audioContext.resume?.().catch(() => {});
+    };
+
+    const playFeedbackTone = (kind) => {
+      if (!soundEnabled || !audioUnlocked || !audioContext || soundVolume <= 0) {
+        return;
+      }
+
+      const tones = {
+        countdown: [520, 0.07],
+        start: [760, 0.11],
+        rank: [920, 0.08],
+        finish: [640, 0.16]
+      };
+      const [frequency, duration] = tones[kind] || tones.rank;
+      const now = audioContext.currentTime;
+      const oscillator = audioContext.createOscillator();
+      const gain = audioContext.createGain();
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(frequency, now);
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(0.08 * soundVolume, now + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+      oscillator.connect(gain).connect(audioContext.destination);
+      oscillator.start(now);
+      oscillator.stop(now + duration + 0.02);
+    };
+
+    const renderPhaseFeedback = () => {
+      if (!snapshot) {
+        return;
+      }
+
+      if (previousPhase !== null && previousPhase !== snapshot.phase) {
+        if (snapshot.phase === "Countdown") {
+          playFeedbackTone("countdown");
+        } else if (snapshot.phase === "Running") {
+          playFeedbackTone("start");
+        } else if (["RoundResults", "SeriesResults", "Closed"].includes(snapshot.phase) || snapshot.finished) {
+          playFeedbackTone("finish");
+        }
+      }
+
+      previousPhase = snapshot.phase;
     };
 
     const maxParticipants = () => {
@@ -237,16 +308,23 @@ export function attachArenaPages() {
     };
 
     const announceRankChange = (rank) => {
-      if (!liveRegion || rank === "-" || rank === previousCurrentRank) {
+      if (!showLiveRankChanges || !liveRegion || rank === "-" || rank === previousCurrentRank) {
         previousCurrentRank = rank;
         return;
       }
 
       const now = Date.now();
       if (previousCurrentRank !== null && now - lastRankAnnouncementAt > 1500) {
-        liveRegion.textContent = rank < previousCurrentRank
+        const numericRank = Number(rank);
+        const previousNumericRank = Number(previousCurrentRank);
+        const improved = Number.isFinite(numericRank) && Number.isFinite(previousNumericRank) && numericRank < previousNumericRank;
+        liveRegion.textContent = improved
           ? `Rang verbessert auf ${rank}.`
           : `Rang jetzt ${rank}.`;
+        if (improved) {
+          playFeedbackTone("rank");
+        }
+
         lastRankAnnouncementAt = now;
       }
 
@@ -305,7 +383,10 @@ export function attachArenaPages() {
 
       const current = snapshot.participants?.find((participant) => participant.profileId === currentProfileId);
       setText(hud.querySelector("[data-hud-rank]"), current ? String(rankFor(current.profileId)) : "-");
-      setText(hud.querySelector("[data-hud-wpm]"), formatNumber(current?.wpm));
+      if (showLiveWpm) {
+        setText(hud.querySelector("[data-hud-wpm]"), formatNumber(current?.wpm));
+      }
+
       setText(hud.querySelector("[data-hud-accuracy]"), `${formatNumber(current?.accuracy)} %`);
       setText(hud.querySelector("[data-hud-progress]"), `${Math.round(progressPercent(current))} %`);
 
@@ -336,6 +417,32 @@ export function attachArenaPages() {
         row.append(title, detail);
         return row;
       }));
+    };
+
+    const renderReaction = (next) => {
+      if (!reactionsEnabled || !reactionStream) {
+        return;
+      }
+
+      const reaction = camelize(next);
+      const chip = document.createElement("span");
+      chip.className = "reaction-chip";
+      if (reducedMotion) {
+        chip.classList.add("static");
+      }
+
+      const suffix = reaction.suppressedCount > 0 ? ` +${reaction.suppressedCount}` : "";
+      chip.textContent = `${reaction.displayName}: ${reaction.label}${suffix}`;
+      reactionStream.prepend(chip);
+      while (reactionStream.children.length > 4) {
+        reactionStream.lastElementChild?.remove();
+      }
+
+      if (!reducedMotion) {
+        window.setTimeout(() => chip.classList.add("fading"), 4500);
+      }
+
+      window.setTimeout(() => chip.remove(), 6000);
     };
 
     const renderState = () => {
@@ -428,6 +535,7 @@ export function attachArenaPages() {
 
     const applySnapshot = (next) => {
       snapshot = camelize(next);
+      renderPhaseFeedback();
       renderTarget();
       renderParticipants();
       renderTrack();
@@ -543,6 +651,24 @@ export function attachArenaPages() {
       giveUp();
     });
 
+    reactionPanel?.addEventListener("click", async (event) => {
+      const button = event.target.closest("[data-reaction-key]");
+      if (!button || !reactionPanel.contains(button)) {
+        return;
+      }
+
+      button.disabled = true;
+      try {
+        await connection.invoke("SendReaction", [roomId, button.dataset.reactionKey]);
+      } catch (error) {
+        showConnectionError(error);
+      } finally {
+        window.setTimeout(() => {
+          button.disabled = false;
+        }, 500);
+      }
+    });
+
     leaveButton?.addEventListener("click", async () => {
       try {
         await connection.invoke("LeaveRoom", [roomId]);
@@ -554,6 +680,8 @@ export function attachArenaPages() {
       window.location.href = "/arena";
     });
 
+    document.addEventListener("pointerdown", unlockAudio, { once: true, capture: true });
+    document.addEventListener("keydown", unlockAudio, { once: true, capture: true });
     input?.addEventListener("keydown", (event) => {
       if (event.key === "Backspace") {
         backspaces += 1;
@@ -572,6 +700,7 @@ export function attachArenaPages() {
 
     connection.on("roomChanged", applySnapshot);
     connection.on("progressChanged", applyProgressBatch);
+    connection.on("reactionReceived", renderReaction);
     connection.onReconnect(async () => {
       try {
         setText(connectionQuality, "Verbindung: neu verbunden");

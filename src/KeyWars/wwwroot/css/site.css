@@ -13,6 +13,12 @@
   --danger: #ff647c;
   --ok: #35d39a;
   --shadow: 0 18px 44px rgba(0, 0, 0, 0.28);
+  --motion-instant: 80ms;
+  --motion-fast: 180ms;
+  --motion-normal: 260ms;
+  --motion-celebration: 520ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasis: cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 * {
@@ -617,7 +623,7 @@ button:focus,
   color: #06111f;
   font-size: 0.72rem;
   font-weight: 900;
-  transition: transform 180ms ease-out;
+  transition: transform var(--motion-fast) var(--ease-standard);
   translate: -50% -50%;
   will-change: transform;
 }
@@ -627,11 +633,65 @@ button:focus,
   width: 30px;
   height: 30px;
   border-radius: 7px;
-  transition-duration: 110ms;
+  transition-duration: var(--motion-instant);
 }
 
 .roster-window-note {
   margin: 2px 0 0;
+}
+
+.reaction-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 12px;
+}
+
+.reaction-panel button {
+  min-height: 34px;
+  padding: 7px 10px;
+}
+
+.reaction-stream {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 28px;
+  margin-bottom: 8px;
+}
+
+.reaction-chip {
+  display: inline-flex;
+  max-width: 100%;
+  padding: 5px 9px;
+  border: 1px solid rgba(119, 103, 232, 0.42);
+  border-radius: 999px;
+  background: rgba(119, 103, 232, 0.16);
+  color: var(--text);
+  font-size: 0.85rem;
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  transition:
+    opacity var(--motion-normal) var(--ease-standard),
+    transform var(--motion-normal) var(--ease-standard);
+  animation: reaction-pop var(--motion-normal) var(--ease-emphasis);
+}
+
+.reaction-chip.fading {
+  opacity: 0;
+  transform: translateY(-4px) scale(0.98);
+}
+
+.reaction-chip.static {
+  animation: none;
+  transition: none;
+}
+
+@keyframes reaction-pop {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
 }
 
 .podium {
@@ -1048,4 +1108,17 @@ button:focus,
   .race-position {
     transition: none;
   }
+
+  .reaction-chip {
+    animation: none;
+    transition: none;
+  }
+}
+
+[data-reduced-motion="true"] .race-position,
+[data-motion-reduced="true"] .race-position,
+[data-reduced-motion="true"] .reaction-chip,
+[data-motion-reduced="true"] .reaction-chip {
+  animation: none;
+  transition: none;
 }

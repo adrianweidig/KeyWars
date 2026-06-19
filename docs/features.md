@@ -23,6 +23,7 @@ Statuswerte:
 | Live-Arena grafische Strecke | teilweise | DOM-basierte Rennstrecke mit Meilensteinen, eigener Spur und CSS-Transform-Fortschritt vorhanden; Visual-/Performance-Evidenz offen |
 | Live-Arena adaptive Grossraumansicht | teilweise | 2-8 Detailansicht, 9-24 kompakte Ansicht und ab 25 fokussiertes Fenster mit Top-Plaetzen, eigener Position und Nachbarn vorhanden; 64er Visual-/Performance-Evidenz offen |
 | Live-HUD und Podium | teilweise | Persoenliches HUD, Ranglisten-Updates, Live-Region und Podium-Container vorhanden; echte Ueberhol-/Belohnungs-E2E offen |
+| Motion, Sound und Reaktionen | teilweise | Profilsettings, synthetische Opt-in-Sounds nach Nutzerinteraktion, Motion-Tokens und feste serverseitig begrenzte Arena-Reaktionen vorhanden; vollstaendige Browser-A11y-/Soundabnahme offen |
 | Mehrere Runden/Best-of | geplant | Raumvertrag lehnt Serien bis zur KW-018-Implementierung ab |
 | Zuschauer | geplant | KW-027 bereitet die Anzeige vor; produktive Zuschauerrolle, Berechtigungen und Update-Priorisierung fehlen |
 | XP/Level/Missionen | teilweise | Idempotentes Reward-Ledger, stabile Tages-/Wochenmissionen, Level-Fortschritt und 30+ Achievement-Definitionen vorhanden; vollstaendige Achievement-UI/E2E und alle Auditkriterien noch offen |

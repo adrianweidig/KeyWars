@@ -34,6 +34,7 @@ public sealed class UserProfile
     public bool ShowLiveWpm { get; set; } = true;
     public bool ShowLiveRankChanges { get; set; } = true;
     public bool SoundEnabled { get; set; }
+    public int SoundVolumePercent { get; set; } = 35;
     public bool ReactionsEnabled { get; set; } = true;
     public bool ReducedMotion { get; set; }
     [MaxLength(32)]

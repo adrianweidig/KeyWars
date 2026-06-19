@@ -40,13 +40,16 @@
 
 <div asp-validation-summary="ModelOnly"></div>
 
-<section class="dashboard-grid" data-arena-room data-room-id="@Model.Snapshot.RoomId" data-current-profile-id="@Model.CurrentProfileId" data-arena-display-mode="@displayMode" data-max-participants="@Model.Snapshot.MaxParticipants">
+<section class="dashboard-grid" data-arena-room data-room-id="@Model.Snapshot.RoomId" data-current-profile-id="@Model.CurrentProfileId" data-arena-display-mode="@displayMode" data-max-participants="@Model.Snapshot.MaxParticipants" data-show-live-wpm="@Bool(Model.ShowLiveWpm)" data-show-live-rank-changes="@Bool(Model.ShowLiveRankChanges)" data-sound-enabled="@Bool(Model.SoundEnabled)" data-sound-volume="@Model.SoundVolumePercent" data-reactions-enabled="@Bool(Model.ReactionsEnabled)" data-reduced-motion="@Bool(Model.ReducedMotion)">
     <div class="card">
         <h2>Rennen</h2>
         <p class="muted" data-arena-state>@DisplayNames.For(Model.Snapshot.Phase)</p>
         <div class="arena-hud" data-arena-hud>
             <div class="metric"><span>Rang</span><strong data-hud-rank>@CurrentRank(currentParticipant, rankedParticipants)</strong></div>
-            <div class="metric"><span>WPM</span><strong data-hud-wpm>@FormatNumber(currentParticipant?.Wpm)</strong></div>
+            @if (Model.ShowLiveWpm)
+            {
+                <div class="metric"><span>WPM</span><strong data-hud-wpm>@FormatNumber(currentParticipant?.Wpm)</strong></div>
+            }
             <div class="metric"><span>Genauigkeit</span><strong data-hud-accuracy>@FormatNumber(currentParticipant?.Accuracy) %</strong></div>
             <div class="metric"><span>Fortschritt</span><strong data-hud-progress>@ProgressPercent(currentParticipant, Model.Snapshot.TargetCharacterCount).ToString("0", System.Globalization.CultureInfo.InvariantCulture) %</strong></div>
         </div>
@@ -56,6 +59,17 @@
             <span data-arena-spectator-summary>Zuschauerrolle vorbereitet</span>
             <span data-arena-connection-quality>Verbindung: wird aufgebaut</span>
         </div>
+        @if (Model.ReactionsEnabled)
+        {
+            <div class="reaction-panel" data-arena-reactions aria-label="Positive Arena-Reaktionen senden">
+                <button type="button" class="secondary" data-reaction-key="stark" aria-label="Reaktion Stark senden">Stark</button>
+                <button type="button" class="secondary" data-reaction-key="knapp" aria-label="Reaktion Knapp senden">Knapp</button>
+                <button type="button" class="secondary" data-reaction-key="sauber" aria-label="Reaktion Sauber senden">Sauber</button>
+                <button type="button" class="secondary" data-reaction-key="revanche" aria-label="Reaktion Revanche senden">Revanche</button>
+                <button type="button" class="secondary" data-reaction-key="respekt" aria-label="Reaktion Respekt senden">Respekt</button>
+            </div>
+            <div class="reaction-stream" data-arena-reaction-stream aria-live="polite" aria-atomic="false"></div>
+        }
         <div class="race-track @displayMode" data-arena-track aria-label="Rennstrecke mit bestätigtem Fortschritt">
             <div class="race-milestones" aria-hidden="true">
                 <span style="left:25%">25</span>
@@ -178,6 +192,8 @@
 
     private static string FormatNumber(double? value) =>
         value is null ? "-" : value.Value.ToString("0.0", System.Globalization.CultureInfo.GetCultureInfo("de-DE"));
+
+    private static string Bool(bool value) => value.ToString().ToLowerInvariant();
 
     private static string DisplayMode(int participantCount) => participantCount switch
     {

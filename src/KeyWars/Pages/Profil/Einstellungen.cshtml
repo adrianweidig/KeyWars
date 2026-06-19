@@ -35,6 +35,27 @@
             Bestleistungen als Rivalen-Geist freigeben
         </label>
         <label class="checkbox-label">
+            <input type="checkbox" asp-for="Input.ShowLiveWpm" />
+            Live-WPM im Rennen anzeigen
+        </label>
+        <label class="checkbox-label">
+            <input type="checkbox" asp-for="Input.ShowLiveRankChanges" />
+            Rangänderungen ansagen
+        </label>
+        <label class="checkbox-label">
+            <input type="checkbox" asp-for="Input.SoundEnabled" />
+            Sounds nach Interaktion aktivieren
+        </label>
+        <label>
+            Lautstärke
+            <input asp-for="Input.SoundVolumePercent" type="range" min="0" max="100" step="5" />
+            <span asp-validation-for="Input.SoundVolumePercent"></span>
+        </label>
+        <label class="checkbox-label">
+            <input type="checkbox" asp-for="Input.ReactionsEnabled" />
+            Positive Reaktionen in der Arena anzeigen
+        </label>
+        <label class="checkbox-label">
             <input type="checkbox" asp-for="Input.ReducedMotion" />
             Reduzierte Bewegung
         </label>

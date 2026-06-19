@@ -54,6 +54,16 @@ und direkte Rangnachbarn. Die UI zeigt dabei aktive Teilnehmende, Raumkapazitaet
 und Verbindungszustand. Eine echte Zuschauerrolle mit eigenen Berechtigungen
 und niedriger priorisierten Updates ist noch nicht produktiv implementiert.
 
+Das Motion-Budget nutzt zentrale CSS-Tokens: `instant` 80 ms, `fast` 180 ms,
+`normal` 260 ms und `celebration` 520 ms mit festgelegten Easing-Kurven.
+Laufende Arena-Bewegung ist auf Transform und Opacity beschraenkt. Die
+Profiloption `ReducedMotion` und `prefers-reduced-motion` deaktivieren
+nichtessenzielle Bewegung. Sounds werden nicht als externe Assets geladen,
+sondern lokal per Web Audio erzeugt und erst nach expliziter Nutzerinteraktion
+aktiviert; Sound ist standardmaessig aus und besitzt eine separate
+Profil-Lautstaerke. Reaktionen sind feste Presets ohne freien Chattext und
+werden serverseitig pro Profil/Raum begrenzt.
+
 Grenzen:
 
 - `KEYWARS__LIVE__MAX_PARTICIPANTS_PER_ROOM`

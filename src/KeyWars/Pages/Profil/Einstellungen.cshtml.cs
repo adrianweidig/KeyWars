@@ -21,6 +21,11 @@ public sealed class EinstellungenModel(CurrentUser currentUser, KeyWarsDbContext
             PreferredMode = profile.PreferredMode,
             LeaderboardVisible = profile.LeaderboardVisible,
             GhostSharingEnabled = profile.GhostSharingEnabled,
+            ShowLiveWpm = profile.ShowLiveWpm,
+            ShowLiveRankChanges = profile.ShowLiveRankChanges,
+            SoundEnabled = profile.SoundEnabled,
+            SoundVolumePercent = profile.SoundVolumePercent,
+            ReactionsEnabled = profile.ReactionsEnabled,
             ReducedMotion = profile.ReducedMotion
         };
     }
@@ -37,6 +42,11 @@ public sealed class EinstellungenModel(CurrentUser currentUser, KeyWarsDbContext
         profile.PreferredMode = Input.PreferredMode;
         profile.LeaderboardVisible = Input.LeaderboardVisible;
         profile.GhostSharingEnabled = Input.GhostSharingEnabled;
+        profile.ShowLiveWpm = Input.ShowLiveWpm;
+        profile.ShowLiveRankChanges = Input.ShowLiveRankChanges;
+        profile.SoundEnabled = Input.SoundEnabled;
+        profile.SoundVolumePercent = Math.Clamp(Input.SoundVolumePercent, 0, 100);
+        profile.ReactionsEnabled = Input.ReactionsEnabled;
         profile.ReducedMotion = Input.ReducedMotion;
         await db.SaveChangesAsync(cancellationToken);
         return RedirectToPage("/Profil/Index");
@@ -49,6 +59,12 @@ public sealed class EinstellungenModel(CurrentUser currentUser, KeyWarsDbContext
         public TrainingMode PreferredMode { get; set; } = TrainingMode.Sprint60;
         public bool LeaderboardVisible { get; set; } = true;
         public bool GhostSharingEnabled { get; set; }
+        public bool ShowLiveWpm { get; set; } = true;
+        public bool ShowLiveRankChanges { get; set; } = true;
+        public bool SoundEnabled { get; set; }
+        [Range(0, 100)]
+        public int SoundVolumePercent { get; set; } = 35;
+        public bool ReactionsEnabled { get; set; } = true;
         public bool ReducedMotion { get; set; }
     }
 }

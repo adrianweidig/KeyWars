@@ -167,6 +167,54 @@ public sealed partial class WebSmokeTests : IClassFixture<KeyWarsWebFactory>
     }
 
     [Fact]
+    public async Task ProfileSettingsPersistArenaFeedbackPreferences()
+    {
+        using var isolatedFactory = new KeyWarsWebFactory();
+        var client = isolatedFactory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        await LoginAsync(client);
+
+        var settings = await client.GetStringAsync("/profil/einstellungen");
+        var token = AntiForgeryRegex().Match(settings).Groups["token"].Value;
+        var response = await client.PostAsync("/profil/einstellungen", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["Input.Motto"] = "Feedback testen",
+            ["Input.PreferredMode"] = TrainingMode.Sprint60.ToString(),
+            ["Input.LeaderboardVisible"] = "true",
+            ["Input.GhostSharingEnabled"] = "false",
+            ["Input.ShowLiveWpm"] = "false",
+            ["Input.ShowLiveRankChanges"] = "false",
+            ["Input.SoundEnabled"] = "true",
+            ["Input.SoundVolumePercent"] = "70",
+            ["Input.ReactionsEnabled"] = "false",
+            ["Input.ReducedMotion"] = "true",
+            ["__RequestVerificationToken"] = token
+        }));
+
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        await using var scope = isolatedFactory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<KeyWarsDbContext>();
+        var profile = await db.UserProfiles.SingleAsync(item => item.SamAccountName == "max.mustermann");
+        Assert.False(profile.ShowLiveWpm);
+        Assert.False(profile.ShowLiveRankChanges);
+        Assert.True(profile.SoundEnabled);
+        Assert.Equal(70, profile.SoundVolumePercent);
+        Assert.False(profile.ReactionsEnabled);
+        Assert.True(profile.ReducedMotion);
+
+        var rooms = scope.ServiceProvider.GetRequiredService<LiveRoomManager>();
+        var room = rooms.CreateRoom(new CreateLiveRoomRequest(profile.Id, profile.DisplayName, "Feedback Runde", "Text", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 8));
+        var page = await client.GetStringAsync($"/arena/{room.RoomId}");
+        var decodedPage = WebUtility.HtmlDecode(page);
+
+        Assert.Contains("data-sound-enabled=\"true\"", page);
+        Assert.Contains("data-sound-volume=\"70\"", page);
+        Assert.Contains("data-reduced-motion=\"true\"", page);
+        Assert.Contains("data-reactions-enabled=\"false\"", page);
+        Assert.DoesNotContain("data-hud-wpm", page);
+        Assert.DoesNotContain("Positive Arena-Reaktionen", decodedPage);
+    }
+
+    [Fact]
     public async Task ArenaLobbyRendersEntryPathsAndRoomCapacityWithoutInfrastructureCopy()
     {
         var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });

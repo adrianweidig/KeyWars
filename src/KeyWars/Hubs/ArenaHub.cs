@@ -6,7 +6,12 @@ using Microsoft.AspNetCore.SignalR;
 namespace KeyWars.Hubs;
 
 [Authorize]
-public sealed class ArenaHub(CurrentUser currentUser, LiveRoomManager rooms, LivePresenceTracker presence, LiveProgressBroadcaster progress) : Hub
+public sealed class ArenaHub(
+    CurrentUser currentUser,
+    LiveRoomManager rooms,
+    LivePresenceTracker presence,
+    LiveProgressBroadcaster progress,
+    LiveReactionService reactions) : Hub
 {
     public async Task<LiveRoomSnapshot> JoinRoom(Guid roomId)
     {
@@ -75,6 +80,29 @@ public sealed class ArenaHub(CurrentUser currentUser, LiveRoomManager rooms, Liv
         var snapshot = rooms.GiveUp(roomId, profile.Id);
         await Clients.Group(roomId.ToString("N")).SendAsync("roomChanged", snapshot, Context.ConnectionAborted);
         return snapshot;
+    }
+
+    public async Task SendReaction(Guid roomId, string key)
+    {
+        var profile = await currentUser.RequireProfileAsync(Context.User!, Context.ConnectionAborted);
+        if (!profile.ReactionsEnabled)
+        {
+            return;
+        }
+
+        var snapshot = rooms.Snapshot(roomId);
+        if (!snapshot.Participants.Any(participant => participant.ProfileId == profile.Id))
+        {
+            throw new InvalidOperationException("Nur aktive Teilnehmende können Arena-Reaktionen senden.");
+        }
+
+        var reaction = reactions.TrySubmit(roomId, profile.Id, profile.DisplayName, key);
+        if (reaction is null)
+        {
+            return;
+        }
+
+        await Clients.Group(roomId.ToString("N")).SendAsync("reactionReceived", reaction, Context.ConnectionAborted);
     }
 
     public async Task<LiveRoomSnapshot?> LeaveRoom(Guid roomId)
