@@ -1,5 +1,6 @@
 using KeyWars.Auth;
 using KeyWars.Data;
+using KeyWars.Domain;
 using KeyWars.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.RateLimiting;
@@ -65,18 +66,7 @@ public static class ApiEndpoints
         {
             var profile = await currentUser.RequireProfileAsync(httpContext.User, cancellationToken);
             var attempt = await attempts.FinishAsync(profile.Id, request, cancellationToken);
-            return Results.Ok(new
-            {
-                attempt.Id,
-                attempt.Wpm,
-                attempt.RawWpm,
-                attempt.CharactersPerMinute,
-                attempt.Accuracy,
-                attempt.Consistency,
-                attempt.CorrectCharacters,
-                attempt.IncorrectCharacters,
-                attempt.Completed
-            });
+            return Results.Ok(BuildAttemptResult(attempt, profile));
         });
 
         api.MapPost("/herausforderungen/{id:guid}/start", async (Guid id, CurrentUser currentUser, HttpContext httpContext, AttemptService attempts, ChallengeService challenges, CancellationToken cancellationToken) =>
@@ -91,18 +81,7 @@ public static class ApiEndpoints
             var profile = await currentUser.RequireProfileAsync(httpContext.User, cancellationToken);
             var attempt = await attempts.FinishAsync(profile.Id, request, cancellationToken);
             await challenges.FinishRoundAsync(id, profile.Id, attempt, cancellationToken);
-            return Results.Ok(new
-            {
-                attempt.Id,
-                attempt.Wpm,
-                attempt.RawWpm,
-                attempt.CharactersPerMinute,
-                attempt.Accuracy,
-                attempt.Consistency,
-                attempt.CorrectCharacters,
-                attempt.IncorrectCharacters,
-                attempt.Completed
-            });
+            return Results.Ok(BuildAttemptResult(attempt, profile));
         });
 
         api.MapGet("/profil/kurz", async (CurrentUser currentUser, HttpContext httpContext, KeyWarsDbContext db, CancellationToken cancellationToken) =>
@@ -117,6 +96,28 @@ public static class ApiEndpoints
                 .ToList();
             return Results.Ok(new { profile.DisplayName, profile.Level, profile.ExperiencePoints, profile.ArenaRating, LastAttempts = last });
         });
+    }
+
+    private static object BuildAttemptResult(TypingAttempt attempt, UserProfile profile)
+    {
+        var progress = MotivationService.GetLevelProgress(profile.ExperiencePoints);
+        return new
+        {
+            attempt.Id,
+            attempt.Wpm,
+            attempt.RawWpm,
+            attempt.CharactersPerMinute,
+            attempt.Accuracy,
+            attempt.Consistency,
+            attempt.CorrectCharacters,
+            attempt.IncorrectCharacters,
+            attempt.Completed,
+            profile.Level,
+            profile.ExperiencePoints,
+            progress.NextLevelXp,
+            progress.RemainingXp,
+            progress.ProgressPercent
+        };
     }
 
     private static bool IsJsonRequest(HttpRequest request)

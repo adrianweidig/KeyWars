@@ -382,6 +382,11 @@ namespace KeyWars.Data.Migrations
                         .HasMaxLength(360)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateOnly>("MissionDate")
                         .HasColumnType("TEXT");
 
@@ -403,7 +408,43 @@ namespace KeyWars.Data.Migrations
 
                     b.HasIndex("UserProfileId", "MissionDate");
 
+                    b.HasIndex("UserProfileId", "MissionDate", "Key")
+                        .IsUnique();
+
                     b.ToTable("Missions");
+                });
+
+            modelBuilder.Entity("KeyWars.Domain.RewardLedgerEntry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("AwardedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceId")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("UserProfileId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Xp")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserProfileId", "Source", "SourceId")
+                        .IsUnique();
+
+                    b.ToTable("RewardLedgerEntries");
                 });
 
             modelBuilder.Entity("KeyWars.Domain.TextCollection", b =>
@@ -966,6 +1007,15 @@ namespace KeyWars.Data.Migrations
                 });
 
             modelBuilder.Entity("KeyWars.Domain.Mission", b =>
+                {
+                    b.HasOne("KeyWars.Domain.UserProfile", null)
+                        .WithMany()
+                        .HasForeignKey("UserProfileId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("KeyWars.Domain.RewardLedgerEntry", b =>
                 {
                     b.HasOne("KeyWars.Domain.UserProfile", null)
                         .WithMany()

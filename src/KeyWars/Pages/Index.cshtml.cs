@@ -18,6 +18,7 @@ public sealed class IndexModel(
     public IReadOnlyList<Mission> Missions { get; private set; } = [];
     public IReadOnlyList<Challenge> Challenges { get; private set; } = [];
     public CoachRecommendation Recommendation { get; private set; } = new("Starte mit einer ruhigen Runde.", TrainingMode.Sprint60, 1);
+    public LevelProgress LevelProgress { get; private set; } = new(1, 0, 0, 200, 0, 200, 0);
     public string LastWpm { get; private set; } = "-";
     public string LastAccuracy { get; private set; } = "-";
 
@@ -25,10 +26,16 @@ public sealed class IndexModel(
     {
         Profile = await currentUser.RequireProfileAsync(User, cancellationToken);
         var today = DateOnly.FromDateTime(timeProvider.GetLocalNow().DateTime);
-        await motivation.EnsureDailyMissionsAsync(Profile.Id, today, cancellationToken);
-        Missions = await db.Missions.Where(item => item.UserProfileId == Profile.Id && item.MissionDate == today).ToListAsync(cancellationToken);
+        var weekStart = MotivationService.GetWeekStart(today);
+        await motivation.EnsureCurrentMissionsAsync(Profile.Id, today, cancellationToken);
+        Missions = await db.Missions
+            .Where(item => item.UserProfileId == Profile.Id && (item.MissionDate == today || item.MissionDate == weekStart))
+            .OrderBy(item => item.MissionDate == today ? 0 : 1)
+            .ThenBy(item => item.Title)
+            .ToListAsync(cancellationToken);
         Challenges = await challenges.ListForProfileAsync(Profile.Id, cancellationToken);
         Recommendation = await motivation.RecommendAsync(Profile.Id, cancellationToken);
+        LevelProgress = MotivationService.GetLevelProgress(Profile.ExperiencePoints);
 
         var lastAttempt = (await db.TypingAttempts
             .Where(item => item.UserProfileId == Profile.Id && item.Completed)

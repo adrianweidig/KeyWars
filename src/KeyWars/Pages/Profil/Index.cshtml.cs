@@ -12,10 +12,12 @@ public sealed class IndexModel(CurrentUser currentUser, KeyWarsDbContext db, Pro
 {
     public UserProfile Profile { get; private set; } = new();
     public IReadOnlyList<TypingAttempt> Attempts { get; private set; } = [];
+    public LevelProgress LevelProgress { get; private set; } = new(1, 0, 0, 200, 0, 200, 0);
 
     public async Task OnGetAsync(CancellationToken cancellationToken)
     {
         Profile = await currentUser.RequireProfileAsync(User, cancellationToken);
+        LevelProgress = MotivationService.GetLevelProgress(Profile.ExperiencePoints);
         Attempts = (await db.TypingAttempts.Where(item => item.UserProfileId == Profile.Id)
             .ToListAsync(cancellationToken))
             .OrderByDescending(item => item.CreatedAt)

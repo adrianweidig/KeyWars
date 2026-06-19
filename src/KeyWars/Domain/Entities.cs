@@ -249,6 +249,8 @@ public sealed class Mission
 {
     public Guid Id { get; set; } = Guid.CreateVersion7();
     public Guid UserProfileId { get; set; }
+    [MaxLength(80)]
+    public string Key { get; set; } = "";
     [MaxLength(160)]
     public string Title { get; set; } = "";
     [MaxLength(360)]
@@ -258,6 +260,18 @@ public sealed class Mission
     public int CurrentValue { get; set; }
     public bool Completed { get; set; }
     public int XpReward { get; set; } = 25;
+}
+
+public sealed class RewardLedgerEntry
+{
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public Guid UserProfileId { get; set; }
+    [MaxLength(64)]
+    public string Source { get; set; } = "";
+    [MaxLength(80)]
+    public string SourceId { get; set; } = "";
+    public int Xp { get; set; }
+    public DateTimeOffset AwardedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
 public sealed class Achievement

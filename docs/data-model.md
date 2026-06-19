@@ -14,6 +14,7 @@ Wichtige Tabellen:
 - `ChallengeAttemptBindings`
 - `LiveRoomSummaries`
 - `Missions`
+- `RewardLedgerEntries`
 - `Achievements`
 - `WeaknessObservations`
 
@@ -53,3 +54,18 @@ enthaelt `ChallengeId`, `ChallengeRoundId`, `UserProfileId`, `TypingAttemptId`,
 `TypingAttemptId` und `(ChallengeRoundId, UserProfileId)` verhindern, dass freie
 Training-Attempts oder wiederverwendete Attempts eine Challenge-Runde
 abschliessen.
+
+## Motivation
+
+`Missions` besitzen einen stabilen `Key`, der die fachliche Mission definiert.
+Anzeigetitel und Beschreibung koennen sich aendern, ohne Fortschritt oder
+Auszahlung zu beeinflussen. Die Kombination aus `UserProfileId`, `MissionDate`
+und `Key` ist eindeutig. Tagesmissionen verwenden das aktuelle lokale Datum,
+Wochenmissionen den Montag der jeweiligen Woche als `MissionDate`.
+
+`RewardLedgerEntries` modelliert XP-Buchungen idempotent. Jede Quelle bucht pro
+Profil ueber `(UserProfileId, Source, SourceId)` genau einmal. Aktuell werden
+Training-/Text-/Challenge-Versuche ueber die Attempt-ID, Arena-Ergebnisse ueber
+den Raum-Idempotency-Key plus Profil-ID und Missionsbelohnungen ueber die
+Mission-ID gebucht. Das Ledger ist Teil von Profil-Export und
+Statistik-Reset/Loeschung.

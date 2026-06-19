@@ -27,7 +27,7 @@ Dieser Tracker folgt dem Audit-Paket `2f3379490dcd`.
 | KW-027 | offen | offen | keine | 64er-Darstellung fehlt |
 | KW-030 | teilweise | offen | Integrationstests fuer Prepared/Started/Finished/Expired, Nonce-Replay, Sprint-Teilabschluss, Session-Finish; HTTP-E2E und Build/Test gruen | Browser-E2E mit echter Eingabe/Fokusverlust und Abbruch-UX fehlen |
 | KW-031 | teilweise | offen | Golden-Master-Unit-Tests fuer Alignment/Formeln/Konsistenz; Integrationstest fuer persistierte Fehler, Wortzeitaggregate und echte Schwaechenmuster; Build/Test gruen | Langzeitgewichtung, Browser-Visual-E2E und vollstaendige Resultatseiten-Abnahme fehlen |
-| KW-032 | teilweise | offen | Integrationstest fuer Missions-XP | Reward-Ledger fehlt |
+| KW-032 | teilweise | offen | Integrationstests fuer Reward-Ledger-Idempotenz, stabile Mission-Keys, Tages-/Wochenmissionen, Arena-XP, Achievement-Definitionen und Ultrakurz-Farm-Schutz; Build/Test gruen | Vollstaendige Achievement-Auswertung fuer alle Kategorien, Wochen-/Team-UI, Browser-E2E fuer sichtbaren XP-/Levelanstieg und alle Auditkriterien fehlen |
 | KW-033 | offen | offen | keine | Profilaggregation fehlt |
 | KW-034 | offen | offen | keine | Saisonmodell fehlt |
 | KW-040 | teilweise | offen | Integrationstests fuer gebundenen Challenge-Start, freie-Attempt-Manipulation, Wiederverwendung, Expiry und Annahmepflicht; Build/Test gruen | Best-of/mehrere Runden, Browser-E2E und echte Parallelabschluss-Evidenz fehlen |

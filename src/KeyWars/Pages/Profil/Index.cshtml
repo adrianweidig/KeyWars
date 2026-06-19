@@ -24,6 +24,10 @@
             <div class="metric"><span>Rating</span><strong>@Model.Profile.ArenaRating</strong></div>
             <div class="metric"><span>Serie</span><strong>@Model.Profile.CurrentStreakDays</strong></div>
         </div>
+        <div class="progress" aria-label="Fortschritt bis zum nächsten Level">
+            <span style="width:@Model.LevelProgress.ProgressPercent.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)%"></span>
+        </div>
+        <p class="muted">@Model.LevelProgress.ProgressXp / @(Model.LevelProgress.NextLevelXp - Model.LevelProgress.LevelStartXp) XP in diesem Level · noch @Model.LevelProgress.RemainingXp XP bis Level @(Model.Profile.Level + 1)</p>
     </article>
     <article class="card">
         <h2>Letzte Versuche</h2>

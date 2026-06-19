@@ -15,7 +15,12 @@ public sealed class ZieleModel(CurrentUser currentUser, KeyWarsDbContext db, Mot
     {
         var profile = await currentUser.RequireProfileAsync(User, cancellationToken);
         var today = DateOnly.FromDateTime(timeProvider.GetLocalNow().DateTime);
-        await motivation.EnsureDailyMissionsAsync(profile.Id, today, cancellationToken);
-        Missions = await db.Missions.Where(item => item.UserProfileId == profile.Id && item.MissionDate == today).ToListAsync(cancellationToken);
+        var weekStart = MotivationService.GetWeekStart(today);
+        await motivation.EnsureCurrentMissionsAsync(profile.Id, today, cancellationToken);
+        Missions = await db.Missions
+            .Where(item => item.UserProfileId == profile.Id && (item.MissionDate == today || item.MissionDate == weekStart))
+            .OrderBy(item => item.MissionDate == today ? 0 : 1)
+            .ThenBy(item => item.Title)
+            .ToListAsync(cancellationToken);
     }
 }

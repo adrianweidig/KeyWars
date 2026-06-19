@@ -310,12 +310,19 @@ export function attachTypingApps() {
       }
 
       const data = await response.json();
+      const progressPercent = Number.isFinite(data.progressPercent) ? Math.max(0, Math.min(100, data.progressPercent)) : 0;
       result.innerHTML = `<div class="metric-row">
         <div class="metric"><span>WPM</span><strong>${numberFormat.format(data.wpm)}</strong></div>
         <div class="metric"><span>Genauigkeit</span><strong>${numberFormat.format(data.accuracy)} %</strong></div>
         <div class="metric"><span>Konsistenz</span><strong>${numberFormat.format(data.consistency)} %</strong></div>
         <div class="metric"><span>Korrekte Zeichen</span><strong>${data.correctCharacters}</strong></div>
+        <div class="metric"><span>Level</span><strong>${data.level}</strong></div>
+        <div class="metric"><span>XP</span><strong>${data.experiencePoints}</strong></div>
       </div>
+      <div class="progress" aria-label="Fortschritt bis zum nächsten Level">
+        <span style="width:${progressPercent}%"></span>
+      </div>
+      <p class="muted">Noch ${data.remainingXp} XP bis Level ${data.level + 1}.</p>
       <p class="metric-note">WPM basiert auf korrekten Zeichen, Roh-WPM auf allen Eingaben. Konsistenz misst die Schwankung der abgeschlossenen Wortzeiten.</p>`;
       result.append(analysis);
       renderAnalysis(data);

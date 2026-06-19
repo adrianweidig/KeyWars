@@ -5,9 +5,77 @@ using Microsoft.EntityFrameworkCore;
 namespace KeyWars.Services;
 
 public sealed record CoachRecommendation(string Text, TrainingMode Mode, int Minutes);
+public enum MissionCadence
+{
+    Daily,
+    Weekly
+}
+
+public sealed record MissionDefinition(string Key, MissionCadence Cadence, string Title, string Description, int TargetValue, int XpReward);
+public sealed record AchievementDefinition(string Key, string Category, string Title, string Description);
+public sealed record LevelProgress(int Level, int ExperiencePoints, int LevelStartXp, int NextLevelXp, int ProgressXp, int RemainingXp, double ProgressPercent);
 
 public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProvider)
 {
+    private const string SourceAttempt = "attempt";
+    private const string SourceArena = "arena";
+    private const string SourceMission = "mission";
+
+    private const string MissionThreeRounds = "daily-three-rounds";
+    private const string MissionAccuracy = "daily-accuracy";
+    private const string MissionTempo = "daily-tempo";
+    private const string MissionArenaOrTeam = "daily-arena-or-team";
+    private const string MissionWeeklyRounds = "weekly-ten-rounds";
+    private const string MissionWeeklyPrecision = "weekly-three-precise";
+    private const string MissionWeeklyArena = "weekly-two-arena";
+    private const string MissionWeeklyTexts = "weekly-text-training";
+
+    private const int MinimumXpCharacters = 20;
+    private const int MinimumXpDurationMilliseconds = 5_000;
+
+    public static IReadOnlyList<AchievementDefinition> AchievementDefinitions { get; } =
+    [
+        new("erster-versuch", "Training", "Erster gültiger Versuch", "Du hast deinen ersten gültigen KeyWars-Versuch abgeschlossen."),
+        new("training-5-attempts", "Training", "Fünf Runden", "Du hast fünf gültige Trainingsrunden abgeschlossen."),
+        new("training-10-attempts", "Training", "Zehn Runden", "Du hast zehn gültige Trainingsrunden abgeschlossen."),
+        new("training-25-attempts", "Training", "Trainingsroutine", "Du hast 25 gültige Trainingsrunden abgeschlossen."),
+        new("training-50-attempts", "Training", "Feste Gewohnheit", "Du hast 50 gültige Trainingsrunden abgeschlossen."),
+        new("training-100-attempts", "Training", "Hundert Runden", "Du hast 100 gültige Trainingsrunden abgeschlossen."),
+        new("training-text-round", "Training", "Text gemeistert", "Du hast eine Textrunde abgeschlossen."),
+        new("training-words-round", "Training", "Worttest erledigt", "Du hast einen Worttest abgeschlossen."),
+        new("training-sprint-round", "Training", "Sprint abgeschlossen", "Du hast einen Zeitsprint abgeschlossen."),
+        new("training-weakness-focus", "Training", "Fehlerfokus genutzt", "Du hast eine Fehlerfokus-Runde abgeschlossen."),
+        new("precision-95", "Präzision", "Saubere Runde", "Du hast eine Runde mit mindestens 95 % Genauigkeit abgeschlossen."),
+        new("praezise", "Präzision", "Präzise Hände", "Ein gültiger Versuch mit mindestens 98 % Genauigkeit."),
+        new("precision-100", "Präzision", "Fehlerfrei", "Du hast eine Runde ohne verbleibende Fehler abgeschlossen."),
+        new("precision-3x-98", "Präzision", "Dreimal sehr präzise", "Du hast drei Runden mit mindestens 98 % Genauigkeit abgeschlossen."),
+        new("precision-10x-95", "Präzision", "Verlässliche Genauigkeit", "Du hast zehn Runden mit mindestens 95 % Genauigkeit abgeschlossen."),
+        new("speed-40", "Tempo", "40 WPM", "Du hast 40 WPM erreicht."),
+        new("speed-60", "Tempo", "60 WPM", "Du hast 60 WPM erreicht."),
+        new("speed-80", "Tempo", "80 WPM", "Du hast 80 WPM erreicht."),
+        new("speed-100", "Tempo", "100 WPM", "Du hast 100 WPM erreicht."),
+        new("speed-personal-best", "Tempo", "Neue Bestleistung", "Du hast deine bisherige WPM-Bestleistung verbessert."),
+        new("streak-3", "Serie", "Drei Tage aktiv", "Du hast an drei Trainingstagen in Folge geübt."),
+        new("streak-7", "Serie", "Sieben Tage aktiv", "Du hast an sieben Trainingstagen in Folge geübt."),
+        new("streak-14", "Serie", "Zwei Wochen aktiv", "Du hast an vierzehn Trainingstagen in Folge geübt."),
+        new("streak-30", "Serie", "Monatsserie", "Du hast an dreißig Trainingstagen in Folge geübt."),
+        new("arena-first", "Arena", "Erstes Rennen", "Du hast deine erste Arena-Runde abgeschlossen."),
+        new("arena-5", "Arena", "Fünf Rennen", "Du hast fünf Arena-Runden abgeschlossen."),
+        new("arena-10", "Arena", "Zehn Rennen", "Du hast zehn Arena-Runden abgeschlossen."),
+        new("arena-rating-1050", "Arena", "Rating 1050", "Du hast ein Arena-Rating von 1050 erreicht."),
+        new("arena-rating-1100", "Arena", "Rating 1100", "Du hast ein Arena-Rating von 1100 erreicht."),
+        new("arena-perfect-accuracy", "Arena", "Arena ohne Fehler", "Du hast eine Arena-Runde mit 100 % Genauigkeit abgeschlossen."),
+        new("text-author-first", "Texte", "Erster eigener Text", "Du hast einen eigenen Trainingstext angelegt."),
+        new("text-author-3", "Texte", "Textsammlung wächst", "Du hast drei eigene Trainingstexte angelegt."),
+        new("text-collection-first", "Texte", "Eigene Sammlung", "Du hast eine eigene Textsammlung angelegt."),
+        new("team-first-challenge", "Team", "Erste Herausforderung", "Du hast deine erste Gruppenherausforderung abgeschlossen."),
+        new("team-3-challenges", "Team", "Drei Herausforderungen", "Du hast drei Gruppenherausforderungen abgeschlossen."),
+        new("team-precise", "Team", "Teampräzision", "Du hast eine Teamrunde mit mindestens 98 % Genauigkeit abgeschlossen."),
+        new("mission-first", "Missionen", "Erste Mission", "Du hast deine erste Mission abgeschlossen."),
+        new("mission-5", "Missionen", "Fünf Missionen", "Du hast fünf Missionen abgeschlossen."),
+        new("mission-weekly", "Missionen", "Wochenziel erreicht", "Du hast eine Wochenmission abgeschlossen.")
+    ];
+
     public async Task ApplyAttemptAsync(Guid profileId, TypingAttempt attempt, string targetText, CancellationToken cancellationToken = default)
     {
         await ApplyAttemptAsync(profileId, attempt, [], cancellationToken);
@@ -15,86 +83,70 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
 
     public async Task ApplyAttemptAsync(Guid profileId, TypingAttempt attempt, IReadOnlyList<TypingError> errors, CancellationToken cancellationToken = default)
     {
-        if (!attempt.Completed || attempt.ExperienceAwarded)
+        if (!attempt.Completed || !attempt.Official)
         {
             return;
         }
 
-        var profile = await db.UserProfiles.SingleAsync(item => item.Id == profileId, cancellationToken);
-        var today = DateOnly.FromDateTime(timeProvider.GetLocalNow().DateTime);
-        profile.ExperiencePoints += CalculateXp(attempt);
-        profile.CurrentStreakDays = CalculateStreak(profile.LastActivityDate, today, profile.CurrentStreakDays);
-        profile.LastActivityDate = today;
-        profile.SeasonPoints += Math.Max(1, (int)Math.Round(attempt.Wpm / 10));
+        var previousBestWpm = await db.TypingAttempts
+            .Where(item => item.UserProfileId == profileId && item.Id != attempt.Id && item.Completed && item.Official)
+            .Select(item => (double?)item.Wpm)
+            .MaxAsync(cancellationToken) ?? 0d;
+        var performance = MotivationPerformance.FromAttempt(profileId, attempt, errors);
+        var xp = CalculateXp(performance, previousBestWpm, attempt.TrainingTextId is not null);
+        var processed = await ApplyPerformanceAsync(performance, xp, previousBestWpm, cancellationToken);
         attempt.ExperienceAwarded = true;
 
-        await EnsureDailyMissionsAsync(profileId, today, cancellationToken);
-        var missions = await db.Missions.Where(item => item.UserProfileId == profileId && item.MissionDate == today).ToListAsync(cancellationToken);
-        var missionXp = 0;
-        foreach (var mission in missions)
+        if (!processed)
         {
-            var wasCompleted = mission.Completed;
-            mission.CurrentValue += mission.Title.Contains("Genauigkeit", StringComparison.OrdinalIgnoreCase)
-                ? attempt.Accuracy >= 95 ? 1 : 0
-                : 1;
-            mission.Completed = mission.CurrentValue >= mission.TargetValue;
-            if (!wasCompleted && mission.Completed)
-            {
-                missionXp += mission.XpReward;
-            }
+            var profile = await db.UserProfiles.SingleAsync(item => item.Id == profileId, cancellationToken);
+            profile.Level = CalculateLevel(profile.ExperiencePoints);
+        }
+    }
+
+    public async Task ApplyArenaResultAsync(
+        Guid profileId,
+        string sourceId,
+        double wpm,
+        double accuracy,
+        int durationMilliseconds,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(sourceId))
+        {
+            throw new InvalidOperationException("Die Arena-Quelle ist ungültig.");
         }
 
-        profile.ExperiencePoints += missionXp;
-        profile.Level = Math.Max(1, profile.ExperiencePoints / 250 + 1);
-
-        await UnlockAchievementAsync(profileId, "erster-versuch", "Erster gültiger Versuch", "Du hast deinen ersten gültigen KeyWars-Versuch abgeschlossen.", cancellationToken);
-        if (attempt.Accuracy >= 98)
-        {
-            await UnlockAchievementAsync(profileId, "praezise", "Präzise Hände", "Ein gültiger Versuch mit mindestens 98 % Genauigkeit.", cancellationToken);
-        }
-
-        var patterns = ExtractErrorPatterns(errors).Distinct(StringComparer.Ordinal).Take(80).ToList();
-        if (patterns.Count == 0)
-        {
-            return;
-        }
-
-        var observations = await db.WeaknessObservations
-            .Where(item => item.UserProfileId == profileId && patterns.Contains(item.Pattern))
-            .ToDictionaryAsync(item => item.Pattern, cancellationToken);
-
-        foreach (var pattern in patterns)
-        {
-            if (!observations.TryGetValue(pattern, out var observation))
-            {
-                observation = new WeaknessObservation { UserProfileId = profileId, Pattern = pattern };
-                db.WeaknessObservations.Add(observation);
-                observations[pattern] = observation;
-            }
-
-            observation.Attempts++;
-            observation.Errors++;
-            observation.AverageMilliseconds = observation.AverageMilliseconds == 0 ? attempt.MeanWordMilliseconds : (observation.AverageMilliseconds * 0.8d) + (attempt.MeanWordMilliseconds * 0.2d);
-            observation.LastSeenAt = timeProvider.GetUtcNow();
-        }
+        var totalCharacters = Math.Max(MinimumXpCharacters, (int)Math.Round(wpm * durationMilliseconds / 12_000d));
+        var performance = new MotivationPerformance(
+            profileId,
+            SourceArena,
+            sourceId.Length <= 80 ? sourceId : sourceId[..80],
+            null,
+            TrainingMode.Text,
+            wpm,
+            accuracy,
+            100,
+            durationMilliseconds,
+            totalCharacters,
+            totalCharacters,
+            true,
+            true,
+            null,
+            false,
+            []);
+        await ApplyPerformanceAsync(performance, CalculateXp(performance, 0d, false), 0d, cancellationToken);
     }
 
     public async Task EnsureDailyMissionsAsync(Guid profileId, DateOnly date, CancellationToken cancellationToken = default)
     {
-        var existing = await db.Missions.CountAsync(item => item.UserProfileId == profileId && item.MissionDate == date, cancellationToken);
-        if (existing >= 3)
-        {
-            return;
-        }
+        await EnsureCurrentMissionsAsync(profileId, date, cancellationToken);
+    }
 
-        var missions = new[]
-        {
-            new Mission { UserProfileId = profileId, MissionDate = date, Title = "Drei kurze Runden", Description = "Schließe heute drei gültige Versuche ab.", TargetValue = 3, XpReward = 30 },
-            new Mission { UserProfileId = profileId, MissionDate = date, Title = "Genauigkeit halten", Description = "Erreiche einmal mindestens 95 % Genauigkeit.", TargetValue = 1, XpReward = 35 },
-            new Mission { UserProfileId = profileId, MissionDate = date, Title = "Tempo festigen", Description = "Beende zwei Sprint- oder Textrunden.", TargetValue = 2, XpReward = 25 }
-        };
-        db.Missions.AddRange(missions.Skip(existing));
-        await db.SaveChangesAsync(cancellationToken);
+    public async Task EnsureCurrentMissionsAsync(Guid profileId, DateOnly date, CancellationToken cancellationToken = default)
+    {
+        await EnsureMissionsAsync(profileId, date, MissionCadence.Daily, cancellationToken);
+        await EnsureMissionsAsync(profileId, GetWeekStart(date), MissionCadence.Weekly, cancellationToken);
     }
 
     public async Task<CoachRecommendation> RecommendAsync(Guid profileId, CancellationToken cancellationToken = default)
@@ -127,11 +179,432 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
         return new CoachRecommendation("Dein Verlauf ist stabil. Ein klassisches Live-Rennen oder ein 60-Sekunden-Sprint setzt einen guten neuen Reiz.", TrainingMode.Sprint60, 1);
     }
 
-    private static int CalculateXp(TypingAttempt attempt)
+    public static LevelProgress GetLevelProgress(int experiencePoints)
     {
-        var baseXp = Math.Clamp((int)Math.Round(attempt.Wpm), 5, 120);
-        var accuracyBonus = attempt.Accuracy >= 98 ? 20 : attempt.Accuracy >= 95 ? 10 : 0;
-        return baseXp + accuracyBonus;
+        var level = CalculateLevel(experiencePoints);
+        var start = XpRequiredForLevel(level);
+        var next = XpRequiredForLevel(level + 1);
+        var progress = Math.Max(0, experiencePoints - start);
+        var span = Math.Max(1, next - start);
+        var remaining = Math.Max(0, next - experiencePoints);
+        return new LevelProgress(level, experiencePoints, start, next, progress, remaining, Math.Clamp(progress * 100d / span, 0d, 100d));
+    }
+
+    public static int CalculateLevel(int experiencePoints)
+    {
+        var level = 1;
+        while (experiencePoints >= XpRequiredForLevel(level + 1))
+        {
+            level++;
+        }
+
+        return level;
+    }
+
+    private async Task<bool> ApplyPerformanceAsync(MotivationPerformance performance, int xp, double previousBestWpm, CancellationToken cancellationToken)
+    {
+        var profile = await db.UserProfiles.SingleAsync(item => item.Id == performance.ProfileId, cancellationToken);
+        var now = timeProvider.GetUtcNow();
+        var today = DateOnly.FromDateTime(timeProvider.GetLocalNow().DateTime);
+
+        if (xp <= 0)
+        {
+            profile.Level = CalculateLevel(profile.ExperiencePoints);
+            UpdateWeaknesses(performance, now);
+            return false;
+        }
+
+        var booked = await AwardXpAsync(profile, performance.Source, performance.SourceId, xp, now, cancellationToken);
+        if (!booked)
+        {
+            profile.Level = CalculateLevel(profile.ExperiencePoints);
+            return false;
+        }
+
+        profile.CurrentStreakDays = CalculateStreak(profile.LastActivityDate, today, profile.CurrentStreakDays);
+        profile.LastActivityDate = today;
+        if (performance.CountsForSeason)
+        {
+            profile.SeasonPoints += Math.Max(1, (int)Math.Round(performance.Wpm / 10));
+        }
+
+        await EnsureCurrentMissionsAsync(profile.Id, today, cancellationToken);
+        var activeMissionDates = new[] { today, GetWeekStart(today) }.Distinct().ToArray();
+        var missions = await db.Missions
+            .Where(item => item.UserProfileId == profile.Id && activeMissionDates.Contains(item.MissionDate))
+            .ToListAsync(cancellationToken);
+        foreach (var mission in missions)
+        {
+            var delta = MissionProgressDelta(mission, performance);
+            if (delta <= 0)
+            {
+                continue;
+            }
+
+            var wasCompleted = mission.Completed;
+            mission.CurrentValue = Math.Min(mission.TargetValue, mission.CurrentValue + delta);
+            mission.Completed = mission.CurrentValue >= mission.TargetValue;
+            if (!wasCompleted && mission.Completed)
+            {
+                await AwardXpAsync(profile, SourceMission, mission.Id.ToString("N"), mission.XpReward, now, cancellationToken);
+            }
+        }
+
+        profile.Level = CalculateLevel(profile.ExperiencePoints);
+        await UnlockAchievementsAsync(profile, performance, previousBestWpm, now, cancellationToken);
+        UpdateWeaknesses(performance, now);
+        return true;
+    }
+
+    private async Task EnsureMissionsAsync(Guid profileId, DateOnly periodStart, MissionCadence cadence, CancellationToken cancellationToken)
+    {
+        var definitions = MissionDefinitions.Where(definition => definition.Cadence == cadence).ToArray();
+        var existingKeys = await db.Missions
+            .Where(item => item.UserProfileId == profileId && item.MissionDate == periodStart)
+            .Select(item => item.Key)
+            .ToListAsync(cancellationToken);
+        var missing = definitions
+            .Where(definition => !existingKeys.Contains(definition.Key, StringComparer.Ordinal))
+            .ToArray();
+        if (missing.Length == 0)
+        {
+            return;
+        }
+
+        db.Missions.AddRange(missing.Select(definition => new Mission
+        {
+            UserProfileId = profileId,
+            MissionDate = periodStart,
+            Key = definition.Key,
+            Title = definition.Title,
+            Description = definition.Description,
+            TargetValue = definition.TargetValue,
+            XpReward = definition.XpReward
+        }));
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private static int CalculateXp(MotivationPerformance performance, double previousBestWpm, bool demandingText)
+    {
+        if (!performance.Completed ||
+            !performance.Official ||
+            Math.Max(performance.CorrectCharacters, performance.TotalCharacters) < MinimumXpCharacters ||
+            performance.DurationMilliseconds < MinimumXpDurationMilliseconds)
+        {
+            return 0;
+        }
+
+        var baseXp = Math.Clamp((int)Math.Round(performance.Wpm), 5, 80);
+        var accuracyBonus = performance.Accuracy >= 99.9 ? 25 : performance.Accuracy >= 98 ? 20 : performance.Accuracy >= 95 ? 10 : 0;
+        var improvementBonus = previousBestWpm > 0 && performance.Wpm >= previousBestWpm + 5
+            ? 15
+            : previousBestWpm > 0 && performance.Wpm >= previousBestWpm + 2
+                ? 8
+                : 0;
+        var textBonus = demandingText && performance.TotalCharacters >= 120 ? 10 : 0;
+        var arenaBonus = performance.Source == SourceArena ? 10 : 0;
+        return Math.Min(140, baseXp + accuracyBonus + improvementBonus + textBonus + arenaBonus);
+    }
+
+    private static int XpRequiredForLevel(int level)
+    {
+        var completedLevels = Math.Max(0, level - 1);
+        return (200 * completedLevels) + (25 * completedLevels * (completedLevels - 1));
+    }
+
+    private async Task<bool> AwardXpAsync(UserProfile profile, string source, string sourceId, int xp, DateTimeOffset awardedAt, CancellationToken cancellationToken)
+    {
+        if (xp <= 0)
+        {
+            return false;
+        }
+
+        var localExists = db.RewardLedgerEntries.Local.Any(item =>
+            item.UserProfileId == profile.Id &&
+            item.Source == source &&
+            item.SourceId == sourceId);
+        var exists = localExists || await db.RewardLedgerEntries.AnyAsync(item =>
+            item.UserProfileId == profile.Id &&
+            item.Source == source &&
+            item.SourceId == sourceId, cancellationToken);
+        if (exists)
+        {
+            return false;
+        }
+
+        db.RewardLedgerEntries.Add(new RewardLedgerEntry
+        {
+            UserProfileId = profile.Id,
+            Source = source,
+            SourceId = sourceId,
+            Xp = xp,
+            AwardedAt = awardedAt
+        });
+        profile.ExperiencePoints += xp;
+        return true;
+    }
+
+    private async Task UnlockAchievementsAsync(UserProfile profile, MotivationPerformance performance, double previousBestWpm, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var completedAttemptsQuery = db.TypingAttempts.Where(item =>
+            item.UserProfileId == profile.Id &&
+            item.Completed &&
+            item.Official);
+        if (performance.AttemptId is { } attemptId)
+        {
+            completedAttemptsQuery = completedAttemptsQuery.Where(item => item.Id != attemptId);
+        }
+
+        var completedAttempts = await completedAttemptsQuery.CountAsync(cancellationToken);
+        if (performance.Source == SourceAttempt)
+        {
+            completedAttempts++;
+        }
+
+        var precise98Query = db.TypingAttempts.Where(item =>
+            item.UserProfileId == profile.Id &&
+            item.Completed &&
+            item.Official &&
+            item.Accuracy >= 98);
+        if (performance.AttemptId is { } preciseAttemptId)
+        {
+            precise98Query = precise98Query.Where(item => item.Id != preciseAttemptId);
+        }
+
+        var precise98Attempts = await precise98Query.CountAsync(cancellationToken);
+        if (performance.Source == SourceAttempt && performance.Accuracy >= 98)
+        {
+            precise98Attempts++;
+        }
+
+        var precise95Query = db.TypingAttempts.Where(item =>
+            item.UserProfileId == profile.Id &&
+            item.Completed &&
+            item.Official &&
+            item.Accuracy >= 95);
+        if (performance.AttemptId is { } precise95AttemptId)
+        {
+            precise95Query = precise95Query.Where(item => item.Id != precise95AttemptId);
+        }
+
+        var precise95Attempts = await precise95Query.CountAsync(cancellationToken);
+        if (performance.Source == SourceAttempt && performance.Accuracy >= 95)
+        {
+            precise95Attempts++;
+        }
+
+        var authoredTexts = await db.TrainingTexts.CountAsync(item => item.OwnerProfileId == profile.Id, cancellationToken);
+        var collections = await db.TextCollections.CountAsync(item => item.OwnerProfileId == profile.Id, cancellationToken);
+        var challengeResults = await db.ChallengeRoundResults.CountAsync(item => item.UserProfileId == profile.Id && item.Status == ParticipantStatus.Finished, cancellationToken);
+        var arenaResults = await db.LiveRoomParticipantSummaries.CountAsync(item => item.UserProfileId == profile.Id && item.Status == ParticipantStatus.Finished, cancellationToken);
+        if (performance.Source == SourceArena)
+        {
+            arenaResults++;
+        }
+
+        var completedMissionIds = new HashSet<Guid>(
+            await db.Missions.Where(item => item.UserProfileId == profile.Id && item.Completed).Select(item => item.Id).ToListAsync(cancellationToken));
+        foreach (var mission in db.Missions.Local.Where(item => item.UserProfileId == profile.Id && item.Completed))
+        {
+            completedMissionIds.Add(mission.Id);
+        }
+
+        var weeklyMissionCompleted = await db.Missions.AnyAsync(item =>
+            item.UserProfileId == profile.Id &&
+            item.Completed &&
+            item.Key.StartsWith("weekly-"), cancellationToken);
+        weeklyMissionCompleted = weeklyMissionCompleted || db.Missions.Local.Any(item =>
+            item.UserProfileId == profile.Id &&
+            item.Completed &&
+            item.Key.StartsWith("weekly-", StringComparison.Ordinal));
+        var bestWpm = Math.Max(previousBestWpm, performance.Wpm);
+        var unlock = new HashSet<string>(StringComparer.Ordinal);
+
+        AddThresholds(unlock, completedAttempts, [
+            (1, "erster-versuch"),
+            (5, "training-5-attempts"),
+            (10, "training-10-attempts"),
+            (25, "training-25-attempts"),
+            (50, "training-50-attempts"),
+            (100, "training-100-attempts")
+        ]);
+        if (performance.Mode == TrainingMode.Text)
+        {
+            unlock.Add("training-text-round");
+        }
+
+        if (performance.Mode is TrainingMode.Words10 or TrainingMode.Words25 or TrainingMode.Words50 or TrainingMode.Words100)
+        {
+            unlock.Add("training-words-round");
+        }
+
+        if (performance.Mode is TrainingMode.Sprint15 or TrainingMode.Sprint30 or TrainingMode.Sprint60 or TrainingMode.Sprint120)
+        {
+            unlock.Add("training-sprint-round");
+        }
+
+        if (performance.Mode == TrainingMode.WeaknessFocus)
+        {
+            unlock.Add("training-weakness-focus");
+        }
+
+        if (performance.Accuracy >= 95)
+        {
+            unlock.Add("precision-95");
+        }
+
+        if (performance.Accuracy >= 98)
+        {
+            unlock.Add("praezise");
+        }
+
+        if (performance.Accuracy >= 99.9)
+        {
+            unlock.Add("precision-100");
+        }
+
+        AddThresholds(unlock, precise98Attempts, [(3, "precision-3x-98")]);
+        AddThresholds(unlock, precise95Attempts, [(10, "precision-10x-95")]);
+        AddSpeedThresholds(unlock, bestWpm);
+        if (previousBestWpm > 0 && performance.Wpm >= previousBestWpm + 2)
+        {
+            unlock.Add("speed-personal-best");
+        }
+
+        AddThresholds(unlock, profile.CurrentStreakDays, [
+            (3, "streak-3"),
+            (7, "streak-7"),
+            (14, "streak-14"),
+            (30, "streak-30")
+        ]);
+        AddThresholds(unlock, Math.Max(profile.RatedMatchCount, arenaResults), [
+            (1, "arena-first"),
+            (5, "arena-5"),
+            (10, "arena-10")
+        ]);
+        if (profile.ArenaRating >= 1050)
+        {
+            unlock.Add("arena-rating-1050");
+        }
+
+        if (profile.ArenaRating >= 1100)
+        {
+            unlock.Add("arena-rating-1100");
+        }
+
+        if (performance.Source == SourceArena && performance.Accuracy >= 99.9)
+        {
+            unlock.Add("arena-perfect-accuracy");
+        }
+
+        AddThresholds(unlock, authoredTexts, [
+            (1, "text-author-first"),
+            (3, "text-author-3")
+        ]);
+        if (collections >= 1)
+        {
+            unlock.Add("text-collection-first");
+        }
+
+        AddThresholds(unlock, challengeResults, [
+            (1, "team-first-challenge"),
+            (3, "team-3-challenges")
+        ]);
+        if (challengeResults >= 1 && performance.Accuracy >= 98)
+        {
+            unlock.Add("team-precise");
+        }
+
+        AddThresholds(unlock, completedMissionIds.Count, [
+            (1, "mission-first"),
+            (5, "mission-5")
+        ]);
+        if (weeklyMissionCompleted)
+        {
+            unlock.Add("mission-weekly");
+        }
+
+        var definitions = AchievementDefinitions.ToDictionary(item => item.Key, StringComparer.Ordinal);
+        var existing = new HashSet<string>(
+            await db.Achievements.Where(item => item.UserProfileId == profile.Id).Select(item => item.Key).ToListAsync(cancellationToken),
+            StringComparer.Ordinal);
+        foreach (var key in unlock)
+        {
+            if (!existing.Contains(key) && definitions.TryGetValue(key, out var definition))
+            {
+                db.Achievements.Add(new Achievement
+                {
+                    UserProfileId = profile.Id,
+                    Key = definition.Key,
+                    Title = definition.Title,
+                    Description = definition.Description,
+                    UnlockedAt = now
+                });
+                existing.Add(key);
+            }
+        }
+    }
+
+    private void UpdateWeaknesses(MotivationPerformance performance, DateTimeOffset now)
+    {
+        var patterns = ExtractErrorPatterns(performance.Errors).Distinct(StringComparer.Ordinal).Take(80).ToList();
+        if (patterns.Count == 0)
+        {
+            return;
+        }
+
+        var observations = db.WeaknessObservations
+            .Where(item => item.UserProfileId == performance.ProfileId && patterns.Contains(item.Pattern))
+            .ToDictionary(item => item.Pattern, StringComparer.Ordinal);
+
+        foreach (var pattern in patterns)
+        {
+            if (!observations.TryGetValue(pattern, out var observation))
+            {
+                observation = new WeaknessObservation { UserProfileId = performance.ProfileId, Pattern = pattern };
+                db.WeaknessObservations.Add(observation);
+                observations[pattern] = observation;
+            }
+
+            observation.Attempts++;
+            observation.Errors++;
+            observation.AverageMilliseconds = observation.AverageMilliseconds == 0 ? performance.MeanWordMilliseconds : (observation.AverageMilliseconds * 0.8d) + (performance.MeanWordMilliseconds * 0.2d);
+            observation.LastSeenAt = now;
+        }
+    }
+
+    private static int MissionProgressDelta(Mission mission, MotivationPerformance performance) => mission.Key switch
+    {
+        MissionThreeRounds => 1,
+        MissionAccuracy => performance.Accuracy >= 95 ? 1 : 0,
+        MissionTempo => IsTempoMode(performance.Mode) ? 1 : 0,
+        MissionArenaOrTeam => performance.Source == SourceArena ? 1 : 0,
+        MissionWeeklyRounds => 1,
+        MissionWeeklyPrecision => performance.Accuracy >= 98 ? 1 : 0,
+        MissionWeeklyArena => performance.Source == SourceArena ? 1 : 0,
+        MissionWeeklyTexts => performance.TrainingTextId is not null ? 1 : 0,
+        _ => 0
+    };
+
+    private static IReadOnlyList<MissionDefinition> MissionDefinitions =>
+    [
+        new(MissionThreeRounds, MissionCadence.Daily, "Drei kurze Runden", "Schließe heute drei gültige Versuche ab.", 3, 30),
+        new(MissionAccuracy, MissionCadence.Daily, "Genauigkeit halten", "Erreiche einmal mindestens 95 % Genauigkeit.", 1, 35),
+        new(MissionTempo, MissionCadence.Daily, "Tempo festigen", "Beende zwei Sprint- oder Textrunden.", 2, 25),
+        new(MissionArenaOrTeam, MissionCadence.Daily, "Gemeinsam antreten", "Schließe heute eine Arena-Runde ab.", 1, 25),
+        new(MissionWeeklyRounds, MissionCadence.Weekly, "Zehn Runden in der Woche", "Schließe in dieser Woche zehn gültige Runden ab.", 10, 80),
+        new(MissionWeeklyPrecision, MissionCadence.Weekly, "Drei Präzisionsrunden", "Erreiche in dieser Woche dreimal mindestens 98 % Genauigkeit.", 3, 90),
+        new(MissionWeeklyArena, MissionCadence.Weekly, "Zwei Arena-Runden", "Schließe in dieser Woche zwei Arena-Runden ab.", 2, 70),
+        new(MissionWeeklyTexts, MissionCadence.Weekly, "Texte trainieren", "Schließe in dieser Woche drei Runden mit gespeicherten Texten ab.", 3, 60)
+    ];
+
+    private static bool IsTempoMode(TrainingMode mode) =>
+        mode is TrainingMode.Sprint15 or TrainingMode.Sprint30 or TrainingMode.Sprint60 or TrainingMode.Sprint120 or TrainingMode.Text;
+
+    public static DateOnly GetWeekStart(DateOnly date)
+    {
+        var offset = ((int)date.DayOfWeek + 6) % 7;
+        return date.AddDays(-offset);
     }
 
     private static int CalculateStreak(DateOnly? lastActivity, DateOnly today, int current)
@@ -144,12 +617,37 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
         return lastActivity == today.AddDays(-1) ? current + 1 : 1;
     }
 
-    private async Task UnlockAchievementAsync(Guid profileId, string key, string title, string description, CancellationToken cancellationToken)
+    private static void AddThresholds(HashSet<string> unlock, int value, IReadOnlyList<(int Threshold, string Key)> thresholds)
     {
-        var exists = await db.Achievements.AnyAsync(item => item.UserProfileId == profileId && item.Key == key, cancellationToken);
-        if (!exists)
+        foreach (var (threshold, key) in thresholds)
         {
-            db.Achievements.Add(new Achievement { UserProfileId = profileId, Key = key, Title = title, Description = description });
+            if (value >= threshold)
+            {
+                unlock.Add(key);
+            }
+        }
+    }
+
+    private static void AddSpeedThresholds(HashSet<string> unlock, double bestWpm)
+    {
+        if (bestWpm >= 40)
+        {
+            unlock.Add("speed-40");
+        }
+
+        if (bestWpm >= 60)
+        {
+            unlock.Add("speed-60");
+        }
+
+        if (bestWpm >= 80)
+        {
+            unlock.Add("speed-80");
+        }
+
+        if (bestWpm >= 100)
+        {
+            unlock.Add("speed-100");
         }
     }
 
@@ -172,5 +670,48 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
                 yield return error.Pattern;
             }
         }
+    }
+
+    private sealed record MotivationPerformance(
+        Guid ProfileId,
+        string Source,
+        string SourceId,
+        Guid? AttemptId,
+        TrainingMode Mode,
+        double Wpm,
+        double Accuracy,
+        double Consistency,
+        int DurationMilliseconds,
+        int CorrectCharacters,
+        int TotalCharacters,
+        bool Completed,
+        bool Official,
+        Guid? TrainingTextId,
+        bool CountsForSeason,
+        IReadOnlyList<TypingError> Errors)
+    {
+        public double MeanWordMilliseconds { get; private init; }
+
+        public static MotivationPerformance FromAttempt(Guid profileId, TypingAttempt attempt, IReadOnlyList<TypingError> errors) =>
+            new(
+                profileId,
+                SourceAttempt,
+                attempt.Id.ToString("N"),
+                attempt.Id,
+                attempt.Mode,
+                attempt.Wpm,
+                attempt.Accuracy,
+                attempt.Consistency,
+                attempt.DurationMilliseconds,
+                attempt.CorrectCharacters,
+                attempt.TotalCharacters,
+                attempt.Completed,
+                attempt.Official,
+                attempt.TrainingTextId,
+                true,
+                errors)
+            {
+                MeanWordMilliseconds = attempt.MeanWordMilliseconds
+            };
     }
 }

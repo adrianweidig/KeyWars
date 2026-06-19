@@ -23,7 +23,7 @@ Statuswerte:
 | Live-HUD und Podium | geplant | KW-024, KW-025 |
 | Mehrere Runden/Best-of | geplant | Raumvertrag lehnt Serien bis zur KW-018-Implementierung ab |
 | Zuschauer | geplant | KW-027 |
-| XP/Level/Missionen | teilweise | Reward-Ledger KW-032 offen |
+| XP/Level/Missionen | teilweise | Idempotentes Reward-Ledger, stabile Tages-/Wochenmissionen, Level-Fortschritt und 30+ Achievement-Definitionen vorhanden; vollstaendige Achievement-UI/E2E und alle Auditkriterien noch offen |
 | Arena-Rating | teilweise | transaktionale Persistenz KW-016/KW-034 offen |
 | Profiltrends und Kalender | geplant | KW-033 |
 | Datenschutz-Reset/Loeschung | teilweise | Export/Reset/Loeschung mit Re-Provisioning getestet, aktive Browser-E2E offen |

@@ -19,6 +19,7 @@ public sealed class KeyWarsDbContext(DbContextOptions<KeyWarsDbContext> options)
     public DbSet<LiveRoomSummary> LiveRoomSummaries => Set<LiveRoomSummary>();
     public DbSet<LiveRoomParticipantSummary> LiveRoomParticipantSummaries => Set<LiveRoomParticipantSummary>();
     public DbSet<Mission> Missions => Set<Mission>();
+    public DbSet<RewardLedgerEntry> RewardLedgerEntries => Set<RewardLedgerEntry>();
     public DbSet<Achievement> Achievements => Set<Achievement>();
     public DbSet<WeaknessObservation> WeaknessObservations => Set<WeaknessObservation>();
 
@@ -209,9 +210,19 @@ public sealed class KeyWarsDbContext(DbContextOptions<KeyWarsDbContext> options)
         modelBuilder.Entity<Mission>(entity =>
         {
             entity.HasIndex(mission => new { mission.UserProfileId, mission.MissionDate });
+            entity.HasIndex(mission => new { mission.UserProfileId, mission.MissionDate, mission.Key }).IsUnique();
             entity.HasOne<UserProfile>()
                 .WithMany()
                 .HasForeignKey(mission => mission.UserProfileId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<RewardLedgerEntry>(entity =>
+        {
+            entity.HasIndex(entry => new { entry.UserProfileId, entry.Source, entry.SourceId }).IsUnique();
+            entity.HasOne<UserProfile>()
+                .WithMany()
+                .HasForeignKey(entry => entry.UserProfileId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

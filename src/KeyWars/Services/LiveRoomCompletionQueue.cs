@@ -190,6 +190,7 @@ public sealed class SqliteLiveRoomCompletionWriter(IServiceScopeFactory scopeFac
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<KeyWarsDbContext>();
+        var motivation = scope.ServiceProvider.GetRequiredService<MotivationService>();
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         if (await db.LiveRoomSummaries.AnyAsync(item => item.Id == record.Id || item.IdempotencyKey == record.IdempotencyKey, cancellationToken))
         {
@@ -262,6 +263,17 @@ public sealed class SqliteLiveRoomCompletionWriter(IServiceScopeFactory scopeFac
                 Accuracy = participant.Accuracy,
                 RatingDelta = ratingDeltas[participant.UserProfileId]
             });
+
+            if (!isServerAbort && participant.Status == ParticipantStatus.Finished)
+            {
+                await motivation.ApplyArenaResultAsync(
+                    participant.UserProfileId,
+                    $"{record.IdempotencyKey}:{participant.UserProfileId:N}",
+                    participant.Wpm,
+                    participant.Accuracy,
+                    participant.DurationMilliseconds,
+                    cancellationToken);
+            }
         }
 
         await db.SaveChangesAsync(cancellationToken);

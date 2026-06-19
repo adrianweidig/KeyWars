@@ -41,6 +41,8 @@ public sealed class LiveRoomCompletionQueueTests
         Assert.True(profiles.Single(item => item.Id == second).ArenaRating < 1000);
         Assert.Equal(profiles.Single(item => item.Id == first).ArenaRating - 1000, participants.Single(item => item.UserProfileId == first).RatingDelta);
         Assert.Equal(profiles.Single(item => item.Id == second).ArenaRating - 1000, participants.Single(item => item.UserProfileId == second).RatingDelta);
+        Assert.Equal(2, await db.RewardLedgerEntries.CountAsync(item => item.Source == "arena"));
+        Assert.Contains(await db.Missions.ToListAsync(), item => item.UserProfileId == first && item.Key == "daily-arena-or-team" && item.Completed);
     }
 
     [Fact]
@@ -167,6 +169,8 @@ public sealed class LiveRoomCompletionQueueTests
             var services = new ServiceCollection();
             services.AddDbContext<KeyWarsDbContext>(options => options.UseSqlite(connection));
             services.AddSingleton(Options.Create(new LiveOptions { CompletionQueueCapacity = 16 }));
+            services.AddSingleton<TimeProvider>(TimeProvider.System);
+            services.AddScoped<MotivationService>();
             services.AddSingleton<SqliteLiveRoomCompletionWriter>();
             FlakyCompletionWriter? flakyWriter = null;
             if (transientFailureOnFirstWrite)

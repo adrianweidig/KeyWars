@@ -9,7 +9,7 @@ Der Profilexport enthaelt nur Daten des angemeldeten Profils:
 
 - Profilstammdaten und KeyWars-Einstellungen;
 - Tippversuche;
-- Missionen und Erfolge;
+- Reward-Ledger, Missionen und Erfolge;
 - Schwaechenbeobachtungen;
 - eigene Texte und Sammlungen;
 - eigene Challenge-Teilnahmen und Rundenergebnisse;
@@ -19,8 +19,8 @@ Der Export enthaelt eine Versionsnummer und einen Erstellzeitpunkt.
 
 ## Statistik Zuruecksetzen
 
-Der Statistik-Reset ist transaktional. Er entfernt Tippversuche, Missionen,
-Erfolge und Schwaechenbeobachtungen. XP, Level, Serie, Saisonpunkte,
+Der Statistik-Reset ist transaktional. Er entfernt Tippversuche, Reward-Ledger,
+Missionen, Erfolge und Schwaechenbeobachtungen. XP, Level, Serie, Saisonpunkte,
 Arena-Rating und gewertete Matchanzahl werden auf Startwerte gesetzt.
 
 AD-Identitaet, Profilangaben, eigene Texte und Sammlungen bleiben erhalten.

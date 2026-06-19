@@ -25,8 +25,14 @@
             <div class="metric"><span>Genauigkeit</span><strong>@Model.LastAccuracy %</strong></div>
             <div class="metric"><span>Serie</span><strong>@Model.Profile.CurrentStreakDays Tage</strong></div>
             <div class="metric"><span>Arena</span><strong>@Model.Profile.ArenaRating</strong></div>
+            <div class="metric"><span>Level</span><strong>@Model.Profile.Level</strong></div>
+            <div class="metric"><span>XP</span><strong>@Model.Profile.ExperiencePoints</strong></div>
         </div>
-        <h3>Tagesmissionen</h3>
+        <div class="progress" aria-label="Fortschritt bis zum nächsten Level">
+            <span style="width:@Model.LevelProgress.ProgressPercent.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)%"></span>
+        </div>
+        <p class="muted">Noch @Model.LevelProgress.RemainingXp XP bis Level @(Model.Profile.Level + 1).</p>
+        <h3>Missionen</h3>
         <div class="grid">
             @foreach (var mission in Model.Missions)
             {

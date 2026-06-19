@@ -10,6 +10,7 @@ public sealed record ProfileExportPayload(
     UserProfile Profile,
     IReadOnlyList<TypingAttempt> Attempts,
     IReadOnlyList<TypingAttemptError> AttemptErrors,
+    IReadOnlyList<RewardLedgerEntry> RewardLedger,
     IReadOnlyList<Mission> Missions,
     IReadOnlyList<Achievement> Achievements,
     IReadOnlyList<WeaknessObservation> WeaknessObservations,
@@ -30,6 +31,7 @@ public sealed class ProfilePrivacyService(KeyWarsDbContext db, LiveRoomManager l
             profile,
             await db.TypingAttempts.Where(item => item.UserProfileId == profileId).ToListAsync(cancellationToken),
             await db.TypingAttemptErrors.Where(item => item.UserProfileId == profileId).ToListAsync(cancellationToken),
+            await db.RewardLedgerEntries.Where(item => item.UserProfileId == profileId).ToListAsync(cancellationToken),
             await db.Missions.Where(item => item.UserProfileId == profileId).ToListAsync(cancellationToken),
             await db.Achievements.Where(item => item.UserProfileId == profileId).ToListAsync(cancellationToken),
             await db.WeaknessObservations.Where(item => item.UserProfileId == profileId).ToListAsync(cancellationToken),
@@ -102,6 +104,7 @@ public sealed class ProfilePrivacyService(KeyWarsDbContext db, LiveRoomManager l
         await db.TypingAttemptErrors.Where(item => item.UserProfileId == profileId).ExecuteDeleteAsync(cancellationToken);
         await db.ChallengeAttemptBindings.Where(item => item.UserProfileId == profileId).ExecuteDeleteAsync(cancellationToken);
         await db.TypingAttempts.Where(item => item.UserProfileId == profileId).ExecuteDeleteAsync(cancellationToken);
+        await db.RewardLedgerEntries.Where(item => item.UserProfileId == profileId).ExecuteDeleteAsync(cancellationToken);
         await db.Missions.Where(item => item.UserProfileId == profileId).ExecuteDeleteAsync(cancellationToken);
         await db.Achievements.Where(item => item.UserProfileId == profileId).ExecuteDeleteAsync(cancellationToken);
         await db.WeaknessObservations.Where(item => item.UserProfileId == profileId).ExecuteDeleteAsync(cancellationToken);
