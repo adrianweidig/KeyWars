@@ -49,6 +49,9 @@ anderen Umgebungen wird ausschliesslich LDAP/LDAPS verwendet.
 | Variable | Standard | Verbraucher | Regel |
 | --- | --- | --- | --- |
 | `KEYWARS__CONTENT__MAX_UPLOAD_BYTES` | `131072` | `TextLibraryService` | Importlimit |
+| `KEYWARS__CONTENT__MAX_TEXT_CHARACTERS` | `20000` | `TextLibraryService` | maximale UTF-16-Zeichen nach NFC-Normalisierung |
+| `KEYWARS__CONTENT__MAX_TEXT_GRAPHEMES` | `20000` | `TextLibraryService` | maximale Grapheme nach NFC-Normalisierung |
+| `KEYWARS__CONTENT__MAX_TEXT_LINES` | `400` | `TextLibraryService` | maximale Zeilenanzahl |
 | `KEYWARS__CHALLENGES__MAX_PARTICIPANTS` | `64` | `ChallengeService` | mindestens 2 |
 
 ## Daten

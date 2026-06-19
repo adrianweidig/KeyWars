@@ -15,12 +15,30 @@
     </div>
 </section>
 
+<section class="card">
+    <form method="get" class="form-grid-spaced">
+        <label>
+            Suche
+            <input asp-for="Suche" />
+        </label>
+        <label>
+            Sichtbarkeit
+            <select asp-for="Sichtbarkeit">
+                <option value="">Alle sichtbaren Texte</option>
+                <option value="Private">Privat</option>
+                <option value="Organization">Organisationsweit</option>
+            </select>
+        </label>
+        <button type="submit">Filtern</button>
+    </form>
+</section>
+
 <section class="grid">
     @foreach (var text in Model.Texts)
     {
         <article class="card">
             <h2>@text.Title</h2>
-            <p class="muted">@text.CharacterCount Zeichen · @(text.IsStandard ? "Standard" : text.Visibility)</p>
+            <p class="muted">@text.CharacterCount Zeichen · @(text.IsStandard ? "Standard" : DisplayNames.For(text.Visibility))</p>
             <div class="action-row">
                 <a class="button secondary" asp-page="/Texte/Details" asp-route-id="@text.Id">Ansehen</a>
                 <a class="button secondary" asp-page="/Spielen/Text" asp-route-id="@text.Id">Trainieren</a>

@@ -199,7 +199,8 @@ button.secondary {
   color: var(--text);
 }
 
-.button.warning {
+.button.warning,
+button.warning {
   background: var(--warn);
 }
 

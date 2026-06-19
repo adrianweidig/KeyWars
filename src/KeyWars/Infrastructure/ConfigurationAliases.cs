@@ -71,6 +71,9 @@ public static class ConfigurationAliases
         var section = configuration.GetSection("KEYWARS:CONTENT");
         section.Bind(options);
         SetInt(section, "MAX_UPLOAD_BYTES", value => options.MaxUploadBytes = value);
+        SetInt(section, "MAX_TEXT_CHARACTERS", value => options.MaxTextCharacters = value);
+        SetInt(section, "MAX_TEXT_GRAPHEMES", value => options.MaxTextGraphemes = value);
+        SetInt(section, "MAX_TEXT_LINES", value => options.MaxTextLines = value);
     }
 
     private static void SetString(IConfiguration section, string key, Action<string> set)

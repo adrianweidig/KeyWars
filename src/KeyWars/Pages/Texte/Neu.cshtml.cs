@@ -30,8 +30,16 @@ public sealed class NeuModel(CurrentUser currentUser, TextLibraryService texts) 
         }
 
         var profile = await currentUser.RequireProfileAsync(User, cancellationToken);
-        var text = await texts.CreateAsync(profile.Id, Input.Title, Input.Body, Input.Visibility, cancellationToken);
-        return RedirectToPage("/Texte/Details", new { id = text.Id });
+        try
+        {
+            var text = await texts.CreateAsync(profile.Id, Input.Title, Input.Body, Input.Visibility, cancellationToken);
+            return RedirectToPage("/Texte/Details", new { id = text.Id });
+        }
+        catch (InvalidOperationException ex)
+        {
+            ModelState.AddModelError(string.Empty, ex.Message);
+            return Page();
+        }
     }
 
     public async Task<IActionResult> OnPostUploadAsync(CancellationToken cancellationToken)
@@ -42,8 +50,16 @@ public sealed class NeuModel(CurrentUser currentUser, TextLibraryService texts) 
             return Page();
         }
 
-        var text = await texts.CreateFromUploadAsync(HttpContext, Upload, UploadVisibility, cancellationToken);
-        return RedirectToPage("/Texte/Details", new { id = text.Id });
+        try
+        {
+            var text = await texts.CreateFromUploadAsync(HttpContext, Upload, UploadVisibility, cancellationToken);
+            return RedirectToPage("/Texte/Details", new { id = text.Id });
+        }
+        catch (InvalidOperationException ex)
+        {
+            ModelState.AddModelError(string.Empty, ex.Message);
+            return Page();
+        }
     }
 
     public sealed class TextInput

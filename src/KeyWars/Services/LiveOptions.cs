@@ -23,4 +23,7 @@ public sealed class ChallengeOptions
 public sealed class ContentOptions
 {
     public int MaxUploadBytes { get; set; } = 131072;
+    public int MaxTextCharacters { get; set; } = 20000;
+    public int MaxTextGraphemes { get; set; } = 20000;
+    public int MaxTextLines { get; set; } = 400;
 }

@@ -29,8 +29,17 @@ public sealed class NeuModel(CurrentUser currentUser, TextLibraryService texts) 
             return Page();
         }
 
-        var collection = await texts.CreateCollectionAsync(profile.Id, Input.Name, Input.Description, Input.Visibility, Input.TextIds, cancellationToken);
-        return RedirectToPage("/Texte/Sammlungen/Details", new { id = collection.Id });
+        try
+        {
+            var collection = await texts.CreateCollectionAsync(profile.Id, Input.Name, Input.Description, Input.Visibility, Input.TextIds, cancellationToken);
+            return RedirectToPage("/Texte/Sammlungen/Details", new { id = collection.Id });
+        }
+        catch (InvalidOperationException ex)
+        {
+            ModelState.AddModelError(string.Empty, ex.Message);
+            Texts = await texts.ListVisibleAsync(profile.Id, cancellationToken: cancellationToken);
+            return Page();
+        }
     }
 
     public sealed class CollectionInput

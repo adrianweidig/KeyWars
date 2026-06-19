@@ -1,0 +1,37 @@
+@page "/texte/{id:guid}/bearbeiten"
+@model KeyWars.Pages.Texte.BearbeitenModel
+@{
+    ViewData["Title"] = "Text bearbeiten";
+}
+
+<section class="page-header">
+    <div>
+        <h1>Text bearbeiten</h1>
+        <p class="lead">Bereits verwendete Texte bleiben unverändert. Erstelle in diesem Fall eine Kopie und passe diese an.</p>
+    </div>
+</section>
+
+<section class="card">
+    <form method="post" class="form-grid">
+        <div asp-validation-summary="ModelOnly"></div>
+        <label>
+            Titel
+            <input asp-for="Input.Title" />
+        </label>
+        <label>
+            Sichtbarkeit
+            <select asp-for="Input.Visibility">
+                <option value="Private">Privat</option>
+                <option value="Organization">Organisationsweit freigeben</option>
+            </select>
+        </label>
+        <label>
+            Text
+            <textarea asp-for="Input.Body"></textarea>
+        </label>
+        <div class="action-row">
+            <button type="submit">Änderungen speichern</button>
+            <a class="button secondary" asp-page="/Texte/Details" asp-route-id="@Model.TextId">Abbrechen</a>
+        </div>
+    </form>
+</section>

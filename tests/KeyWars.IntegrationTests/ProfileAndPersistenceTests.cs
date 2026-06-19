@@ -244,7 +244,10 @@ public sealed class ProfileAndPersistenceTests
                 ["KEYWARS:LIVE:MAX_PARTICIPANTS_PER_ROOM"] = "12",
                 ["KEYWARS:LIVE:COUNTDOWN_SECONDS"] = "4",
                 ["KEYWARS:LIVE:COMPLETION_QUEUE_CAPACITY"] = "32",
-                ["KEYWARS:CONTENT:MAX_UPLOAD_BYTES"] = "4096"
+                ["KEYWARS:CONTENT:MAX_UPLOAD_BYTES"] = "4096",
+                ["KEYWARS:CONTENT:MAX_TEXT_CHARACTERS"] = "2048",
+                ["KEYWARS:CONTENT:MAX_TEXT_GRAPHEMES"] = "2040",
+                ["KEYWARS:CONTENT:MAX_TEXT_LINES"] = "80"
             })
             .Build();
 
@@ -265,6 +268,9 @@ public sealed class ProfileAndPersistenceTests
         Assert.Equal(4, live.CountdownSeconds);
         Assert.Equal(32, live.CompletionQueueCapacity);
         Assert.Equal(4096, content.MaxUploadBytes);
+        Assert.Equal(2048, content.MaxTextCharacters);
+        Assert.Equal(2040, content.MaxTextGraphemes);
+        Assert.Equal(80, content.MaxTextLines);
     }
 
     [Fact]

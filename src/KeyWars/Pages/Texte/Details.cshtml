@@ -12,7 +12,26 @@
     <div class="action-row">
         <a class="button" asp-page="/Spielen/Text" asp-route-id="@Model.Text.Id">Trainieren</a>
         <a class="button secondary" asp-page="/Herausforderungen/Neu" asp-route-textId="@Model.Text.Id">Herausfordern</a>
+        <form method="post" asp-page-handler="Copy" asp-route-id="@Model.Text.Id">
+            <button class="secondary" type="submit">Kopie erstellen</button>
+        </form>
+        @if (Model.CanManage)
+        {
+            <a class="button secondary" asp-page="/Texte/Bearbeiten" asp-route-id="@Model.Text.Id">Bearbeiten</a>
+            <form method="post" asp-page-handler="Delete" asp-route-id="@Model.Text.Id">
+                <button class="warning" type="submit">Löschen</button>
+            </form>
+        }
     </div>
+</section>
+
+<div asp-validation-summary="ModelOnly"></div>
+
+<section class="metric-row">
+    <div class="metric"><span>Wörter</span><strong>@Model.Quality.Words</strong></div>
+    <div class="metric"><span>Grapheme</span><strong>@Model.Quality.Graphemes</strong></div>
+    <div class="metric"><span>Zeilen</span><strong>@Model.Quality.Lines</strong></div>
+    <div class="metric"><span>Geschätzt</span><strong>@Model.Quality.EstimatedSeconds s</strong></div>
 </section>
 
 <section class="card">

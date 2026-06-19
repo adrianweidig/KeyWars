@@ -31,7 +31,7 @@ Dieser Tracker folgt dem Audit-Paket `2f3379490dcd`.
 | KW-033 | offen | offen | keine | Profilaggregation fehlt |
 | KW-034 | offen | offen | keine | Saisonmodell fehlt |
 | KW-040 | teilweise | offen | Integrationstests fuer gebundenen Challenge-Start, freie-Attempt-Manipulation, Wiederverwendung, Expiry und Annahmepflicht; Build/Test gruen | Best-of/mehrere Runden, Browser-E2E und echte Parallelabschluss-Evidenz fehlen |
-| KW-041 | teilweise | offen | Integrationstest fuer striktes UTF-8 | Edit/Delete/Import-UX fehlen |
+| KW-041 | teilweise | offen | Integrationstests fuer striktes UTF-8, NFC-/Limitvalidierung, unsichtbare/Steuerzeichen, Ownership bei Edit/Delete, POST-Kopie, Sammlungsschutz und Filter/Paging; Build/Test gruen | Browser-E2E fuer CRUD/Upload/Sammlung, echte Pagination-UI und vollstaendige Direktaktionen fehlen |
 | KW-042 | teilweise | offen | `DisplayNames.For(TrainingMode)` und Profilansichten | Vollstaendige UI-Pruefung fehlt |
 | KW-043 | teilweise | offen | Integrationstests fuer Export, Reset, Loeschung und Re-Provisioning | Browser-E2E und vollstaendige Datenschutzabnahme fehlen |
 | KW-050 | blockiert | offen | Agent-Share-Pruefung | Kein AD-Runbook gefunden |
