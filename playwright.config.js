@@ -45,7 +45,7 @@ module.exports = defineConfig({
     reducedMotion: "reduce",
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
-    video: "retain-on-failure"
+    video: "off"
   },
   projects: [
     {
