@@ -173,7 +173,8 @@ public sealed partial class WebSmokeTests : IClassFixture<KeyWarsWebFactory>
         var client = isolatedFactory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
         await LoginAsync(client);
 
-        var settings = await client.GetStringAsync("/profil/einstellungen");
+        var settingsResponse = await client.GetAsync("/profil/einstellungen");
+        var settings = await settingsResponse.Content.ReadAsStringAsync();
         var token = AntiForgeryRegex().Match(settings).Groups["token"].Value;
         var response = await client.PostAsync("/profil/einstellungen", new FormUrlEncodedContent(new Dictionary<string, string>
         {
@@ -191,6 +192,8 @@ public sealed partial class WebSmokeTests : IClassFixture<KeyWarsWebFactory>
         }));
 
         Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.Equal("de-DE", settingsResponse.Content.Headers.ContentLanguage.Single());
+        Assert.Equal("/profil/einstellungen", response.Headers.Location?.ToString());
         await using var scope = isolatedFactory.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<KeyWarsDbContext>();
         var profile = await db.UserProfiles.SingleAsync(item => item.SamAccountName == "max.mustermann");
@@ -200,6 +203,15 @@ public sealed partial class WebSmokeTests : IClassFixture<KeyWarsWebFactory>
         Assert.Equal(70, profile.SoundVolumePercent);
         Assert.False(profile.ReactionsEnabled);
         Assert.True(profile.ReducedMotion);
+
+        var savedSettings = WebUtility.HtmlDecode(await client.GetStringAsync("/profil/einstellungen"));
+        Assert.Contains("Einstellungen gespeichert.", savedSettings);
+        Assert.Contains("Identität aus AD/LDAP", savedSettings);
+        Assert.Contains("max.mustermann", savedSettings);
+        Assert.Contains("Darstellung", savedSettings);
+        Assert.Contains("Training", savedSettings);
+        Assert.Contains("Arena", savedSettings);
+        Assert.Contains("Profil und Privatsphäre", savedSettings);
 
         var rooms = scope.ServiceProvider.GetRequiredService<LiveRoomManager>();
         var room = rooms.CreateRoom(new CreateLiveRoomRequest(profile.Id, profile.DisplayName, "Feedback Runde", "Text", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 8));

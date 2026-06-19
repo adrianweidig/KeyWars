@@ -20,14 +20,22 @@ public static class DisplayNames
 
     public static string For(LiveRoomPhase phase) => phase switch
     {
-        LiveRoomPhase.Lobby => "Lobby",
-        LiveRoomPhase.Countdown => "Countdown",
+        LiveRoomPhase.Lobby => "Warteraum",
+        LiveRoomPhase.Countdown => "Start zählt herunter",
         LiveRoomPhase.Running => "Rennen läuft",
         LiveRoomPhase.RoundResults => "Rundenergebnis",
         LiveRoomPhase.SeriesResults => "Ergebnisse",
         LiveRoomPhase.Closed => "Geschlossen",
         LiveRoomPhase.Aborted => "Abgebrochen",
         _ => phase.ToString()
+    };
+
+    public static string For(LiveRoomVisibility visibility) => visibility switch
+    {
+        LiveRoomVisibility.InvitationOnly => "Nur per Einladung",
+        LiveRoomVisibility.Code => "Raumcode",
+        LiveRoomVisibility.InternalOpen => "Intern offen",
+        _ => visibility.ToString()
     };
 
     public static string For(LiveRoomMode mode) => mode switch
@@ -56,6 +64,24 @@ public static class DisplayNames
         ChallengeStatus.Expired => "Abgelaufen",
         ChallengeStatus.Cancelled => "Abgebrochen",
         _ => status.ToString()
+    };
+
+    public static string For(AttemptPhase phase) => phase switch
+    {
+        AttemptPhase.Prepared => "Vorbereitet",
+        AttemptPhase.Started => "Gestartet",
+        AttemptPhase.Finished => "Abgeschlossen",
+        AttemptPhase.Expired => "Abgelaufen",
+        AttemptPhase.Aborted => "Abgebrochen",
+        _ => phase.ToString()
+    };
+
+    public static string For(TypingErrorKind kind) => kind switch
+    {
+        TypingErrorKind.Insertion => "Einfügung",
+        TypingErrorKind.Deletion => "Auslassung",
+        TypingErrorKind.Substitution => "Ersetzung",
+        _ => kind.ToString()
     };
 
     public static string For(TrainingMode mode) => mode switch

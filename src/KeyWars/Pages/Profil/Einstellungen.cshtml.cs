@@ -12,9 +12,15 @@ public sealed class EinstellungenModel(CurrentUser currentUser, KeyWarsDbContext
     [BindProperty]
     public SettingsInput Input { get; set; } = new();
 
+    [TempData]
+    public string? SavedMessage { get; set; }
+
+    public IdentitySummary Identity { get; private set; } = IdentitySummary.Empty;
+
     public async Task OnGetAsync(CancellationToken cancellationToken)
     {
         var profile = await currentUser.RequireProfileAsync(User, cancellationToken);
+        PopulateIdentity(profile);
         Input = new SettingsInput
         {
             Motto = profile.Motto,
@@ -33,6 +39,7 @@ public sealed class EinstellungenModel(CurrentUser currentUser, KeyWarsDbContext
     public async Task<IActionResult> OnPostAsync(CancellationToken cancellationToken)
     {
         var profile = await currentUser.RequireProfileAsync(User, cancellationToken);
+        PopulateIdentity(profile);
         if (!ModelState.IsValid)
         {
             return Page();
@@ -49,7 +56,13 @@ public sealed class EinstellungenModel(CurrentUser currentUser, KeyWarsDbContext
         profile.ReactionsEnabled = Input.ReactionsEnabled;
         profile.ReducedMotion = Input.ReducedMotion;
         await db.SaveChangesAsync(cancellationToken);
-        return RedirectToPage("/Profil/Index");
+        SavedMessage = "Einstellungen gespeichert.";
+        return RedirectToPage("/Profil/Einstellungen");
+    }
+
+    private void PopulateIdentity(UserProfile profile)
+    {
+        Identity = IdentitySummary.From(profile);
     }
 
     public sealed class SettingsInput
@@ -66,5 +79,27 @@ public sealed class EinstellungenModel(CurrentUser currentUser, KeyWarsDbContext
         public int SoundVolumePercent { get; set; } = 35;
         public bool ReactionsEnabled { get; set; } = true;
         public bool ReducedMotion { get; set; }
+    }
+
+    public sealed record IdentitySummary(
+        string DisplayName,
+        string SamAccountName,
+        string UserPrincipalName,
+        string Email,
+        string Department,
+        string Title)
+    {
+        public static IdentitySummary Empty { get; } = new("-", "-", "-", "-", "-", "-");
+
+        public static IdentitySummary From(UserProfile profile) => new(
+            ValueOrPlaceholder(profile.DisplayName),
+            ValueOrPlaceholder(profile.SamAccountName),
+            ValueOrPlaceholder(profile.UserPrincipalName),
+            ValueOrPlaceholder(profile.Email),
+            ValueOrPlaceholder(profile.Department),
+            ValueOrPlaceholder(profile.Title));
+
+        private static string ValueOrPlaceholder(string? value) =>
+            string.IsNullOrWhiteSpace(value) ? "-" : value.Trim();
     }
 }

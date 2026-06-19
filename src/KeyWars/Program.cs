@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Claims;
 using System.Text.Json.Serialization;
 using System.Threading.RateLimiting;
@@ -11,6 +12,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.Localization;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -27,6 +29,8 @@ if (args is ["healthcheck", ..])
 var builder = WebApplication.CreateBuilder(args);
 builder.Configuration.AddEnvironmentVariables();
 
+var germanCulture = CultureInfo.GetCultureInfo("de-DE");
+
 var startupLogger = LoggerFactory.Create(logging => logging.AddConsole()).CreateLogger("Startup");
 StartupValidator.Validate(builder.Configuration, builder.Environment, startupLogger);
 
@@ -38,6 +42,14 @@ builder.Services.Configure<AuthOptions>(options => ConfigurationAliases.BindAuth
 builder.Services.Configure<LiveOptions>(options => ConfigurationAliases.BindLive(builder.Configuration, options));
 builder.Services.Configure<ChallengeOptions>(options => ConfigurationAliases.BindChallenges(builder.Configuration, options));
 builder.Services.Configure<ContentOptions>(options => ConfigurationAliases.BindContent(builder.Configuration, options));
+builder.Services.Configure<RequestLocalizationOptions>(options =>
+{
+    options.DefaultRequestCulture = new RequestCulture(germanCulture);
+    options.SupportedCultures = [germanCulture];
+    options.SupportedUICultures = [germanCulture];
+    options.ApplyCurrentCultureToResponseHeaders = true;
+    options.RequestCultureProviders.Clear();
+});
 
 builder.Services.AddDbContext<KeyWarsDbContext>(options =>
 {
@@ -240,6 +252,7 @@ if (!app.Environment.IsDevelopment())
 }
 
 app.UseForwardedHeaders();
+app.UseRequestLocalization();
 app.UseMiddleware<SecurityHeadersMiddleware>();
 app.UseStaticFiles();
 app.UseRouting();
