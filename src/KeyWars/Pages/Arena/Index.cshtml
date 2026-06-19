@@ -65,7 +65,12 @@
                     <div><dt>Teilnehmer</dt><dd>@room.Participants.Count / @room.MaxParticipants</dd></div>
                     <div><dt>Format</dt><dd>Runde @room.CurrentRound von @room.RoundCount</dd></div>
                 </dl>
-                <p class="room-code">Code <strong>@room.Code</strong></p>
+                <div class="room-code-share">
+                    <span class="room-code">Code <strong>@room.Code</strong></span>
+                    <button type="button" class="secondary compact-button" data-copy-text="@room.Code" data-copy-success="Raumcode kopiert.">Code kopieren</button>
+                    <button type="button" class="secondary compact-button" data-share-title="KeyWars-Raum @room.Code" data-share-text="KeyWars-Raumcode @room.Code" data-share-url="@Url.Page("/Arena/Beitreten")" data-share-fallback="@room.Code">Einladung teilen</button>
+                    <span class="copy-status" data-copy-status aria-live="polite"></span>
+                </div>
                 <a class="button secondary" asp-page="/Arena/Raum" asp-route-id="@room.RoomId">Öffnen</a>
             </article>
         }

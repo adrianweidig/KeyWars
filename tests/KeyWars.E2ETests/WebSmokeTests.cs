@@ -91,6 +91,9 @@ public sealed partial class WebSmokeTests : IClassFixture<KeyWarsWebFactory>
         Assert.Contains("data-arena-hud", canonical);
         Assert.Contains("data-arena-podium", canonical);
         Assert.Contains("aria-live=\"polite\"", canonical);
+        Assert.Contains("data-copy-text", canonical);
+        Assert.Contains("Code kopieren", canonical);
+        Assert.Contains("Einladung teilen", canonical);
         Assert.Contains("25", canonical);
         Assert.Contains("Ziel", canonical);
         Assert.DoesNotContain("style=", canonical);
@@ -319,6 +322,9 @@ public sealed partial class WebSmokeTests : IClassFixture<KeyWarsWebFactory>
         Assert.Contains("Max Mustermann", arena);
         Assert.Contains("1 / 8", arena);
         Assert.Contains("Klassisches Rennen", arena);
+        Assert.Contains("Code kopieren", arena);
+        Assert.Contains("Einladung teilen", arena);
+        Assert.Contains("data-copy-status", arena);
         Assert.DoesNotContain("Arbeitsspeicher", arena);
         Assert.DoesNotContain("Neustart", arena);
     }
@@ -334,8 +340,25 @@ public sealed partial class WebSmokeTests : IClassFixture<KeyWarsWebFactory>
 
         Assert.Contains("2 bis 12 Personen", form);
         Assert.Contains("max=\"12\"", form);
+        Assert.Contains("data-submit-guard", form);
         Assert.DoesNotContain("max=\"64\"", form);
         Assert.DoesNotContain("Einladungen", form);
+    }
+
+    [Fact]
+    public async Task ArenaJoinFormUsesSixCharacterCodeContractAndSubmitGuard()
+    {
+        using var isolatedFactory = new KeyWarsWebFactory();
+        var client = isolatedFactory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        await LoginAsync(client);
+
+        var form = await client.GetStringAsync("/arena/beitreten");
+
+        Assert.Contains("maxlength=\"6\"", form);
+        Assert.Contains("minlength=\"6\"", form);
+        Assert.Contains("pattern=\"[A-HJ-NP-Z2-9a-hj-np-z]{6}\"", form);
+        Assert.Contains("data-room-code-input", form);
+        Assert.Contains("data-submit-guard", form);
     }
 
     private static async Task<HttpResponseMessage> LoginAsync(HttpClient client)

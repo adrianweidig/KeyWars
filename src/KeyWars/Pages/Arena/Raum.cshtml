@@ -19,7 +19,13 @@
 <section class="page-header">
     <div>
         <h1>@Model.Snapshot.Title</h1>
-        <p class="lead">Code @Model.Snapshot.Code · @DisplayNames.For(Model.Snapshot.Mode) · Runde @Model.Snapshot.CurrentRound von @Model.Snapshot.RoundCount · @Model.Snapshot.Participants.Count @(Model.Snapshot.Participants.Count == 1 ? "Person" : "Personen")</p>
+        <p class="lead">@DisplayNames.For(Model.Snapshot.Mode) · Runde @Model.Snapshot.CurrentRound von @Model.Snapshot.RoundCount · @Model.Snapshot.Participants.Count @(Model.Snapshot.Participants.Count == 1 ? "Person" : "Personen")</p>
+        <div class="room-code-share">
+            <span class="room-code">Code <strong>@Model.Snapshot.Code</strong></span>
+            <button type="button" class="secondary compact-button" data-copy-text="@Model.Snapshot.Code" data-copy-success="Raumcode kopiert.">Code kopieren</button>
+            <button type="button" class="secondary compact-button" data-share-title="KeyWars-Raum @Model.Snapshot.Code" data-share-text="KeyWars-Raumcode @Model.Snapshot.Code" data-share-url="@Url.Page("/Arena/Beitreten")" data-share-fallback="@Model.Snapshot.Code">Einladung teilen</button>
+            <span class="copy-status" data-copy-status aria-live="polite"></span>
+        </div>
     </div>
     <div class="action-row">
         @if (inLobby)

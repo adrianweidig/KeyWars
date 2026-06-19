@@ -245,6 +245,12 @@ input[type="submit"] {
   font: inherit;
 }
 
+.compact-button {
+  min-height: 34px;
+  padding: 7px 10px;
+  font-size: 0.92rem;
+}
+
 .button.secondary,
 button.secondary {
   background: var(--surface);
@@ -1110,11 +1116,25 @@ button:focus,
   color: var(--muted);
 }
 
+.room-code-share {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+}
+
 .room-code strong,
 .room-code-input {
   font-family: "Cascadia Mono", "Consolas", monospace;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+.copy-status {
+  min-height: 1.25em;
+  color: var(--ok);
+  font-size: 0.9rem;
 }
 
 .form-note {

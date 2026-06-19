@@ -12,6 +12,112 @@ function attachRoomCodeInputs() {
   });
 }
 
+function attachCopyButtons() {
+  document.querySelectorAll("[data-copy-text]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const status = button.parentElement?.querySelector("[data-copy-status]");
+      button.disabled = true;
+      try {
+        await copyText(button.dataset.copyText || "");
+        setCopyStatus(status, button.dataset.copySuccess || "Kopiert.");
+      } catch {
+        setCopyStatus(status, "Kopieren nicht möglich. Code markieren und kopieren.");
+      } finally {
+        window.setTimeout(() => {
+          button.disabled = false;
+        }, 600);
+      }
+    });
+  });
+}
+
+function attachShareButtons() {
+  document.querySelectorAll("[data-share-title]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const status = button.parentElement?.querySelector("[data-copy-status]");
+      button.disabled = true;
+      try {
+        if (navigator.share) {
+          await navigator.share({
+            title: button.dataset.shareTitle || "KeyWars-Raum",
+            text: button.dataset.shareText || "",
+            url: absoluteUrl(button.dataset.shareUrl || window.location.href)
+          });
+          setCopyStatus(status, "Einladung geteilt.");
+        } else {
+          await copyText(button.dataset.shareFallback || button.dataset.shareText || "");
+          setCopyStatus(status, "Raumcode kopiert.");
+        }
+      } catch (error) {
+        if (error?.name !== "AbortError") {
+          setCopyStatus(status, "Teilen nicht möglich. Code markieren und kopieren.");
+        }
+      } finally {
+        window.setTimeout(() => {
+          button.disabled = false;
+        }, 600);
+      }
+    });
+  });
+}
+
+function attachSubmitGuards() {
+  document.querySelectorAll("form[data-submit-guard]").forEach((form) => {
+    form.addEventListener("submit", (event) => {
+      if (form.dataset.submitting === "true") {
+        event.preventDefault();
+        return;
+      }
+
+      form.dataset.submitting = "true";
+      form.querySelectorAll("button[type='submit'], input[type='submit']").forEach((button) => {
+        button.disabled = true;
+        if (button.tagName === "BUTTON" && form.dataset.submitBusyText) {
+          button.textContent = form.dataset.submitBusyText;
+        }
+      });
+    });
+  });
+}
+
+async function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.className = "visually-hidden";
+  document.body.append(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  textarea.remove();
+  if (!copied) {
+    throw new Error("Copy command failed.");
+  }
+}
+
+function setCopyStatus(status, text) {
+  if (!status) {
+    return;
+  }
+
+  status.textContent = text;
+  window.clearTimeout(Number(status.dataset.copyStatusTimer || 0));
+  status.dataset.copyStatusTimer = String(window.setTimeout(() => {
+    status.textContent = "";
+  }, 3000));
+}
+
+function absoluteUrl(value) {
+  return new URL(value, window.location.origin).toString();
+}
+
 attachTypingApps();
 attachArenaPages();
 attachRoomCodeInputs();
+attachCopyButtons();
+attachShareButtons();
+attachSubmitGuards();

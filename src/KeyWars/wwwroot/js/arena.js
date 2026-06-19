@@ -48,6 +48,8 @@ export function attachArenaPages() {
     let previousPhase = null;
     let audioUnlocked = false;
     let audioContext = null;
+    let readyPending = false;
+    let startPending = false;
 
     const renderTarget = () => {
       if (!snapshot || !target || !input) {
@@ -473,13 +475,14 @@ export function attachArenaPages() {
       const current = snapshot.participants?.find((participant) => participant.profileId === currentProfileId);
       const readyButton = readyForm?.querySelector("button");
       if (readyButton) {
-        readyButton.textContent = current?.ready ? "Nicht bereit" : "Bereit";
-        readyButton.disabled = !snapshot || snapshot.phase !== "Lobby";
+        readyButton.textContent = readyPending ? "Wird gespeichert..." : current?.ready ? "Nicht bereit" : "Bereit";
+        readyButton.disabled = readyPending || !snapshot || snapshot.phase !== "Lobby";
       }
 
       const startButton = startForm?.querySelector("button");
       if (startButton) {
-        startButton.disabled = !snapshot || snapshot.phase !== "Lobby";
+        startButton.textContent = startPending ? "Startet..." : "Starten";
+        startButton.disabled = startPending || !snapshot || snapshot.phase !== "Lobby";
       }
 
       renderTimer();
@@ -633,20 +636,38 @@ export function attachArenaPages() {
 
     readyForm?.addEventListener("submit", async (event) => {
       event.preventDefault();
+      if (readyPending) {
+        return;
+      }
+
+      readyPending = true;
+      renderState();
       try {
         const current = snapshot?.participants?.find((participant) => participant.profileId === currentProfileId);
         applySnapshot(await connection.invoke("SetReady", [roomId, current?.ready !== true]));
       } catch (error) {
         showConnectionError(error);
+      } finally {
+        readyPending = false;
+        renderState();
       }
     });
 
     startForm?.addEventListener("submit", async (event) => {
       event.preventDefault();
+      if (startPending) {
+        return;
+      }
+
+      startPending = true;
+      renderState();
       try {
         applySnapshot(await connection.invoke("Start", [roomId]));
       } catch (error) {
         showConnectionError(error);
+      } finally {
+        startPending = false;
+        renderState();
       }
     });
 
