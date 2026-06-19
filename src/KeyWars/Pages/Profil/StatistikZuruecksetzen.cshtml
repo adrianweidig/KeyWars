@@ -7,7 +7,14 @@
 <section class="card">
     <h1>Statistik zurücksetzen</h1>
     <p>Diese Aktion löscht deine Versuche, Missionen, Erfolge und Schwächenbeobachtungen. XP, Level, Serie, Saisonpunkte, Arena-Rating und gewertete Matchanzahl werden auf den Startwert zurückgesetzt. Deine AD-Identität und deine eigenen Texte bleiben bestehen.</p>
-    <form method="post">
+    <p>Gib zur Bestätigung deinen Kontonamen <strong>@Model.ConfirmationName</strong> ein.</p>
+    <form method="post" class="form-grid">
+        <div asp-validation-summary="ModelOnly"></div>
+        <label>
+            Kontoname
+            <input asp-for="Input.Confirmation" autocomplete="off" />
+            <span asp-validation-for="Input.Confirmation"></span>
+        </label>
         <button type="submit" class="warning">Statistik zurücksetzen</button>
     </form>
 </section>

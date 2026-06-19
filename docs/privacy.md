@@ -19,6 +19,10 @@ Der Export enthaelt eine Versionsnummer und einen Erstellzeitpunkt.
 
 ## Statistik Zuruecksetzen
 
+Der Reset muss im Formular mit dem aktuellen AD-/LDAP-Kontonamen bestaetigt
+werden. Eine falsche Eingabe bricht die Aktion serverseitig ab und laesst die
+Statistiken unveraendert.
+
 Der Statistik-Reset ist transaktional. Er entfernt Tippversuche, Reward-Ledger,
 Missionen, Erfolge und Schwaechenbeobachtungen. XP, Level, Serie, Saisonpunkte,
 Arena-Rating und gewertete Matchanzahl werden auf Startwerte gesetzt.
@@ -26,6 +30,10 @@ Arena-Rating und gewertete Matchanzahl werden auf Startwerte gesetzt.
 AD-Identitaet, Profilangaben, eigene Texte und Sammlungen bleiben erhalten.
 
 ## Profil Loeschen
+
+Die Loeschung muss im Formular mit dem aktuellen AD-/LDAP-Kontonamen bestaetigt
+werden. Eine falsche Eingabe bricht die Aktion serverseitig ab; das Profil
+bleibt aktiv und die Sitzung bleibt bestehen.
 
 Die Profil-Loeschung pseudonymisiert das lokale Profil und meldet die Sitzung
 ab. Directory-Identifier, Namen, E-Mail, Abteilung, Titel und Motto werden

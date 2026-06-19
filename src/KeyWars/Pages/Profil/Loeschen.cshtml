@@ -13,7 +13,14 @@
         <li>Historische Gruppen- und Arena-Ergebnisse bleiben nur mit dem gelöschten Profil verknüpft.</li>
         <li>Ein späterer AD-Login erzeugt ein neues KeyWars-Profil.</li>
     </ul>
-    <form method="post">
+    <p>Gib zur Bestätigung deinen Kontonamen <strong>@Model.ConfirmationName</strong> ein.</p>
+    <form method="post" class="form-grid">
+        <div asp-validation-summary="ModelOnly"></div>
+        <label>
+            Kontoname
+            <input asp-for="Input.Confirmation" autocomplete="off" />
+            <span asp-validation-for="Input.Confirmation"></span>
+        </label>
         <button type="submit" class="warning">Profil löschen und abmelden</button>
     </form>
 </section>

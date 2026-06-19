@@ -227,6 +227,77 @@ public sealed partial class WebSmokeTests : IClassFixture<KeyWarsWebFactory>
     }
 
     [Fact]
+    public async Task PrivacyActionsRequireCurrentAccountConfirmation()
+    {
+        using var isolatedFactory = new KeyWarsWebFactory();
+        var client = isolatedFactory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        await LoginAsync(client);
+        await using var seedScope = isolatedFactory.Services.CreateAsyncScope();
+        var db = seedScope.ServiceProvider.GetRequiredService<KeyWarsDbContext>();
+        var profile = await db.UserProfiles.SingleAsync(item => item.SamAccountName == "max.mustermann");
+        profile.ExperiencePoints = 250;
+        profile.Level = 3;
+        profile.ArenaRating = 1180;
+        await db.SaveChangesAsync();
+
+        var resetPage = await client.GetStringAsync("/profil/statistik-zuruecksetzen");
+        Assert.Contains("max.mustermann", WebUtility.HtmlDecode(resetPage));
+        var resetToken = AntiForgeryRegex().Match(resetPage).Groups["token"].Value;
+        var rejectedReset = await client.PostAsync("/profil/statistik-zuruecksetzen", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["Input.Confirmation"] = "falsch",
+            ["__RequestVerificationToken"] = resetToken
+        }));
+
+        Assert.Equal(HttpStatusCode.OK, rejectedReset.StatusCode);
+        var rejectedResetBody = WebUtility.HtmlDecode(await rejectedReset.Content.ReadAsStringAsync());
+        Assert.Contains("Gib max.mustermann ein", rejectedResetBody);
+        await db.Entry(profile).ReloadAsync();
+        Assert.Equal(250, profile.ExperiencePoints);
+        Assert.Equal(3, profile.Level);
+        Assert.Equal(1180, profile.ArenaRating);
+
+        var acceptedReset = await client.PostAsync("/profil/statistik-zuruecksetzen", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["Input.Confirmation"] = "max.mustermann",
+            ["__RequestVerificationToken"] = resetToken
+        }));
+
+        Assert.Equal(HttpStatusCode.Redirect, acceptedReset.StatusCode);
+        Assert.Equal("/profil", acceptedReset.Headers.Location?.ToString());
+        await db.Entry(profile).ReloadAsync();
+        Assert.Equal(0, profile.ExperiencePoints);
+        Assert.Equal(1, profile.Level);
+        Assert.Equal(1000, profile.ArenaRating);
+
+        var deletePage = await client.GetStringAsync("/profil/loeschen");
+        Assert.Contains("max.mustermann", WebUtility.HtmlDecode(deletePage));
+        var deleteToken = AntiForgeryRegex().Match(deletePage).Groups["token"].Value;
+        var rejectedDelete = await client.PostAsync("/profil/loeschen", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["Input.Confirmation"] = "falsch",
+            ["__RequestVerificationToken"] = deleteToken
+        }));
+
+        Assert.Equal(HttpStatusCode.OK, rejectedDelete.StatusCode);
+        var rejectedDeleteBody = WebUtility.HtmlDecode(await rejectedDelete.Content.ReadAsStringAsync());
+        Assert.Contains("Gib max.mustermann ein", rejectedDeleteBody);
+        await db.Entry(profile).ReloadAsync();
+        Assert.False(profile.Deleted);
+
+        var acceptedDelete = await client.PostAsync("/profil/loeschen", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["Input.Confirmation"] = "max.mustermann",
+            ["__RequestVerificationToken"] = deleteToken
+        }));
+
+        Assert.Equal(HttpStatusCode.Redirect, acceptedDelete.StatusCode);
+        Assert.Equal("/anmelden", acceptedDelete.Headers.Location?.ToString());
+        await db.Entry(profile).ReloadAsync();
+        Assert.True(profile.Deleted);
+    }
+
+    [Fact]
     public async Task ArenaLobbyRendersEntryPathsAndRoomCapacityWithoutInfrastructureCopy()
     {
         var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
