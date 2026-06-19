@@ -86,6 +86,12 @@ public sealed partial class WebSmokeTests : IClassFixture<KeyWarsWebFactory>
         Assert.DoesNotContain("Zieleinlauf speichern", canonical);
         Assert.DoesNotContain("data-arena-finish-form", canonical);
         Assert.Contains("Runde aufgeben", canonical);
+        Assert.Contains("data-arena-track", canonical);
+        Assert.Contains("data-arena-hud", canonical);
+        Assert.Contains("data-arena-podium", canonical);
+        Assert.Contains("aria-live=\"polite\"", canonical);
+        Assert.Contains("25", canonical);
+        Assert.Contains("Ziel", canonical);
     }
 
     [Fact]

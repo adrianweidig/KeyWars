@@ -20,9 +20,9 @@ Dieser Tracker folgt dem Audit-Paket `2f3379490dcd`.
 | KW-020 | teilweise | offen | HTTP-Smokes fuer App-Shell-Aenderungen; Navy/Cyan/Violett-Tokens, aktive Navigation, Nutzerchip, Badge-, Empty-State- und Raumkarten-Komponenten umgesetzt; Build/Test gruen | Vollstaendiges Komponenteninventar, Kontrast-/Zoom-/Visualtests und breite Tabellenumstellung fehlen |
 | KW-021 | teilweise | offen | HTTP-Smoke fuer Tagesfokus, 30-Tage-Uebersicht und deutsche Challenge-Statusnamen; Dashboard nutzt ProfileInsights statt vollstaendigem Attempt-Load; Build/Test gruen | Browser-Visualtests, Backendfehlerzustand, Skeletons, Wochenziel-Ring und vollstaendige Progressionsmechaniken fehlen |
 | KW-022 | teilweise | offen | HTTP-Smokes fuer Lobby ohne Infrastrukturtext, Einstiegspfade, Raumkapazitaet und konfiguriertes Teilnehmerlimit; Build/Test gruen | Code-Copy/Share, Zwei-Nutzer-Browserfluss, voller Raum, Live-Aktualisierung und Visualtests fehlen |
-| KW-023 | offen | offen | keine | Rennstrecke fehlt |
-| KW-024 | offen | offen | keine | HUD/Deltas fehlen |
-| KW-025 | offen | offen | keine | Podium/Belohnung fehlt |
+| KW-023 | teilweise | offen | HTTP-Smoke fuer kanonische Arena-Seite mit Rennstrecke, Meilensteinen und Reduced-Motion-faehigen CSS-Transforms; Build/Test gruen | Visualtests bei 2/8/24/64 Teilnehmenden, Performanceprofil, echte Ueberhol-/Rueckschritt-E2E und kompakte Grossraumdarstellung fehlen |
+| KW-024 | teilweise | offen | HTTP-Smoke fuer Live-HUD-Markup; Arena-Client aktualisiert Rangliste, HUD, Live-Region und Track aus serverbestaetigten Snapshots/Deltas; Build/Test gruen | Zwei-Nutzer-Ueberhol-E2E, Stale-/Reconnect-Anzeige, Nutzereinstellung fuer Live-Werte und DOM-Update-Messung fehlen |
+| KW-025 | teilweise | offen | HTTP-Smoke fuer Podium-Container; Arena-Client rendert serverbestaetigtes Top-3-Podium aus terminalen Snapshots; Build/Test gruen | DB-genaue XP-/Rating-/Missionsauflösung, Revanche-/Naechste-Runde-Aktionen, Persistenzfehlerzustand, PB-Logik und Visualtests fehlen |
 | KW-026 | teilweise | offen | CSS Reduced Motion | Sound/Reaktionen fehlen |
 | KW-027 | offen | offen | keine | 64er-Darstellung fehlt |
 | KW-030 | teilweise | offen | Integrationstests fuer Prepared/Started/Finished/Expired, Nonce-Replay, Sprint-Teilabschluss, Session-Finish; HTTP-E2E und Build/Test gruen | Browser-E2E mit echter Eingabe/Fokusverlust und Abbruch-UX fehlen |

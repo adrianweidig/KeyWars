@@ -42,6 +42,11 @@ nichtkritische Progress-Deltas verworfen und unter `/health/arena-progress`
 sichtbar. Zuverlaessige Ereignisse wie Start, Finish, Leave und Phasenwechsel
 nutzen weiterhin Vollsnapshots.
 
+Die kanonische Raumseite rendert dieselben serverbestaetigten Daten als
+Rennstrecke, persoenliches HUD, Rangliste und Podium-Container. Deltas
+aktualisieren die Positionen per CSS-Transform und die textuelle Live-Region
+gedrosselt; Reduced-Motion deaktiviert gleitende Positionsuebergaenge.
+
 Grenzen:
 
 - `KEYWARS__LIVE__MAX_PARTICIPANTS_PER_ROOM`

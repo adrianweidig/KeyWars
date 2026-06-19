@@ -20,8 +20,8 @@ Statuswerte:
 | Challenges | teilweise | Servergebundenes Challenge-Attempt-Binding, Annahme/Ablehnung, Expiry- und Replaytests vorhanden; Best-of/Browser-E2E offen |
 | Live-Arena Lobby | teilweise | Phasen, Countdown, Presence, Hosttransfer, nutzerorientierte Einstiegspfade und konfigurierbare Raumkapazitaet begonnen |
 | Live-Arena Countdown | teilweise | Serverzeit vorhanden, Browser-E2E fehlt |
-| Live-Arena grafische Strecke | geplant | KW-023 |
-| Live-HUD und Podium | geplant | KW-024, KW-025 |
+| Live-Arena grafische Strecke | teilweise | DOM-basierte Rennstrecke mit Meilensteinen, eigener Spur und CSS-Transform-Fortschritt vorhanden; Visual-/Performance-Evidenz offen |
+| Live-HUD und Podium | teilweise | Persoenliches HUD, Ranglisten-Updates, Live-Region und Podium-Container vorhanden; echte Ueberhol-/Belohnungs-E2E offen |
 | Mehrere Runden/Best-of | geplant | Raumvertrag lehnt Serien bis zur KW-018-Implementierung ab |
 | Zuschauer | geplant | KW-027 |
 | XP/Level/Missionen | teilweise | Idempotentes Reward-Ledger, stabile Tages-/Wochenmissionen, Level-Fortschritt und 30+ Achievement-Definitionen vorhanden; vollstaendige Achievement-UI/E2E und alle Auditkriterien noch offen |

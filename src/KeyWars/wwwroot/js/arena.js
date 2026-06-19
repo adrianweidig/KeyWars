@@ -7,6 +7,10 @@ export function attachArenaPages() {
     const participants = root.querySelector("[data-arena-participants]");
     const state = root.querySelector("[data-arena-state]");
     const timer = root.querySelector("[data-arena-timer]");
+    const track = root.querySelector("[data-arena-track]");
+    const hud = root.querySelector("[data-arena-hud]");
+    const podium = root.querySelector("[data-arena-podium]");
+    const liveRegion = root.querySelector("[data-arena-live-region]");
     const readyForm = document.querySelector("[data-arena-ready-form]");
     const startForm = document.querySelector("[data-arena-start-form]");
     const dnfButton = root.querySelector("[data-arena-dnf]");
@@ -21,6 +25,8 @@ export function attachArenaPages() {
     let backspaces = 0;
     let focusLosses = 0;
     let finishedLocally = false;
+    let previousCurrentRank = null;
+    let lastRankAnnouncementAt = 0;
 
     const renderTarget = () => {
       if (!snapshot || !target || !input) {
@@ -46,19 +52,193 @@ export function attachArenaPages() {
       }));
     };
 
+    const rankedParticipants = () => [...(snapshot?.participants || [])].sort((left, right) => {
+      const leftPlacement = left.placement || Number.MAX_SAFE_INTEGER;
+      const rightPlacement = right.placement || Number.MAX_SAFE_INTEGER;
+      if (leftPlacement !== rightPlacement) {
+        return leftPlacement - rightPlacement;
+      }
+
+      if (right.correctCharacters !== left.correctCharacters) {
+        return right.correctCharacters - left.correctCharacters;
+      }
+
+      return String(left.displayName).localeCompare(String(right.displayName), "de");
+    });
+
+    const rankFor = (participantId) => {
+      const index = rankedParticipants().findIndex((participant) => participant.profileId === participantId);
+      return index < 0 ? "-" : index + 1;
+    };
+
+    const progressPercent = (participant) => {
+      if (!participant || !snapshot?.targetCharacterCount) {
+        return 0;
+      }
+
+      return Math.max(0, Math.min(100, participant.correctCharacters * 100 / snapshot.targetCharacterCount));
+    };
+
+    const participantRow = (participant) => {
+      const row = document.createElement("tr");
+      row.dataset.participantId = participant.profileId;
+      row.append(
+        tableCell(""),
+        tableCell(document.createElement("span")),
+        tableCell(""),
+        tableCell("")
+      );
+      return row;
+    };
+
+    const updateParticipantRow = (row, participant) => {
+      row.cells[0].textContent = participant.displayName;
+      row.cells[1].replaceChildren(statusPill(participant.status));
+      row.cells[2].textContent = `${participant.correctCharacters} / ${snapshot.targetCharacterCount}`;
+      row.cells[3].textContent = participant.placement ? String(participant.placement) : participant.rankHint ? `~${participant.rankHint}` : String(rankFor(participant.profileId));
+    };
+
+    const trackLane = (participant) => {
+      const lane = document.createElement("div");
+      lane.className = "race-lane";
+      lane.dataset.trackParticipantId = participant.profileId;
+      const meta = document.createElement("div");
+      meta.className = "race-lane-meta";
+      const bar = document.createElement("div");
+      bar.className = "race-lane-bar";
+      const position = document.createElement("span");
+      position.className = "race-position";
+      position.append(document.createElement("span"));
+      bar.append(position);
+      lane.append(meta, bar);
+      return lane;
+    };
+
+    const updateTrackLane = (lane, participant) => {
+      const meta = lane.querySelector(".race-lane-meta");
+      const bar = lane.querySelector(".race-lane-bar");
+      const position = lane.querySelector(".race-position");
+      const percent = progressPercent(participant);
+      lane.classList.toggle("current", participant.profileId === currentProfileId);
+      if (meta) {
+        const token = element("span", initials(participant.displayName));
+        token.className = "race-token";
+        const name = element("span", participant.displayName);
+        const children = [token, name];
+        if (participant.profileId === snapshot.creatorProfileId) {
+          children.push(badge("Host"));
+        }
+
+        if (participant.ready) {
+          children.push(badge("Bereit"));
+        }
+
+        meta.replaceChildren(...children);
+      }
+
+      if (bar) {
+        bar.setAttribute("aria-label", `${participant.displayName}: ${Math.round(percent)} Prozent`);
+      }
+
+      if (position) {
+        position.style.transform = `translateX(${percent}%)`;
+        position.querySelector("span").textContent = initials(participant.displayName);
+      }
+    };
+
+    const announceRankChange = (rank) => {
+      if (!liveRegion || rank === "-" || rank === previousCurrentRank) {
+        previousCurrentRank = rank;
+        return;
+      }
+
+      const now = Date.now();
+      if (previousCurrentRank !== null && now - lastRankAnnouncementAt > 1500) {
+        liveRegion.textContent = rank < previousCurrentRank
+          ? `Rang verbessert auf ${rank}.`
+          : `Rang jetzt ${rank}.`;
+        lastRankAnnouncementAt = now;
+      }
+
+      previousCurrentRank = rank;
+    };
+
     const renderParticipants = () => {
       if (!snapshot || !participants) {
         return;
       }
 
-      participants.replaceChildren(...snapshot.participants.map((participant) => {
-        const row = document.createElement("tr");
-        row.append(
-          tableCell(participant.displayName),
-          tableCell(statusPill(participant.status)),
-          tableCell(`${participant.correctCharacters} / ${snapshot.targetCharacterCount}`),
-          tableCell(participant.placement ? String(participant.placement) : participant.rankHint ? `~${participant.rankHint}` : "-")
-        );
+      const expectedIds = new Set();
+      rankedParticipants().forEach((participant) => {
+        expectedIds.add(participant.profileId);
+        const row = participants.querySelector(`[data-participant-id="${participant.profileId}"]`) || participantRow(participant);
+        updateParticipantRow(row, participant);
+        participants.append(row);
+      });
+
+      participants.querySelectorAll("[data-participant-id]").forEach((row) => {
+        if (!expectedIds.has(row.dataset.participantId)) {
+          row.remove();
+        }
+      });
+    };
+
+    const renderTrack = () => {
+      if (!snapshot || !track) {
+        return;
+      }
+
+      const expectedIds = new Set();
+      rankedParticipants().forEach((participant) => {
+        expectedIds.add(participant.profileId);
+        const lane = track.querySelector(`[data-track-participant-id="${participant.profileId}"]`) || trackLane(participant);
+        updateTrackLane(lane, participant);
+        track.append(lane);
+      });
+
+      track.querySelectorAll("[data-track-participant-id]").forEach((lane) => {
+        if (!expectedIds.has(lane.dataset.trackParticipantId)) {
+          lane.remove();
+        }
+      });
+    };
+
+    const renderHud = () => {
+      if (!snapshot || !hud) {
+        return;
+      }
+
+      const current = snapshot.participants?.find((participant) => participant.profileId === currentProfileId);
+      setText(hud.querySelector("[data-hud-rank]"), current ? String(rankFor(current.profileId)) : "-");
+      setText(hud.querySelector("[data-hud-wpm]"), formatNumber(current?.wpm));
+      setText(hud.querySelector("[data-hud-accuracy]"), `${formatNumber(current?.accuracy)} %`);
+      setText(hud.querySelector("[data-hud-progress]"), `${Math.round(progressPercent(current))} %`);
+
+      if (current) {
+        announceRankChange(rankFor(current.profileId));
+      }
+    };
+
+    const renderPodium = () => {
+      if (!snapshot || !podium) {
+        return;
+      }
+
+      const terminal = rankedParticipants()
+        .filter((participant) => ["Finished", "Dnf"].includes(participant.status))
+        .slice(0, 3);
+      podium.classList.toggle("is-hidden", !snapshot.finished && terminal.length === 0);
+      podium.replaceChildren(element("h2", "Podium"), ...terminal.map((participant) => {
+        const row = document.createElement("div");
+        row.className = "podium-row";
+        row.dataset.podiumParticipantId = participant.profileId;
+        const title = document.createElement("strong");
+        title.textContent = `${participant.placement || "-"} . ${participant.displayName}`;
+        const detail = document.createElement("span");
+        detail.textContent = participant.status === "Dnf"
+          ? "Nicht beendet"
+          : `${formatNumber(participant.wpm)} WPM · ${formatNumber(participant.accuracy)} %`;
+        row.append(title, detail);
         return row;
       }));
     };
@@ -155,6 +335,9 @@ export function attachArenaPages() {
       snapshot = camelize(next);
       renderTarget();
       renderParticipants();
+      renderTrack();
+      renderHud();
+      renderPodium();
       renderState();
     };
 
@@ -181,6 +364,8 @@ export function attachArenaPages() {
         participant.rankHint = delta.rankHint;
       });
       renderParticipants();
+      renderTrack();
+      renderHud();
       renderState();
     };
 
@@ -382,6 +567,49 @@ function statusPill(status) {
   span.className = "pill";
   span.textContent = statusLabel(status);
   return span;
+}
+
+function badge(text) {
+  const span = document.createElement("span");
+  span.className = "badge";
+  span.textContent = text;
+  return span;
+}
+
+function element(tagName, text) {
+  const node = document.createElement(tagName);
+  node.textContent = text;
+  return node;
+}
+
+function setText(node, text) {
+  if (node) {
+    node.textContent = text;
+  }
+}
+
+function initials(value) {
+  const parts = String(value || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2);
+  if (parts.length === 0) {
+    return "KW";
+  }
+
+  return parts.map((part) => part[0].toUpperCase()).join("");
+}
+
+function formatNumber(value) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "-";
+  }
+
+  return new Intl.NumberFormat("de-DE", {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1
+  }).format(value);
 }
 
 function statusLabel(status) {

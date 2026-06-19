@@ -6,6 +6,11 @@
     var isHost = Model.Snapshot.CreatorProfileId == Model.CurrentProfileId;
     var inLobby = Model.Snapshot.Phase == LiveRoomPhase.Lobby;
     var readyButtonText = currentParticipant?.Ready == true ? "Nicht bereit" : "Bereit";
+    var rankedParticipants = Model.Snapshot.Participants
+        .OrderBy(item => item.Placement ?? int.MaxValue)
+        .ThenByDescending(item => item.CorrectCharacters)
+        .ThenBy(item => item.DisplayName)
+        .ToList();
 }
 
 <section class="page-header">
@@ -36,6 +41,45 @@
     <div class="card">
         <h2>Rennen</h2>
         <p class="muted" data-arena-state>@DisplayNames.For(Model.Snapshot.Phase)</p>
+        <div class="arena-hud" data-arena-hud>
+            <div class="metric"><span>Rang</span><strong data-hud-rank>@CurrentRank(currentParticipant, rankedParticipants)</strong></div>
+            <div class="metric"><span>WPM</span><strong data-hud-wpm>@FormatNumber(currentParticipant?.Wpm)</strong></div>
+            <div class="metric"><span>Genauigkeit</span><strong data-hud-accuracy>@FormatNumber(currentParticipant?.Accuracy) %</strong></div>
+            <div class="metric"><span>Fortschritt</span><strong data-hud-progress>@ProgressPercent(currentParticipant, Model.Snapshot.TargetCharacterCount).ToString("0", System.Globalization.CultureInfo.InvariantCulture) %</strong></div>
+        </div>
+        <div class="race-track" data-arena-track aria-label="Rennstrecke mit bestätigtem Fortschritt">
+            <div class="race-milestones" aria-hidden="true">
+                <span style="left:25%">25</span>
+                <span style="left:50%">50</span>
+                <span style="left:75%">75</span>
+                <span style="left:100%">Ziel</span>
+            </div>
+            @foreach (var participant in rankedParticipants)
+            {
+                var progress = ProgressPercent(participant, Model.Snapshot.TargetCharacterCount);
+                var isCurrent = participant.ProfileId == Model.CurrentProfileId;
+                var isParticipantHost = participant.ProfileId == Model.Snapshot.CreatorProfileId;
+                <div class="race-lane @(isCurrent ? "current" : "")" data-track-participant-id="@participant.ProfileId">
+                    <div class="race-lane-meta">
+                        <span class="race-token">@Initials(participant.DisplayName)</span>
+                        <span>@participant.DisplayName</span>
+                        @if (isParticipantHost)
+                        {
+                            <span class="badge">Host</span>
+                        }
+                        @if (participant.Ready)
+                        {
+                            <span class="badge">Bereit</span>
+                        }
+                    </div>
+                    <div class="race-lane-bar" aria-label="@participant.DisplayName: @progress.ToString("0", System.Globalization.CultureInfo.InvariantCulture) Prozent">
+                        <span class="race-position" style="transform:translateX(@progress.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)%);">
+                            <span>@Initials(participant.DisplayName)</span>
+                        </span>
+                    </div>
+                </div>
+            }
+        </div>
         <div class="typing-target" data-arena-target>
             @if (string.IsNullOrEmpty(Model.Snapshot.TargetText))
             {
@@ -57,6 +101,7 @@
             </label>
             <button type="button" class="secondary" data-arena-dnf>Runde aufgeben</button>
         </div>
+        <div class="visually-hidden" aria-live="polite" data-arena-live-region></div>
     </div>
     <aside class="card">
         <h2>Teilnehmende</h2>
@@ -65,7 +110,7 @@
             <tbody data-arena-participants>
             @foreach (var participant in Model.Snapshot.Participants)
             {
-                <tr>
+                <tr data-participant-id="@participant.ProfileId">
                     <td>@participant.DisplayName</td>
                     <td><span class="pill">@DisplayNames.For(participant.Status)</span></td>
                     <td>@participant.CorrectCharacters / @Model.Snapshot.TargetCharacterCount</td>
@@ -74,5 +119,52 @@
             }
             </tbody>
         </table>
+        <div class="podium @(Model.Snapshot.Finished ? "" : "is-hidden")" data-arena-podium>
+            <h2>Podium</h2>
+            @foreach (var participant in rankedParticipants.Where(item => item.Status is ParticipantStatus.Finished or ParticipantStatus.Dnf).Take(3))
+            {
+                <div class="podium-row" data-podium-participant-id="@participant.ProfileId">
+                    <strong>@(participant.Placement?.ToString() ?? "-"). @participant.DisplayName</strong>
+                    <span>@FormatNumber(participant.Wpm) WPM · @FormatNumber(participant.Accuracy) %</span>
+                </div>
+            }
+        </div>
     </aside>
 </section>
+
+@functions {
+    private static string Initials(string value)
+    {
+        var parts = value.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length == 0)
+        {
+            return "KW";
+        }
+
+        return string.Concat(parts.Take(2).Select(part => part[0].ToString().ToUpperInvariant()));
+    }
+
+    private static double ProgressPercent(KeyWars.Services.LiveParticipantSnapshot? participant, int targetCharacters)
+    {
+        if (participant is null || targetCharacters <= 0)
+        {
+            return 0;
+        }
+
+        return Math.Clamp(participant.CorrectCharacters * 100d / targetCharacters, 0, 100);
+    }
+
+    private static string CurrentRank(KeyWars.Services.LiveParticipantSnapshot? participant, IReadOnlyList<KeyWars.Services.LiveParticipantSnapshot> ranked)
+    {
+        if (participant is null)
+        {
+            return "-";
+        }
+
+        var index = ranked.Select((item, rank) => new { item.ProfileId, Rank = rank + 1 }).FirstOrDefault(item => item.ProfileId == participant.ProfileId);
+        return index is null ? "-" : index.Rank.ToString(System.Globalization.CultureInfo.GetCultureInfo("de-DE"));
+    }
+
+    private static string FormatNumber(double? value) =>
+        value is null ? "-" : value.Value.ToString("0.0", System.Globalization.CultureInfo.GetCultureInfo("de-DE"));
+}

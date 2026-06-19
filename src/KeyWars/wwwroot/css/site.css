@@ -422,6 +422,169 @@ button:focus,
   color: var(--muted);
 }
 
+.arena-hud {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(90px, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.arena-hud .metric {
+  min-height: 78px;
+}
+
+.arena-hud strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.race-track {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #081424;
+}
+
+.race-milestones {
+  position: relative;
+  height: 18px;
+  margin-left: 158px;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.race-milestones span {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+}
+
+.race-milestones span::before {
+  content: "";
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  width: 1px;
+  height: 100vh;
+  max-height: 420px;
+  border-left: 1px dashed rgba(169, 185, 204, 0.22);
+}
+
+.race-lane {
+  display: grid;
+  grid-template-columns: 150px minmax(160px, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.race-lane.current {
+  color: var(--accent);
+}
+
+.race-lane-meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.race-lane-meta > span:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.race-token {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  background: var(--surface-3);
+  color: var(--text);
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.race-lane.current .race-token {
+  background: var(--accent);
+  color: #06111f;
+}
+
+.race-lane-bar {
+  position: relative;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background:
+    linear-gradient(90deg, transparent 24.8%, rgba(169, 185, 204, 0.2) 25%, transparent 25.2%),
+    linear-gradient(90deg, transparent 49.8%, rgba(169, 185, 204, 0.2) 50%, transparent 50.2%),
+    linear-gradient(90deg, transparent 74.8%, rgba(169, 185, 204, 0.2) 75%, transparent 75.2%),
+    var(--surface-2);
+  overflow: hidden;
+}
+
+.race-lane-bar::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 3px;
+  height: 100%;
+  background: var(--accent-2);
+}
+
+.race-position {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 2px solid var(--surface);
+  border-radius: 8px;
+  background: var(--accent);
+  color: #06111f;
+  font-size: 0.72rem;
+  font-weight: 900;
+  transition: transform 180ms ease-out;
+  translate: -50% -50%;
+  will-change: transform;
+}
+
+.podium {
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.podium.is-hidden {
+  display: none;
+}
+
+.podium-row {
+  display: grid;
+  gap: 3px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.podium-row:first-of-type {
+  border-color: rgba(245, 184, 75, 0.65);
+  background: rgba(245, 184, 75, 0.12);
+}
+
+.podium-row span {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .typing-input {
   min-height: 100px;
   font-size: 1.1rem;
@@ -766,6 +929,15 @@ button:focus,
   .profile-identity {
     align-items: flex-start;
   }
+
+  .arena-hud,
+  .race-lane {
+    grid-template-columns: 1fr;
+  }
+
+  .race-milestones {
+    margin-left: 0;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -776,5 +948,9 @@ button:focus,
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
+  }
+
+  .race-position {
+    transition: none;
   }
 }
