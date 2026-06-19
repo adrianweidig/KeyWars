@@ -11,6 +11,9 @@
         .ThenByDescending(item => item.CorrectCharacters)
         .ThenBy(item => item.DisplayName)
         .ToList();
+    var displayMode = DisplayMode(rankedParticipants.Count);
+    var visibleParticipants = VisibleParticipants(rankedParticipants, Model.CurrentProfileId, displayMode).ToList();
+    var hiddenParticipants = Math.Max(0, rankedParticipants.Count - visibleParticipants.Count);
 }
 
 <section class="page-header">
@@ -37,7 +40,7 @@
 
 <div asp-validation-summary="ModelOnly"></div>
 
-<section class="dashboard-grid" data-arena-room data-room-id="@Model.Snapshot.RoomId" data-current-profile-id="@Model.CurrentProfileId">
+<section class="dashboard-grid" data-arena-room data-room-id="@Model.Snapshot.RoomId" data-current-profile-id="@Model.CurrentProfileId" data-arena-display-mode="@displayMode" data-max-participants="@Model.Snapshot.MaxParticipants">
     <div class="card">
         <h2>Rennen</h2>
         <p class="muted" data-arena-state>@DisplayNames.For(Model.Snapshot.Phase)</p>
@@ -47,14 +50,20 @@
             <div class="metric"><span>Genauigkeit</span><strong data-hud-accuracy>@FormatNumber(currentParticipant?.Accuracy) %</strong></div>
             <div class="metric"><span>Fortschritt</span><strong data-hud-progress>@ProgressPercent(currentParticipant, Model.Snapshot.TargetCharacterCount).ToString("0", System.Globalization.CultureInfo.InvariantCulture) %</strong></div>
         </div>
-        <div class="race-track" data-arena-track aria-label="Rennstrecke mit bestätigtem Fortschritt">
+        <div class="arena-scale-note">
+            <strong data-arena-mode-label>@DisplayModeLabel(displayMode)</strong>
+            <span data-arena-roster-summary>@RosterSummary(rankedParticipants.Count, visibleParticipants.Count, Model.Snapshot.MaxParticipants)</span>
+            <span data-arena-spectator-summary>Zuschauerrolle vorbereitet</span>
+            <span data-arena-connection-quality>Verbindung: wird aufgebaut</span>
+        </div>
+        <div class="race-track @displayMode" data-arena-track aria-label="Rennstrecke mit bestätigtem Fortschritt">
             <div class="race-milestones" aria-hidden="true">
                 <span style="left:25%">25</span>
                 <span style="left:50%">50</span>
                 <span style="left:75%">75</span>
                 <span style="left:100%">Ziel</span>
             </div>
-            @foreach (var participant in rankedParticipants)
+            @foreach (var participant in visibleParticipants)
             {
                 var progress = ProgressPercent(participant, Model.Snapshot.TargetCharacterCount);
                 var isCurrent = participant.ProfileId == Model.CurrentProfileId;
@@ -79,6 +88,7 @@
                     </div>
                 </div>
             }
+            <p class="muted roster-window-note @(hiddenParticipants > 0 ? "" : "is-hidden")" data-arena-window-note>@HiddenParticipantsText(hiddenParticipants)</p>
         </div>
         <div class="typing-target" data-arena-target>
             @if (string.IsNullOrEmpty(Model.Snapshot.TargetText))
@@ -105,10 +115,10 @@
     </div>
     <aside class="card">
         <h2>Teilnehmende</h2>
-        <table class="table">
+        <table class="table participant-list @displayMode">
             <thead><tr><th>Name</th><th>Status</th><th>Fortschritt</th><th>Platz</th></tr></thead>
             <tbody data-arena-participants>
-            @foreach (var participant in Model.Snapshot.Participants)
+            @foreach (var participant in visibleParticipants)
             {
                 <tr data-participant-id="@participant.ProfileId">
                     <td>@participant.DisplayName</td>
@@ -119,6 +129,7 @@
             }
             </tbody>
         </table>
+        <p class="muted @(hiddenParticipants > 0 ? "" : "is-hidden")" data-arena-hidden-count>@HiddenParticipantsText(hiddenParticipants)</p>
         <div class="podium @(Model.Snapshot.Finished ? "" : "is-hidden")" data-arena-podium>
             <h2>Podium</h2>
             @foreach (var participant in rankedParticipants.Where(item => item.Status is ParticipantStatus.Finished or ParticipantStatus.Dnf).Take(3))
@@ -167,4 +178,66 @@
 
     private static string FormatNumber(double? value) =>
         value is null ? "-" : value.Value.ToString("0.0", System.Globalization.CultureInfo.GetCultureInfo("de-DE"));
+
+    private static string DisplayMode(int participantCount) => participantCount switch
+    {
+        <= 8 => "detailed",
+        <= 24 => "compact",
+        _ => "focused"
+    };
+
+    private static string DisplayModeLabel(string mode) => mode switch
+    {
+        "detailed" => "Detailansicht",
+        "compact" => "Kompakte Ansicht",
+        "focused" => "Fokussierte Ansicht",
+        _ => "Arena-Ansicht"
+    };
+
+    private static string RosterSummary(int totalParticipants, int visibleParticipants, int maxParticipants)
+    {
+        if (totalParticipants == visibleParticipants)
+        {
+            return $"{totalParticipants} aktive Teilnehmende von {maxParticipants} Plätzen";
+        }
+
+        return $"{visibleParticipants} von {totalParticipants} Teilnehmenden im Fokus, Kapazität {maxParticipants}";
+    }
+
+    private static string HiddenParticipantsText(int hiddenParticipants) =>
+        hiddenParticipants <= 0
+            ? string.Empty
+            : $"{hiddenParticipants} weitere Teilnehmende sind über Top-Plätze, eigene Position und Nachbarn zusammengefasst.";
+
+    private static IReadOnlyList<KeyWars.Services.LiveParticipantSnapshot> VisibleParticipants(
+        IReadOnlyList<KeyWars.Services.LiveParticipantSnapshot> ranked,
+        Guid currentProfileId,
+        string mode)
+    {
+        if (mode != "focused")
+        {
+            return ranked;
+        }
+
+        var selected = new Dictionary<Guid, KeyWars.Services.LiveParticipantSnapshot>();
+        foreach (var participant in ranked.Take(3))
+        {
+            selected[participant.ProfileId] = participant;
+        }
+
+        var currentIndex = ranked.ToList().FindIndex(item => item.ProfileId == currentProfileId);
+        if (currentIndex >= 0)
+        {
+            foreach (var index in new[] { currentIndex - 1, currentIndex, currentIndex + 1 })
+            {
+                if (index >= 0 && index < ranked.Count)
+                {
+                    var participant = ranked[index];
+                    selected[participant.ProfileId] = participant;
+                }
+            }
+        }
+
+        return ranked.Where(item => selected.ContainsKey(item.ProfileId)).ToList();
+    }
 }

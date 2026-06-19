@@ -95,6 +95,37 @@ public sealed partial class WebSmokeTests : IClassFixture<KeyWarsWebFactory>
     }
 
     [Fact]
+    public async Task ArenaRoomUsesFocusedWindowForLargeParticipantFields()
+    {
+        var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        await LoginAsync(client);
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<KeyWarsDbContext>();
+        var profile = await db.UserProfiles.SingleAsync(item => item.SamAccountName == "max.mustermann");
+        var rooms = scope.ServiceProvider.GetRequiredService<LiveRoomManager>();
+        var room = rooms.CreateRoom(new CreateLiveRoomRequest(profile.Id, profile.DisplayName, "Große Runde", "Text", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 64));
+        foreach (var index in Enumerable.Range(1, 31))
+        {
+            rooms.Join(room.RoomId, Guid.CreateVersion7(), $"Alpha {index:00}");
+        }
+
+        var page = await client.GetStringAsync($"/arena/{room.RoomId}");
+        var decodedPage = WebUtility.HtmlDecode(page);
+
+        Assert.Contains("data-arena-display-mode=\"focused\"", page);
+        Assert.Contains("Fokussierte Ansicht", decodedPage);
+        Assert.Contains("5 von 32 Teilnehmenden im Fokus", decodedPage);
+        Assert.Contains("Kapazität 64", decodedPage);
+        Assert.Contains("Zuschauerrolle vorbereitet", decodedPage);
+        Assert.Contains("Max Mustermann", decodedPage);
+        Assert.Contains("Alpha 01", decodedPage);
+        Assert.Contains("Alpha 03", decodedPage);
+        Assert.Contains("Alpha 31", decodedPage);
+        Assert.Contains("27 weitere Teilnehmende", decodedPage);
+        Assert.DoesNotContain("Alpha 04", decodedPage);
+    }
+
+    [Fact]
     public async Task ProfilePageRendersAggregatedInsightsWithoutRawEnums()
     {
         var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });

@@ -47,6 +47,13 @@ Rennstrecke, persoenliches HUD, Rangliste und Podium-Container. Deltas
 aktualisieren die Positionen per CSS-Transform und die textuelle Live-Region
 gedrosselt; Reduced-Motion deaktiviert gleitende Positionsuebergaenge.
 
+Die Darstellung skaliert nach Teilnehmerfeld: bis acht Personen bleibt die
+Detailansicht aktiv, neun bis 24 Personen nutzen eine kompaktere Strecke, und
+ab 25 Personen rendert die fokussierte Ansicht nur Top-Plaetze, eigene Position
+und direkte Rangnachbarn. Die UI zeigt dabei aktive Teilnehmende, Raumkapazitaet
+und Verbindungszustand. Eine echte Zuschauerrolle mit eigenen Berechtigungen
+und niedriger priorisierten Updates ist noch nicht produktiv implementiert.
+
 Grenzen:
 
 - `KEYWARS__LIVE__MAX_PARTICIPANTS_PER_ROOM`

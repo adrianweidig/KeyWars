@@ -11,6 +11,13 @@ export function attachArenaPages() {
     const hud = root.querySelector("[data-arena-hud]");
     const podium = root.querySelector("[data-arena-podium]");
     const liveRegion = root.querySelector("[data-arena-live-region]");
+    const modeLabel = root.querySelector("[data-arena-mode-label]");
+    const rosterSummaryLabel = root.querySelector("[data-arena-roster-summary]");
+    const spectatorSummary = root.querySelector("[data-arena-spectator-summary]");
+    const connectionQuality = root.querySelector("[data-arena-connection-quality]");
+    const hiddenCountLabel = root.querySelector("[data-arena-hidden-count]");
+    const windowNote = root.querySelector("[data-arena-window-note]");
+    const participantList = participants?.closest("table");
     const readyForm = document.querySelector("[data-arena-ready-form]");
     const startForm = document.querySelector("[data-arena-start-form]");
     const dnfButton = root.querySelector("[data-arena-dnf]");
@@ -77,6 +84,89 @@ export function attachArenaPages() {
       }
 
       return Math.max(0, Math.min(100, participant.correctCharacters * 100 / snapshot.targetCharacterCount));
+    };
+
+    const maxParticipants = () => {
+      const snapshotMax = Number(snapshot?.maxParticipants);
+      const rootMax = Number(root.dataset.maxParticipants);
+      if (Number.isFinite(snapshotMax) && snapshotMax > 0) {
+        return snapshotMax;
+      }
+
+      return Number.isFinite(rootMax) && rootMax > 0 ? rootMax : 0;
+    };
+
+    const displayMode = () => {
+      const count = snapshot?.participants?.length || 0;
+      if (count <= 8) {
+        return "detailed";
+      }
+
+      if (count <= 24) {
+        return "compact";
+      }
+
+      return "focused";
+    };
+
+    const visibleParticipantWindow = (ranked = rankedParticipants()) => {
+      if (displayMode() !== "focused") {
+        return ranked;
+      }
+
+      const selected = new Set();
+      ranked.slice(0, 3).forEach((participant) => selected.add(participant.profileId));
+      const currentIndex = ranked.findIndex((participant) => participant.profileId === currentProfileId);
+      if (currentIndex >= 0) {
+        [currentIndex - 1, currentIndex, currentIndex + 1].forEach((index) => {
+          if (index >= 0 && index < ranked.length) {
+            selected.add(ranked[index].profileId);
+          }
+        });
+      }
+
+      return ranked.filter((participant) => selected.has(participant.profileId));
+    };
+
+    const modeTitle = (mode) => ({
+      detailed: "Detailansicht",
+      compact: "Kompakte Ansicht",
+      focused: "Fokussierte Ansicht"
+    }[mode] || "Arena-Ansicht");
+
+    const rosterSummary = (total, visible) => {
+      const capacity = maxParticipants();
+      if (total === visible) {
+        return capacity > 0
+          ? `${total} aktive Teilnehmende von ${capacity} Plätzen`
+          : `${total} sichtbare Teilnehmende`;
+      }
+
+      return capacity > 0
+        ? `${visible} von ${total} Teilnehmenden im Fokus, Kapazität ${capacity}`
+        : `${visible} von ${total} Teilnehmenden im Fokus`;
+    };
+
+    const hiddenParticipantsText = (hidden) => hidden <= 0
+      ? ""
+      : `${hidden} weitere Teilnehmende sind über Top-Plätze, eigene Position und Nachbarn zusammengefasst.`;
+
+    const renderRosterMode = (ranked = rankedParticipants(), visible = visibleParticipantWindow(ranked)) => {
+      const mode = displayMode();
+      const hidden = Math.max(0, ranked.length - visible.length);
+      root.dataset.arenaDisplayMode = mode;
+      ["detailed", "compact", "focused"].forEach((name) => {
+        track?.classList.toggle(name, mode === name);
+        participantList?.classList.toggle(name, mode === name);
+      });
+      setText(modeLabel, modeTitle(mode));
+      setText(rosterSummaryLabel, rosterSummary(ranked.length, visible.length));
+      setText(spectatorSummary, "Zuschauer: Rolle vorbereitet");
+      setText(connectionQuality, "Verbindung: aktiv");
+      setText(hiddenCountLabel, hiddenParticipantsText(hidden));
+      setText(windowNote, hiddenParticipantsText(hidden));
+      setHidden(hiddenCountLabel, hidden === 0);
+      setHidden(windowNote, hidden === 0);
     };
 
     const participantRow = (participant) => {
@@ -169,7 +259,10 @@ export function attachArenaPages() {
       }
 
       const expectedIds = new Set();
-      rankedParticipants().forEach((participant) => {
+      const ranked = rankedParticipants();
+      const visible = visibleParticipantWindow(ranked);
+      renderRosterMode(ranked, visible);
+      visible.forEach((participant) => {
         expectedIds.add(participant.profileId);
         const row = participants.querySelector(`[data-participant-id="${participant.profileId}"]`) || participantRow(participant);
         updateParticipantRow(row, participant);
@@ -189,11 +282,13 @@ export function attachArenaPages() {
       }
 
       const expectedIds = new Set();
-      rankedParticipants().forEach((participant) => {
+      const ranked = rankedParticipants();
+      const visible = visibleParticipantWindow(ranked);
+      visible.forEach((participant) => {
         expectedIds.add(participant.profileId);
         const lane = track.querySelector(`[data-track-participant-id="${participant.profileId}"]`) || trackLane(participant);
         updateTrackLane(lane, participant);
-        track.append(lane);
+        track.insertBefore(lane, windowNote || null);
       });
 
       track.querySelectorAll("[data-track-participant-id]").forEach((lane) => {
@@ -479,16 +574,24 @@ export function attachArenaPages() {
     connection.on("progressChanged", applyProgressBatch);
     connection.onReconnect(async () => {
       try {
+        setText(connectionQuality, "Verbindung: neu verbunden");
         applySnapshot(await connection.invoke("JoinRoom", [roomId]));
       } catch (error) {
+        setText(connectionQuality, "Verbindung: Fehler");
         showConnectionError(error);
       }
     });
 
     connection.start()
-      .then(() => connection.invoke("JoinRoom", [roomId]))
+      .then(() => {
+        setText(connectionQuality, "Verbindung: aktiv");
+        return connection.invoke("JoinRoom", [roomId]);
+      })
       .then(applySnapshot)
-      .catch(showConnectionError);
+      .catch((error) => {
+        setText(connectionQuality, "Verbindung: Fehler");
+        showConnectionError(error);
+      });
 
     window.addEventListener("pagehide", () => {
       if (connection.isConnected()) {
@@ -585,6 +688,12 @@ function element(tagName, text) {
 function setText(node, text) {
   if (node) {
     node.textContent = text;
+  }
+}
+
+function setHidden(node, hidden) {
+  if (node) {
+    node.classList.toggle("is-hidden", hidden);
   }
 }
 

@@ -21,9 +21,10 @@ Statuswerte:
 | Live-Arena Lobby | teilweise | Phasen, Countdown, Presence, Hosttransfer, nutzerorientierte Einstiegspfade und konfigurierbare Raumkapazitaet begonnen |
 | Live-Arena Countdown | teilweise | Serverzeit vorhanden, Browser-E2E fehlt |
 | Live-Arena grafische Strecke | teilweise | DOM-basierte Rennstrecke mit Meilensteinen, eigener Spur und CSS-Transform-Fortschritt vorhanden; Visual-/Performance-Evidenz offen |
+| Live-Arena adaptive Grossraumansicht | teilweise | 2-8 Detailansicht, 9-24 kompakte Ansicht und ab 25 fokussiertes Fenster mit Top-Plaetzen, eigener Position und Nachbarn vorhanden; 64er Visual-/Performance-Evidenz offen |
 | Live-HUD und Podium | teilweise | Persoenliches HUD, Ranglisten-Updates, Live-Region und Podium-Container vorhanden; echte Ueberhol-/Belohnungs-E2E offen |
 | Mehrere Runden/Best-of | geplant | Raumvertrag lehnt Serien bis zur KW-018-Implementierung ab |
-| Zuschauer | geplant | KW-027 |
+| Zuschauer | geplant | KW-027 bereitet die Anzeige vor; produktive Zuschauerrolle, Berechtigungen und Update-Priorisierung fehlen |
 | XP/Level/Missionen | teilweise | Idempotentes Reward-Ledger, stabile Tages-/Wochenmissionen, Level-Fortschritt und 30+ Achievement-Definitionen vorhanden; vollstaendige Achievement-UI/E2E und alle Auditkriterien noch offen |
 | Arena-Rating | teilweise | transaktionale Persistenz KW-016/KW-034 offen |
 | Profiltrends und Kalender | teilweise | SQL-aggregierte 7/30/90-Tage-Trends, Aktivitaetskalender, Bestwerte und paginierte Historie vorhanden; Visual-/Accessibility-Abnahme offen |
