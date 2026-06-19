@@ -28,9 +28,60 @@ test("Dashboard und Einstellungen rendern im echten Browser", async ({ page }) =
   await expect(page.locator("html")).toHaveAttribute("lang", "de");
 });
 
+test("Raumformular blockiert doppelte Submit-Aktion im echten Browser", async ({ page }) => {
+  await login(page, "browser.submit.guard");
+  await page.goto("/arena/neu");
+  await page.getByLabel("Titel").fill("Submit Guard Browser");
+  await page.getByLabel("Maximale Teilnehmer").fill("2");
+
+  const guardState = await page.evaluate(() => {
+    const form = document.querySelector("form[data-submit-guard]");
+    const button = form?.querySelector("button[type='submit']");
+    if (!form || !button) {
+      throw new Error("Submit-Guard-Formular fehlt.");
+    }
+
+    let observedSubmits = 0;
+    form.addEventListener("submit", (event) => {
+      observedSubmits += 1;
+      event.preventDefault();
+    });
+
+    const first = new Event("submit", { bubbles: true, cancelable: true });
+    const second = new Event("submit", { bubbles: true, cancelable: true });
+    form.dispatchEvent(first);
+    form.dispatchEvent(second);
+
+    return {
+      buttonDisabled: button.disabled,
+      buttonText: button.textContent.trim(),
+      firstPrevented: first.defaultPrevented,
+      observedSubmits,
+      secondPrevented: second.defaultPrevented,
+      submitting: form.dataset.submitting
+    };
+  });
+
+  expect(guardState).toEqual({
+    buttonDisabled: true,
+    buttonText: "Raum wird erstellt...",
+    firstPrevented: true,
+    observedSubmits: 2,
+    secondPrevented: true,
+    submitting: "true"
+  });
+});
+
 test("Arena läuft mit zwei getrennten Browserkontexten über SignalR", async ({ browser, baseURL }, testInfo) => {
   const hostContext = await browser.newContext({ baseURL, colorScheme: "dark", reducedMotion: "reduce" });
   const guestContext = await browser.newContext({ baseURL, colorScheme: "dark", reducedMotion: "reduce" });
+  await hostContext.grantPermissions(["clipboard-read", "clipboard-write"], { origin: baseURL });
+  await hostContext.addInitScript(() => {
+    Object.defineProperty(navigator, "share", {
+      configurable: true,
+      value: undefined
+    });
+  });
   const suffix = testInfo.workerIndex.toString();
   const hostName = `arena.host.${suffix}`;
   const guestName = `arena.gast.${suffix}`;
@@ -51,8 +102,12 @@ test("Arena läuft mit zwei getrennten Browserkontexten über SignalR", async ({
 
     const roomUrl = host.url();
     const roomCode = (await host.locator(".room-code strong").textContent()).trim();
-    await expect(host.getByRole("button", { name: "Code kopieren" })).toBeVisible();
-    await expect(host.getByRole("button", { name: "Einladung teilen" })).toBeVisible();
+    await host.getByRole("button", { name: "Code kopieren" }).click();
+    await expect(host.locator("[data-copy-status]")).toHaveText("Raumcode kopiert.");
+    await expect.poll(() => host.evaluate(() => navigator.clipboard.readText())).toBe(roomCode);
+    await host.getByRole("button", { name: "Einladung teilen" }).click();
+    await expect(host.locator("[data-copy-status]")).toHaveText("Raumcode kopiert.");
+    await expect.poll(() => host.evaluate(() => navigator.clipboard.readText())).toBe(roomCode);
 
     await guest.goto("/arena/beitreten");
     await guest.getByLabel("Raumcode").fill(roomCode);
