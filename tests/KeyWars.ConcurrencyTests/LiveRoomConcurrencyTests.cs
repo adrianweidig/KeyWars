@@ -277,6 +277,72 @@ public sealed class LiveRoomConcurrencyTests
     }
 
     [Fact]
+    public void FinishWithWrongLastGraphemeKeepsParticipantRunning()
+    {
+        var (manager, room, first, _, _) = CreateRunningRoom();
+
+        var ex = Assert.Throws<InvalidOperationException>(() => manager.Finish(room.RoomId, first, "Texx", 0, 0));
+        var snapshot = manager.Snapshot(room.RoomId);
+        var participant = snapshot.Participants.Single(item => item.ProfileId == first);
+
+        Assert.Contains("fehlerfrei", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(LiveRoomPhase.Running, snapshot.Phase);
+        Assert.Equal(ParticipantStatus.Running, participant.Status);
+        Assert.Null(participant.Placement);
+    }
+
+    [Fact]
+    public void ExplicitGiveUpMarksParticipantDnf()
+    {
+        var (manager, room, first, _, _) = CreateRunningRoom();
+
+        var snapshot = manager.GiveUp(room.RoomId, first);
+        var participant = snapshot.Participants.Single(item => item.ProfileId == first);
+
+        Assert.Equal(ParticipantStatus.Dnf, participant.Status);
+        Assert.NotNull(participant.Placement);
+        Assert.Equal(LiveRoomPhase.Running, snapshot.Phase);
+    }
+
+    [Fact]
+    public void SubmitProgressNormalizesCombiningGraphemeBeforeCountingPrefix()
+    {
+        var (manager, room, first, _, _) = CreateRunningRoom("Ärger");
+
+        var snapshot = manager.SubmitProgress(room.RoomId, first, 1, "A\u0308");
+        var participant = snapshot.Participants.Single(item => item.ProfileId == first);
+
+        Assert.Equal(1, participant.CorrectCharacters);
+        Assert.Equal(100, participant.Accuracy);
+    }
+
+    [Fact]
+    public void SubmitProgressRejectsOversizedInputWithoutAdvancingSequence()
+    {
+        var (manager, room, first, _, _) = CreateRunningRoom();
+        manager.SubmitProgress(room.RoomId, first, 1, "Te");
+
+        Assert.Throws<InvalidOperationException>(() => manager.SubmitProgress(room.RoomId, first, 2, new string('x', 40)));
+        var participant = manager.Snapshot(room.RoomId).Participants.Single(item => item.ProfileId == first);
+
+        Assert.Equal(1, participant.Sequence);
+        Assert.Equal(2, participant.CorrectCharacters);
+    }
+
+    [Fact]
+    public void OlderProgressSequenceDoesNotOverwriteCurrentProgress()
+    {
+        var (manager, room, first, _, _) = CreateRunningRoom();
+
+        manager.SubmitProgress(room.RoomId, first, 2, "Text");
+        var snapshot = manager.SubmitProgress(room.RoomId, first, 1, "T");
+        var participant = snapshot.Participants.Single(item => item.ProfileId == first);
+
+        Assert.Equal(2, participant.Sequence);
+        Assert.Equal(4, participant.CorrectCharacters);
+    }
+
+    [Fact]
     public void PresenceKeepsParticipantConnectedWhileSecondTabIsActive()
     {
         var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-06-18T12:00:00Z"));
@@ -388,6 +454,22 @@ public sealed class LiveRoomConcurrencyTests
     private static LivePresenceTracker CreatePresence(LiveOptions? options = null, TimeProvider? timeProvider = null) => new(
         Options.Create(options ?? new LiveOptions()),
         timeProvider ?? TimeProvider.System);
+
+    private static (LiveRoomManager Manager, LiveRoomSnapshot Room, Guid First, Guid Second, ManualTimeProvider Time) CreateRunningRoom(string text = "Text")
+    {
+        var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-06-18T12:00:00Z"));
+        var manager = CreateManager(new LiveOptions { CountdownSeconds = 1 }, time);
+        var first = Guid.CreateVersion7();
+        var second = Guid.CreateVersion7();
+        var room = manager.CreateRoom(new CreateLiveRoomRequest(first, "A", "Raum", text, LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 8));
+        manager.Join(room.RoomId, second, "B");
+        manager.SetReady(room.RoomId, first, true);
+        manager.SetReady(room.RoomId, second, true);
+        manager.Start(room.RoomId, first);
+        time.Advance(TimeSpan.FromSeconds(1));
+        manager.Snapshot(room.RoomId);
+        return (manager, room, first, second, time);
+    }
 
     private sealed class ManualTimeProvider(DateTimeOffset utcNow) : TimeProvider
     {

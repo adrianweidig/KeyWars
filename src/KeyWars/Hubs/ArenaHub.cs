@@ -69,6 +69,14 @@ public sealed class ArenaHub(CurrentUser currentUser, LiveRoomManager rooms, Liv
         return snapshot;
     }
 
+    public async Task<LiveRoomSnapshot> GiveUp(Guid roomId)
+    {
+        var profile = await currentUser.RequireProfileAsync(Context.User!, Context.ConnectionAborted);
+        var snapshot = rooms.GiveUp(roomId, profile.Id);
+        await Clients.Group(roomId.ToString("N")).SendAsync("roomChanged", snapshot, Context.ConnectionAborted);
+        return snapshot;
+    }
+
     public async Task<LiveRoomSnapshot?> LeaveRoom(Guid roomId)
     {
         var profile = await currentUser.RequireProfileAsync(Context.User!, Context.ConnectionAborted);

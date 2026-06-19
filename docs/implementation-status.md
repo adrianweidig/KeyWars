@@ -12,7 +12,7 @@ Dieser Tracker folgt dem Audit-Paket `2f3379490dcd`.
 | KW-011 | teilweise | offen | Offizieller lokaler SignalR-Client, Build/Test gruen | Reconnect-E2E fehlt |
 | KW-012 | teilweise | offen | Concurrency-Tests fuer Presence, Limit, Raumwechsel, Hosttransfer und Grace-Sweep | Zwei-Tab-Browser-E2E und Presence-Deltas fehlen |
 | KW-013 | teilweise | offen | Concurrency-Tests | Zwei-Browser-E2E fehlt |
-| KW-014 | teilweise | offen | Concurrency-Tests | Sequenz-/Fuzztests fehlen |
+| KW-014 | teilweise | offen | Concurrency-Tests fuer Backspace-Fortschritt, falschen Finish ohne DNF, expliziten GiveUp-DNF, NFC-Grapheme, Oversize-Ablehnung und alte Sequenzen; Build/Test gruen | Frequenz-/Sprungheuristiken, echter Hub-/Browser-E2E und umfassende Fuzztests fehlen |
 | KW-015 | teilweise | offen | Unit-Tests fuer Progress-Koaleszierung und Pending-Drop; Concurrency-Test fuer Delta-Pfad ohne Vollsnapshot; Build/Test gruen | Vollstaendige RoomCommand-Pipeline, echter SignalR-Netzlasttest und Soak-Evidenz fehlen |
 | KW-016 | teilweise | offen | Integrationstests fuer Completion-Queue, Idempotenz, transienten SQLite-Retry, Shutdown-Flush, Serverabbruch ohne Rating und konkurrierende Raeume; Concurrency-Tests fuer einmaliges Enqueue und Cleanup | Mehrfachrunden-/Serienpersistenz und vollstaendige Browser-E2E-Abnahme fehlen |
 | KW-017 | teilweise | offen | Unit-Tests fuer Raumcodevalidierung; HTTP-Smoke fuer Redirect der alten `/arena/{id}/rennen`-Route und kanonische Seite ohne manuellen Finish-Fallback; Build/Test gruen; DNF-Aktion und differenzierte Raumfehler umgesetzt | Rollenbasierte Browser-E2E, Copy-to-Clipboard und Slow-network-/Double-click-Evidenz fehlen |

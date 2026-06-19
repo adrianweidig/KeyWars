@@ -216,6 +216,26 @@ export function attachArenaPages() {
       }
     };
 
+    const giveUp = async () => {
+      if (!snapshot || finishedLocally) {
+        return;
+      }
+
+      finishedLocally = true;
+      if (input) {
+        input.disabled = true;
+      }
+
+      try {
+        const next = await connection.invoke("GiveUp", [roomId]);
+        applySnapshot(next);
+      } catch (error) {
+        finishedLocally = false;
+        showConnectionError(error);
+        renderState();
+      }
+    };
+
     readyForm?.addEventListener("submit", async (event) => {
       event.preventDefault();
       try {
@@ -240,7 +260,7 @@ export function attachArenaPages() {
         return;
       }
 
-      finish();
+      giveUp();
     });
 
     leaveButton?.addEventListener("click", async () => {

@@ -63,6 +63,7 @@ public sealed class LiveRoomManager(
     ILiveRoomCompletionSink? completionSink = null)
 {
     private const int MinimumParticipants = 2;
+    private const int MaxInputOverrunCharacters = 20;
     private const string RoomCodeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     private readonly object createGate = new();
     private readonly ConcurrentDictionary<Guid, LiveRoomState> rooms = new();
@@ -256,14 +257,61 @@ public sealed class LiveRoomManager(
                 }
 
                 var duration = NormalizeDuration(now - room.StartedAt.Value);
-                var metrics = typingEngine.Analyze(room.Text, input, duration, backspaces, focusLosses);
-                participant.Status = metrics.Completed ? ParticipantStatus.Finished : ParticipantStatus.Dnf;
+                var normalizedInput = NormalizeBoundedInput(room, input);
+                var metrics = typingEngine.Analyze(room.Text, normalizedInput, duration, backspaces, focusLosses);
+                if (!metrics.Completed)
+                {
+                    throw new InvalidOperationException("Der Zieltext ist noch nicht fehlerfrei abgeschlossen.");
+                }
+
+                participant.Status = ParticipantStatus.Finished;
                 participant.Ready = true;
                 participant.FinishedAt = now;
                 participant.DurationMilliseconds = metrics.DurationMilliseconds;
                 participant.Accuracy = metrics.Accuracy;
                 participant.Wpm = metrics.Wpm;
                 participant.CorrectCharacters = metrics.CorrectCharacters;
+                ApplyPlacements(room);
+                completed ??= TryCompleteRoom(room, now);
+                snapshot = SnapshotUnlocked(room, now);
+            }
+        }
+
+        QueuePersistence(completed);
+        return snapshot;
+    }
+
+    public LiveRoomSnapshot GiveUp(Guid roomId, Guid profileId)
+    {
+        var room = GetRoom(roomId);
+        CompletedRoomRecord? completed;
+        LiveRoomSnapshot snapshot;
+        lock (room.Gate)
+        {
+            var now = timeProvider.GetUtcNow();
+            completed = ApplyDisconnectTimeouts(room, now);
+            AdvancePhase(room, now);
+            var participant = RequireParticipant(room, profileId);
+            if (participant.Status is ParticipantStatus.Finished or ParticipantStatus.Dnf)
+            {
+                snapshot = SnapshotUnlocked(room, now);
+            }
+            else
+            {
+                if (room.Phase != LiveRoomPhase.Running || room.StartedAt is null)
+                {
+                    throw new InvalidOperationException("Diese Runde läuft aktuell nicht.");
+                }
+
+                if (participant.Status != ParticipantStatus.Running)
+                {
+                    throw new InvalidOperationException("Die Runde kann für deinen aktuellen Status nicht aufgegeben werden.");
+                }
+
+                participant.Status = ParticipantStatus.Dnf;
+                participant.Ready = true;
+                participant.FinishedAt = now;
+                participant.DurationMilliseconds = (int)Math.Round(NormalizeDuration(now - room.StartedAt.Value).TotalMilliseconds);
                 ApplyPlacements(room);
                 completed ??= TryCompleteRoom(room, now);
                 snapshot = SnapshotUnlocked(room, now);
@@ -487,7 +535,8 @@ public sealed class LiveRoomManager(
             }
             else
             {
-                var inputElements = TypingEngine.SplitGraphemes(input);
+                var normalizedInput = NormalizeBoundedInput(room, input);
+                var inputElements = TypingEngine.SplitGraphemes(normalizedInput);
                 var correctCharacters = CountCorrectPrefix(room.TargetElements, inputElements);
                 participant.Sequence = sequence;
                 participant.CorrectCharacters = correctCharacters;
@@ -789,6 +838,18 @@ public sealed class LiveRoomManager(
     private static double CalculateProgressAccuracy(int correctCharacters, int inputCharacters)
     {
         return inputCharacters == 0 ? 100 : Math.Round(correctCharacters * 100d / inputCharacters, 2);
+    }
+
+    private static string NormalizeBoundedInput(LiveRoomState room, string input)
+    {
+        var normalized = TypingEngine.NormalizeText(input);
+        var inputLength = TypingEngine.SplitGraphemes(normalized).Count;
+        if (inputLength > room.TargetElements.Count + MaxInputOverrunCharacters)
+        {
+            throw new InvalidOperationException("Die Eingabe ist zu lang.");
+        }
+
+        return normalized;
     }
 
     private static int CalculateRankHint(LiveRoomState room, Guid profileId)
