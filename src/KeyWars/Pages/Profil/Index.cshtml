@@ -1,16 +1,31 @@
 @page "/profil"
+@using System.Globalization
 @model KeyWars.Pages.Profil.IndexModel
 @{
     ViewData["Title"] = "Profil";
+    var culture = CultureInfo.GetCultureInfo("de-DE");
+    var trendMax = Math.Max(1, Model.Insights.Trends.Count == 0 ? 1 : Model.Insights.Trends.Max(item => item.AverageWpm));
+    var activityDays = Model.Insights.ActivityDays;
+    var activityColumns = 15;
+    var activityCell = 10;
+    var activityStep = 13;
+    var activityRows = Math.Max(1, (int)Math.Ceiling(activityDays.Count / (double)activityColumns));
+    var chartWidth = activityColumns * activityStep;
+    var chartHeight = activityRows * activityStep;
 }
 
-<section class="page-header">
-    <div>
-        <h1>@Model.Profile.DisplayName</h1>
-        <p class="lead">@Model.Profile.SamAccountName · @Model.Profile.Department · @Model.Profile.Title</p>
+<section class="page-header profile-header">
+    <div class="profile-identity">
+        <div class="profile-avatar" aria-hidden="true">@Model.Insights.Initials</div>
+        <div>
+            <h1>@Model.Profile.DisplayName</h1>
+            <p class="lead">@Model.Profile.SamAccountName · @Model.Profile.Department · @Model.Profile.Title</p>
+            <p class="muted">Beigetreten am @Model.Profile.CreatedAt.LocalDateTime.ToString("d", culture) · @Model.Insights.Division · @(Model.Profile.Motto ?? "Noch kein Motto")</p>
+        </div>
     </div>
     <div class="action-row">
         <a class="button secondary" asp-page="/Profil/Einstellungen">Einstellungen</a>
+        <a class="button secondary" asp-page="/Profil/Ziele">Ziele</a>
         <a class="button secondary" asp-page="/Profil/Erfolge">Erfolge</a>
     </div>
 </section>
@@ -19,30 +34,226 @@
     <article class="card">
         <h2>Fortschritt</h2>
         <div class="metric-row">
-            <div class="metric"><span>Level</span><strong>@Model.Profile.Level</strong></div>
-            <div class="metric"><span>XP</span><strong>@Model.Profile.ExperiencePoints</strong></div>
-            <div class="metric"><span>Rating</span><strong>@Model.Profile.ArenaRating</strong></div>
-            <div class="metric"><span>Serie</span><strong>@Model.Profile.CurrentStreakDays</strong></div>
+            <div class="metric"><span>Level</span><strong>@Model.Profile.Level.ToString("N0", culture)</strong></div>
+            <div class="metric"><span>XP</span><strong>@Model.Profile.ExperiencePoints.ToString("N0", culture)</strong></div>
+            <div class="metric"><span>Rating</span><strong>@Model.Profile.ArenaRating.ToString("N0", culture)</strong></div>
+            <div class="metric"><span>Serie</span><strong>@Model.Profile.CurrentStreakDays.ToString("N0", culture)</strong></div>
         </div>
         <div class="progress" aria-label="Fortschritt bis zum nächsten Level">
-            <span style="width:@Model.LevelProgress.ProgressPercent.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)%"></span>
+            <span style="width:@Model.LevelProgress.ProgressPercent.ToString("0.#", CultureInfo.InvariantCulture)%"></span>
         </div>
-        <p class="muted">@Model.LevelProgress.ProgressXp / @(Model.LevelProgress.NextLevelXp - Model.LevelProgress.LevelStartXp) XP in diesem Level · noch @Model.LevelProgress.RemainingXp XP bis Level @(Model.Profile.Level + 1)</p>
+        <p class="muted">@Model.LevelProgress.ProgressXp.ToString("N0", culture) / @((Model.LevelProgress.NextLevelXp - Model.LevelProgress.LevelStartXp).ToString("N0", culture)) XP in diesem Level · noch @Model.LevelProgress.RemainingXp.ToString("N0", culture) XP bis Level @(Model.Profile.Level + 1)</p>
     </article>
+
     <article class="card">
-        <h2>Letzte Versuche</h2>
+        <h2>Gesamtleistung</h2>
+        <div class="metric-row">
+            <div class="metric"><span>Versuche</span><strong>@Model.Insights.Totals.CompletedAttempts.ToString("N0", culture)</strong></div>
+            <div class="metric"><span>Zeichen</span><strong>@Model.Insights.Totals.TypedCharacters.ToString("N0", culture)</strong></div>
+            <div class="metric"><span>Wörter</span><strong>@Model.Insights.Totals.EstimatedWords.ToString("N0", culture)</strong></div>
+            <div class="metric"><span>Zeit</span><strong>@FormatDuration(Model.Insights.Totals.TypingTime)</strong></div>
+        </div>
+        <p class="muted">Wörter werden als fünf getippte Zeichen gezählt. Fehlerzeichen bleiben in der Zeichenbilanz sichtbar.</p>
+    </article>
+</section>
+
+<section class="grid stack-spaced">
+    <article class="card">
+        <h2>Trend</h2>
+        @if (Model.Insights.Trends.All(item => item.SampleCount == 0))
+        {
+            <p class="muted">Noch keine abgeschlossenen Versuche für eine belastbare Trendlinie.</p>
+        }
+        else
+        {
+            <svg class="profile-chart" viewBox="0 0 320 150" role="img" aria-labelledby="trendChartTitle">
+                <title id="trendChartTitle">WPM-Trend über 7, 30 und 90 Tage</title>
+                <line x1="24" y1="122" x2="300" y2="122" />
+                @for (var index = 0; index < Model.Insights.Trends.Count; index++)
+                {
+                    var trend = Model.Insights.Trends[index];
+                    var height = Math.Max(4, trend.AverageWpm / trendMax * 96);
+                    var x = 42 + index * 86;
+                    var y = 122 - height;
+                    <g>
+                        <rect x="@x.ToString("0.#", CultureInfo.InvariantCulture)" y="@y.ToString("0.#", CultureInfo.InvariantCulture)" width="38" height="@height.ToString("0.#", CultureInfo.InvariantCulture)" rx="4">
+                            <title>@trend.Days Tage: @trend.AverageWpm.ToString("0.0", culture) WPM, @trend.AverageAccuracy.ToString("0.0", culture) % Genauigkeit, @trend.SampleCount.ToString("N0", culture) Versuche</title>
+                        </rect>
+                        <text x="@((x + 19).ToString("0.#", CultureInfo.InvariantCulture))" y="140" text-anchor="middle">@trend.Days T</text>
+                    </g>
+                }
+            </svg>
+            <table class="table compact-table" aria-label="Trendwerte als Tabelle">
+                <thead><tr><th>Zeitraum</th><th>Versuche</th><th>WPM</th><th>Genauigkeit</th><th>Konsistenz</th></tr></thead>
+                <tbody>
+                @foreach (var trend in Model.Insights.Trends)
+                {
+                    <tr>
+                        <td>@trend.Days Tage</td>
+                        <td>@trend.SampleCount.ToString("N0", culture)</td>
+                        <td>@trend.AverageWpm.ToString("0.0", culture) <span class="muted">@FormatSigned(trend.WpmDelta)</span></td>
+                        <td>@trend.AverageAccuracy.ToString("0.0", culture) % <span class="muted">@FormatSigned(trend.AccuracyDelta, " %")</span></td>
+                        <td>@trend.AverageConsistency.ToString("0.0", culture) % <span class="muted">@FormatSigned(trend.ConsistencyDelta, " %")</span></td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        }
+    </article>
+
+    <article class="card">
+        <h2>Aktivität</h2>
+        @if (activityDays.All(item => item.Intensity == 0))
+        {
+            <p class="muted">Noch keine Aktivität in den letzten 90 Tagen.</p>
+        }
+        else
+        {
+            <svg class="activity-chart" viewBox="0 0 @chartWidth @chartHeight" role="img" aria-labelledby="activityChartTitle">
+                <title id="activityChartTitle">Aktivitätskalender der letzten 90 Tage</title>
+                @for (var index = 0; index < activityDays.Count; index++)
+                {
+                    var day = activityDays[index];
+                    var x = index % activityColumns * activityStep;
+                    var y = index / activityColumns * activityStep;
+                    <rect x="@x" y="@y" width="@activityCell" height="@activityCell" rx="2" class="@ActivityClass(day.Intensity)">
+                        <title>@day.Date.ToString("d", culture): @day.TrainingAttempts Training, @day.ArenaRuns Arena, @day.CompletedGoals Ziele</title>
+                    </rect>
+                }
+            </svg>
+            <table class="table compact-table" aria-label="Aktivität der letzten sieben Tage">
+                <thead><tr><th>Tag</th><th>Training</th><th>Arena</th><th>Ziele</th></tr></thead>
+                <tbody>
+                @foreach (var day in activityDays.TakeLast(7))
+                {
+                    <tr>
+                        <td>@day.Date.ToString("d", culture)</td>
+                        <td>@day.TrainingAttempts.ToString("N0", culture)</td>
+                        <td>@day.ArenaRuns.ToString("N0", culture)</td>
+                        <td>@day.CompletedGoals.ToString("N0", culture)</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        }
+    </article>
+</section>
+
+<section class="grid stack-spaced">
+    <article class="card">
+        <h2>Bestwerte je Modus</h2>
+        @if (Model.Insights.BestModes.Count == 0)
+        {
+            <p class="muted">Noch keine Bestwerte vorhanden.</p>
+        }
+        else
+        {
+            <table class="table">
+                <thead><tr><th>Modus</th><th>Stichprobe</th><th>Bestes WPM</th><th>Beste Genauigkeit</th><th>Ø WPM</th></tr></thead>
+                <tbody>
+                @foreach (var best in Model.Insights.BestModes)
+                {
+                    <tr>
+                        <td>@DisplayNames.For(best.Mode)</td>
+                        <td>@best.SampleCount.ToString("N0", culture)</td>
+                        <td>@best.BestWpm.ToString("0.0", culture)</td>
+                        <td>@best.BestAccuracy.ToString("0.0", culture) %</td>
+                        <td>@best.AverageWpm.ToString("0.0", culture)</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        }
+    </article>
+
+    <article class="card">
+        <h2>Ziele und Erfolge</h2>
+        @if (Model.Insights.CurrentGoals.Count == 0 && Model.Insights.FeaturedAchievements.Count == 0)
+        {
+            <p class="muted">Aktuelle Ziele und freigeschaltete Erfolge erscheinen hier nach den ersten Trainings.</p>
+        }
+        @foreach (var mission in Model.Insights.CurrentGoals.Take(4))
+        {
+            var percent = mission.TargetValue <= 0 ? 0 : Math.Min(100, mission.CurrentValue * 100d / mission.TargetValue);
+            <div class="goal-row">
+                <strong>@mission.Title</strong>
+                <span>@mission.CurrentValue.ToString("N0", culture) / @mission.TargetValue.ToString("N0", culture) · @mission.XpReward.ToString("N0", culture) XP</span>
+                <div class="progress" aria-label="Fortschritt für @mission.Title">
+                    <span style="width:@percent.ToString("0.#", CultureInfo.InvariantCulture)%"></span>
+                </div>
+            </div>
+        }
+        @foreach (var achievement in Model.Insights.FeaturedAchievements)
+        {
+            <p class="pill">@achievement.Title</p>
+        }
+    </article>
+</section>
+
+<section class="card stack-spaced">
+    <div class="section-title-row">
+        <h2>Historie</h2>
+        <span class="muted">Seite @Model.Insights.HistoryPage.ToString("N0", culture) von @Model.Insights.HistoryTotalPages.ToString("N0", culture)</span>
+    </div>
+    @if (Model.Insights.History.Count == 0)
+    {
+        <p class="muted">Noch keine abgeschlossenen Versuche.</p>
+    }
+    else
+    {
         <table class="table">
-            <thead><tr><th>Modus</th><th>WPM</th><th>Genauigkeit</th></tr></thead>
+            <thead><tr><th>Zeit</th><th>Modus</th><th>WPM</th><th>Genauigkeit</th><th>Konsistenz</th><th>Zeichen</th></tr></thead>
             <tbody>
-            @foreach (var attempt in Model.Attempts)
+            @foreach (var attempt in Model.Insights.History)
             {
                 <tr>
+                    <td>@attempt.CreatedAt.LocalDateTime.ToString("g", culture)</td>
                     <td>@DisplayNames.For(attempt.Mode)</td>
-                    <td>@attempt.Wpm.ToString("0.0")</td>
-                    <td>@attempt.Accuracy.ToString("0.0") %</td>
+                    <td>@attempt.Wpm.ToString("0.0", culture)</td>
+                    <td>@attempt.Accuracy.ToString("0.0", culture) %</td>
+                    <td>@attempt.Consistency.ToString("0.0", culture) %</td>
+                    <td>@attempt.CorrectCharacters.ToString("N0", culture)</td>
                 </tr>
             }
             </tbody>
         </table>
-    </article>
+        @if (Model.Insights.HistoryTotalPages > 1)
+        {
+            <nav class="pagination" aria-label="Historie Seiten">
+                <a class="button secondary" asp-page="/Profil/Index" asp-route-seite="@(Model.Insights.HistoryPage - 1)" aria-disabled="@(Model.Insights.HistoryPage <= 1)">Zurück</a>
+                <a class="button secondary" asp-page="/Profil/Index" asp-route-seite="@(Model.Insights.HistoryPage + 1)" aria-disabled="@(Model.Insights.HistoryPage >= Model.Insights.HistoryTotalPages)">Weiter</a>
+            </nav>
+        }
+    }
 </section>
+
+@functions {
+    private static string FormatSigned(double value, string suffix = "")
+    {
+        if (Math.Abs(value) < 0.01)
+        {
+            return "±0" + suffix;
+        }
+
+        return (value > 0 ? "+" : "") + value.ToString("0.0", CultureInfo.GetCultureInfo("de-DE")) + suffix;
+    }
+
+    private static string FormatDuration(TimeSpan value)
+    {
+        if (value.TotalHours >= 1)
+        {
+            return value.ToString(@"h\:mm");
+        }
+
+        return value.ToString(@"m\:ss");
+    }
+
+    private static string ActivityClass(int intensity) => intensity switch
+    {
+        >= 6 => "activity-cell-4",
+        >= 4 => "activity-cell-3",
+        >= 2 => "activity-cell-2",
+        >= 1 => "activity-cell-1",
+        _ => "activity-cell-0"
+    };
+}

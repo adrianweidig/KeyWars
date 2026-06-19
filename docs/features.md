@@ -25,7 +25,7 @@ Statuswerte:
 | Zuschauer | geplant | KW-027 |
 | XP/Level/Missionen | teilweise | Idempotentes Reward-Ledger, stabile Tages-/Wochenmissionen, Level-Fortschritt und 30+ Achievement-Definitionen vorhanden; vollstaendige Achievement-UI/E2E und alle Auditkriterien noch offen |
 | Arena-Rating | teilweise | transaktionale Persistenz KW-016/KW-034 offen |
-| Profiltrends und Kalender | geplant | KW-033 |
+| Profiltrends und Kalender | teilweise | SQL-aggregierte 7/30/90-Tage-Trends, Aktivitaetskalender, Bestwerte und paginierte Historie vorhanden; Visual-/Accessibility-Abnahme offen |
 | Datenschutz-Reset/Loeschung | teilweise | Export/Reset/Loeschung mit Re-Provisioning getestet, aktive Browser-E2E offen |
 | GHCR Multiarch Image | teilweise | Workflow vorhanden, Release-Gate offen |
 | Air-Gap Image-Archiv | teilweise | amd64-Archiv vorhanden, Import-Evidenz offen |

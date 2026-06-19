@@ -69,3 +69,11 @@ Training-/Text-/Challenge-Versuche ueber die Attempt-ID, Arena-Ergebnisse ueber
 den Raum-Idempotency-Key plus Profil-ID und Missionsbelohnungen ueber die
 Mission-ID gebucht. Das Ledger ist Teil von Profil-Export und
 Statistik-Reset/Loeschung.
+
+## Profilaggregation
+
+Die Profilseite nutzt `ProfileInsightsService` und laedt keine vollstaendige
+Versuchsliste mehr in den Speicher. Trends, Gesamtwerte und Bestwerte werden
+ueber SQL-Aggregate aus abgeschlossenen `TypingAttempts` berechnet. Die Historie
+ist paginiert; Aktivitaet wird fuer die letzten 90 Tage aus Training, Arena und
+erreichten Missionen zusammengesetzt.

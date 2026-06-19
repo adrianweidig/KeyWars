@@ -53,6 +53,47 @@ public sealed partial class WebSmokeTests : IClassFixture<KeyWarsWebFactory>
         Assert.Contains("Runde aufgeben", canonical);
     }
 
+    [Fact]
+    public async Task ProfilePageRendersAggregatedInsightsWithoutRawEnums()
+    {
+        var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        await LoginAsync(client);
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<KeyWarsDbContext>();
+        var profile = await db.UserProfiles.SingleAsync(item => item.SamAccountName == "max.mustermann");
+        db.TypingAttempts.Add(new TypingAttempt
+        {
+            UserProfileId = profile.Id,
+            Mode = TrainingMode.Sprint60,
+            Phase = AttemptPhase.Finished,
+            Completed = true,
+            Official = true,
+            CreatedAt = DateTimeOffset.UtcNow.AddMinutes(-5),
+            PreparedAt = DateTimeOffset.UtcNow.AddMinutes(-6),
+            StartedAt = DateTimeOffset.UtcNow.AddMinutes(-6),
+            FinishedAt = DateTimeOffset.UtcNow.AddMinutes(-5),
+            DurationMilliseconds = 60_000,
+            CorrectCharacters = 240,
+            TotalCharacters = 240,
+            Wpm = 48,
+            RawWpm = 48,
+            Accuracy = 100,
+            Consistency = 92,
+            ConsistencySampleCount = 8
+        });
+        await db.SaveChangesAsync();
+
+        var profilePage = await client.GetStringAsync("/profil");
+
+        Assert.Contains("Gesamtleistung", profilePage);
+        Assert.Contains("Trendwerte als Tabelle", profilePage);
+        Assert.Contains("Aktivitätskalender", profilePage);
+        Assert.Contains("Bestwerte je Modus", profilePage);
+        Assert.Contains("60-Sekunden-Sprint", profilePage);
+        Assert.DoesNotContain("Sprint60", profilePage);
+        Assert.Contains("<svg", profilePage);
+    }
+
     private static async Task<HttpResponseMessage> LoginAsync(HttpClient client)
     {
         var login = await client.GetStringAsync("/anmelden");
