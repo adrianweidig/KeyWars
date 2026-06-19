@@ -31,7 +31,7 @@ Statuswerte:
 | Arena-Rating | teilweise | Transaktionale Persistenz mit RatingBefore/Delta/After für Arena-Ergebnisse vorhanden; Saisonmodell, Rivalen und vollständige Ranking-Abnahme offen |
 | Profiltrends und Kalender | teilweise | SQL-aggregierte 7/30/90-Tage-Trends, Aktivitätskalender, Bestwerte und paginierte Historie vorhanden; Visual-/Accessibility-Abnahme offen |
 | Datenschutz-Reset/Löschung | teilweise | Export/Reset/Löschung mit Re-Provisioning getestet, aktive Browser-E2E offen |
-| GHCR Multiarch Image | teilweise | Workflow vorhanden, Release-Gate offen |
-| Air-Gap Image-Archiv | teilweise | amd64-Archiv vorhanden, Import-Evidenz offen |
+| GHCR Multiarch Image | verfügbar | Release-Workflow veröffentlicht versionierte Multiarch-Images nach GHCR |
+| Air-Gap Image-Archiv | verfügbar | Release-Workflow erzeugt amd64-Imagearchiv, Manifest und Prüfsummen |
 | Playwright Visual Regression | geplant | KW-051 |
 | SignalR-Lasttest | teilweise | In-process-Lasttest bis 100 Teilnehmende, echte Netzwerk-Last offen |
