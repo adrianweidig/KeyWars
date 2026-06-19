@@ -17,7 +17,7 @@ Statuswerte:
 | Fehleranalyse | teilweise | Alignment, echte Fehleraggregate und timingbasierte Konsistenz vorhanden; Browser-Visual-E2E und Langzeitaggregation offen |
 | Textbibliothek | teilweise | strikter UTF-8-Import, NFC-/Limitvalidierung, Suche/Filter, POST-Kopie, Edit/Delete mit Ownership- und Referenzschutz vorhanden; Browser-E2E/Pagination-Abnahme offen |
 | Challenges | teilweise | Servergebundenes Challenge-Attempt-Binding, Annahme/Ablehnung, Expiry- und Replaytests vorhanden; Best-of/Browser-E2E offen |
-| Live-Arena Lobby | teilweise | Phasen, Countdown, Presence und Hosttransfer begonnen |
+| Live-Arena Lobby | teilweise | Phasen, Countdown, Presence, Hosttransfer, nutzerorientierte Einstiegspfade und konfigurierbare Raumkapazitaet begonnen |
 | Live-Arena Countdown | teilweise | Serverzeit vorhanden, Browser-E2E fehlt |
 | Live-Arena grafische Strecke | geplant | KW-023 |
 | Live-HUD und Podium | geplant | KW-024, KW-025 |

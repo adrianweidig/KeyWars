@@ -7,21 +7,68 @@
 <section class="page-header">
     <div>
         <h1>Live-Arena</h1>
-        <p class="lead">Räume laufen in dieser KeyWars-Instanz im Arbeitsspeicher. Ein Neustart bricht laufende Runden ohne Ratingänderung ab.</p>
-    </div>
-    <div class="action-row">
-        <a class="button" asp-page="/Arena/Neu">Raum starten</a>
-        <a class="button secondary" asp-page="/Arena/Beitreten">Mit Code beitreten</a>
+        <p class="lead">Starte ein gemeinsames Rennen, tritt per Code bei oder öffne einen intern sichtbaren Raum.</p>
     </div>
 </section>
 
-<section class="grid">
-@foreach (var room in Model.Rooms)
-{
-    <article class="card">
-        <h2>@room.Title</h2>
-        <p class="muted">@room.Participants.Count Personen · Code @room.Code</p>
-        <a class="button secondary" asp-page="/Arena/Raum" asp-route-id="@room.RoomId">Öffnen</a>
+<section class="arena-entry-grid">
+    <article class="card arena-entry">
+        <span class="badge">Neu</span>
+        <h2>Raum erstellen</h2>
+        <p class="muted">Wähle Text, Sichtbarkeit und Teilnehmerzahl für ein klassisches Rennen.</p>
+        <a class="button" asp-page="/Arena/Neu">Raum erstellen</a>
     </article>
-}
+    <article class="card arena-entry">
+        <span class="badge">Code</span>
+        <h2>Mit Code beitreten</h2>
+        <p class="muted">Füge den sechsstelligen Code ein. KeyWars prüft Format und Raumzugang.</p>
+        <a class="button secondary" asp-page="/Arena/Beitreten">Code eingeben</a>
+    </article>
+    <article class="card arena-entry">
+        <span class="badge">Offen</span>
+        <h2>Intern offene Räume</h2>
+        <p class="muted">@Model.Rooms.Count @(Model.Rooms.Count == 1 ? "Raum wartet" : "Räume warten") in der Lobby.</p>
+        <a class="button secondary" href="#offene-raeume">Räume ansehen</a>
+    </article>
+</section>
+
+<section id="offene-raeume" class="stack-spaced">
+    <div class="section-title-row">
+        <h2>Offene Räume</h2>
+        <span class="muted">Live-Lobbys vor dem Start</span>
+    </div>
+    @if (Model.Rooms.Count == 0)
+    {
+        <div class="empty-state">
+            <h3>Noch kein offener Raum</h3>
+            <p>Erstelle den ersten Raum oder tritt einer privaten Runde per Code bei.</p>
+            <div class="action-row">
+                <a class="button" asp-page="/Arena/Neu">Raum erstellen</a>
+                <a class="button secondary" asp-page="/Arena/Beitreten">Code eingeben</a>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="grid">
+        @foreach (var room in Model.Rooms)
+        {
+            var host = room.Participants.FirstOrDefault(item => item.ProfileId == room.CreatorProfileId)?.DisplayName ?? "Raumleitung";
+            <article class="card room-card">
+                <div class="section-title-row">
+                    <h3>@room.Title</h3>
+                    <span class="pill">@DisplayNames.For(room.Phase)</span>
+                </div>
+                <dl class="room-facts">
+                    <div><dt>Host</dt><dd>@host</dd></div>
+                    <div><dt>Modus</dt><dd>@DisplayNames.For(room.Mode)</dd></div>
+                    <div><dt>Teilnehmer</dt><dd>@room.Participants.Count / @room.MaxParticipants</dd></div>
+                    <div><dt>Format</dt><dd>Runde @room.CurrentRound von @room.RoundCount</dd></div>
+                </dl>
+                <p class="room-code">Code <strong>@room.Code</strong></p>
+                <a class="button secondary" asp-page="/Arena/Raum" asp-route-id="@room.RoomId">Öffnen</a>
+            </article>
+        }
+        </div>
+    }
 </section>

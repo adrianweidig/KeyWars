@@ -7,6 +7,12 @@
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
 </head>
 <body>
+@{
+    var currentPage = ViewContext.RouteData.Values["page"]?.ToString() ?? "";
+    var isActive = (string prefix) => currentPage.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
+    var displayName = User.Identity?.Name ?? "KeyWars";
+    var samAccount = User.FindFirst("samAccountName")?.Value ?? "";
+}
     <header>
         <nav class="topbar" aria-label="Hauptnavigation">
             <a class="brand" asp-page="/Index" aria-label="KeyWars Startseite">
@@ -16,10 +22,14 @@
             @if (User.Identity?.IsAuthenticated == true)
             {
                 <div class="nav-links">
-                    <a asp-page="/Spielen/Index">Spielen</a>
-                    <a asp-page="/Arena/Index">Arena</a>
-                    <a asp-page="/Texte/Index">Texte</a>
-                    <a asp-page="/Profil/Index">Profil</a>
+                    <a class="@(isActive("/Spielen") ? "active" : "")" asp-page="/Spielen/Index">Spielen</a>
+                    <a class="@(isActive("/Arena") ? "active" : "")" asp-page="/Arena/Index">Arena</a>
+                    <a class="@(isActive("/Texte") ? "active" : "")" asp-page="/Texte/Index">Texte</a>
+                    <a class="@(isActive("/Profil") ? "active" : "")" asp-page="/Profil/Index">Profil</a>
+                </div>
+                <div class="user-chip" title="@displayName">
+                    <span class="user-avatar" aria-hidden="true">@Initials(displayName)</span>
+                    <span class="user-label"><strong>@displayName</strong><small>@samAccount</small></span>
                 </div>
                 <form class="logout" asp-page="/Abmelden" method="post">
                     <button type="submit" title="Abmelden" aria-label="Abmelden">Abmelden</button>
@@ -37,3 +47,16 @@
     @await RenderSectionAsync("Scripts", required: false)
 </body>
 </html>
+
+@functions {
+    private static string Initials(string value)
+    {
+        var parts = value.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length == 0)
+        {
+            return "KW";
+        }
+
+        return string.Concat(parts.Take(2).Select(part => part[0].ToString().ToUpperInvariant()));
+    }
+}

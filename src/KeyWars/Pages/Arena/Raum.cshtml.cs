@@ -15,6 +15,7 @@ public sealed class RaumModel(CurrentUser currentUser, LiveRoomManager rooms) : 
         "",
         "",
         0,
+        0,
         LiveRoomMode.Classic,
         LiveRoomVisibility.Code,
         1,
