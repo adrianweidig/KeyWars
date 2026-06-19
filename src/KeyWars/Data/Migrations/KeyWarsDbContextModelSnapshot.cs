@@ -176,6 +176,12 @@ namespace KeyWars.Data.Migrations
                     b.Property<int?>("Placement")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int>("RatingAfter")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("RatingBefore")
+                        .HasColumnType("INTEGER");
+
                     b.Property<double>("RatingDelta")
                         .HasColumnType("REAL");
 
@@ -281,6 +287,12 @@ namespace KeyWars.Data.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<int?>("Placement")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("RatingAfter")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("RatingBefore")
                         .HasColumnType("INTEGER");
 
                     b.Property<double>("RatingDelta")

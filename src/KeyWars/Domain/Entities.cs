@@ -168,7 +168,9 @@ public sealed class ChallengeParticipant
     public Guid UserProfileId { get; set; }
     public ParticipantStatus Status { get; set; } = ParticipantStatus.Invited;
     public int? Placement { get; set; }
+    public int RatingBefore { get; set; } = 1000;
     public double RatingDelta { get; set; }
+    public int RatingAfter { get; set; } = 1000;
     public DateTimeOffset InvitedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? RespondedAt { get; set; }
     public DateTimeOffset? FinishedAt { get; set; }
@@ -243,7 +245,9 @@ public sealed class LiveRoomParticipantSummary
     public int DurationMilliseconds { get; set; }
     public double Wpm { get; set; }
     public double Accuracy { get; set; }
+    public int RatingBefore { get; set; } = 1000;
     public double RatingDelta { get; set; }
+    public int RatingAfter { get; set; } = 1000;
 }
 
 public sealed class Mission

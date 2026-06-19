@@ -27,7 +27,7 @@ Statuswerte:
 | Mehrere Runden/Best-of | geplant | Raumvertrag lehnt Serien bis zur KW-018-Implementierung ab |
 | Zuschauer | geplant | KW-027 bereitet die Anzeige vor; produktive Zuschauerrolle, Berechtigungen und Update-Priorisierung fehlen |
 | XP/Level/Missionen | teilweise | Idempotentes Reward-Ledger, stabile Tages-/Wochenmissionen, Level-Fortschritt und 30+ Achievement-Definitionen vorhanden; vollstaendige Achievement-UI/E2E und alle Auditkriterien noch offen |
-| Arena-Rating | teilweise | transaktionale Persistenz KW-016/KW-034 offen |
+| Arena-Rating | teilweise | Transaktionale Persistenz mit RatingBefore/Delta/After fuer Arena-Ergebnisse vorhanden; Saisonmodell, Rivalen und vollstaendige Ranking-Abnahme offen |
 | Profiltrends und Kalender | teilweise | SQL-aggregierte 7/30/90-Tage-Trends, Aktivitaetskalender, Bestwerte und paginierte Historie vorhanden; Visual-/Accessibility-Abnahme offen |
 | Datenschutz-Reset/Loeschung | teilweise | Export/Reset/Loeschung mit Re-Provisioning getestet, aktive Browser-E2E offen |
 | GHCR Multiarch Image | teilweise | Workflow vorhanden, Release-Gate offen |

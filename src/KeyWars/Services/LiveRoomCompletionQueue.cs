@@ -205,7 +205,7 @@ public sealed class SqliteLiveRoomCompletionWriter(IServiceScopeFactory scopeFac
             throw new InvalidOperationException("Mindestens ein Arena-Teilnehmerprofil fehlt fuer die Ergebnispersistenz.");
         }
 
-        var ratingDeltas = participantIds.ToDictionary(id => id, _ => 0);
+        var ratingChanges = profiles.ToDictionary(profile => profile.Id, profile => new RatingChange(profile.Id, profile.ArenaRating, 0, profile.ArenaRating));
         var rankingInput = record.Participants
             .Select(item => new RaceResult(
                 item.UserProfileId,
@@ -222,11 +222,12 @@ public sealed class SqliteLiveRoomCompletionWriter(IServiceScopeFactory scopeFac
         if (!isServerAbort && ranked.Count >= 2)
         {
             var ratings = profiles.ToDictionary(item => item.Id, item => item.ArenaRating);
-            ratingDeltas = MultiplayerRating.CalculatePairwiseElo(ratings, ranked).ToDictionary(item => item.Key, item => item.Value);
+            ratingChanges = MultiplayerRating.CalculatePairwiseEloChanges(ratings, ranked).ToDictionary(item => item.Key, item => item.Value);
             foreach (var profile in profiles)
             {
                 var participant = record.Participants.Single(item => item.UserProfileId == profile.Id);
-                profile.ArenaRating += ratingDeltas[profile.Id];
+                var ratingChange = ratingChanges[profile.Id];
+                profile.ArenaRating = ratingChange.RatingAfter;
                 profile.RatedMatchCount++;
                 profile.SeasonPoints += Math.Max(1, (int)Math.Round(participant.Wpm / 10d));
                 profile.UpdatedAt = DateTimeOffset.UtcNow;
@@ -252,6 +253,7 @@ public sealed class SqliteLiveRoomCompletionWriter(IServiceScopeFactory scopeFac
 
         foreach (var participant in record.Participants)
         {
+            var ratingChange = ratingChanges[participant.UserProfileId];
             db.LiveRoomParticipantSummaries.Add(new LiveRoomParticipantSummary
             {
                 LiveRoomSummaryId = record.Id,
@@ -261,7 +263,9 @@ public sealed class SqliteLiveRoomCompletionWriter(IServiceScopeFactory scopeFac
                 DurationMilliseconds = participant.DurationMilliseconds,
                 Wpm = participant.Wpm,
                 Accuracy = participant.Accuracy,
-                RatingDelta = ratingDeltas[participant.UserProfileId]
+                RatingBefore = ratingChange.RatingBefore,
+                RatingDelta = ratingChange.RatingDelta,
+                RatingAfter = ratingChange.RatingAfter
             });
 
             if (!isServerAbort && participant.Status == ParticipantStatus.Finished)

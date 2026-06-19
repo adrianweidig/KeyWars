@@ -307,13 +307,16 @@ public sealed class ChallengeService(
             var ids = ranked.Select(item => item.Result.UserProfileId).ToArray();
             var profiles = await db.UserProfiles.Where(item => ids.Contains(item.Id)).ToListAsync(cancellationToken);
             var ratings = profiles.ToDictionary(item => item.Id, item => item.ArenaRating);
-            var deltas = MultiplayerRating.CalculatePairwiseElo(ratings, ranked);
+            var ratingChanges = MultiplayerRating.CalculatePairwiseEloChanges(ratings, ranked);
             foreach (var profile in profiles)
             {
-                profile.ArenaRating += deltas[profile.Id];
+                var ratingChange = ratingChanges[profile.Id];
+                profile.ArenaRating = ratingChange.RatingAfter;
                 profile.RatedMatchCount++;
                 var participant = participants.Single(item => item.UserProfileId == profile.Id);
-                participant.RatingDelta = deltas[profile.Id];
+                participant.RatingBefore = ratingChange.RatingBefore;
+                participant.RatingDelta = ratingChange.RatingDelta;
+                participant.RatingAfter = ratingChange.RatingAfter;
             }
         }
 

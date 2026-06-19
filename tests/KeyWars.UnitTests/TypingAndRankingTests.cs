@@ -164,4 +164,29 @@ public sealed class TypingAndRankingTests
         Assert.True(deltas[ranked[0].Result.UserProfileId] > 0);
         Assert.True(deltas[ranked[^1].Result.UserProfileId] < 0);
     }
+
+    [Fact]
+    public void PairwiseEloChangesKeepBeforeDeltaAndAfterTogether()
+    {
+        var winner = Guid.CreateVersion7();
+        var runnerUp = Guid.CreateVersion7();
+        var ranked = RaceRanking.RankClassic(
+        [
+            new RaceResult(winner, ParticipantStatus.Finished, 20_000, 99, 0, 99, 90, 300),
+            new RaceResult(runnerUp, ParticipantStatus.Finished, 25_000, 98, 1, 95, 70, 280)
+        ]);
+        var ratings = new Dictionary<Guid, int>
+        {
+            [winner] = 1030,
+            [runnerUp] = 970
+        };
+
+        var changes = MultiplayerRating.CalculatePairwiseEloChanges(ratings, ranked);
+
+        Assert.Equal(1030, changes[winner].RatingBefore);
+        Assert.Equal(changes[winner].RatingBefore + changes[winner].RatingDelta, changes[winner].RatingAfter);
+        Assert.Equal(970, changes[runnerUp].RatingBefore);
+        Assert.Equal(changes[runnerUp].RatingBefore + changes[runnerUp].RatingDelta, changes[runnerUp].RatingAfter);
+        Assert.Equal(0, changes.Values.Sum(item => item.RatingDelta));
+    }
 }

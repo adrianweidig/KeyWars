@@ -63,6 +63,14 @@ enthaelt `ChallengeId`, `ChallengeRoundId`, `UserProfileId`, `TypingAttemptId`,
 Training-Attempts oder wiederverwendete Attempts eine Challenge-Runde
 abschliessen.
 
+## Arena- und Challenge-Rating
+
+`LiveRoomParticipantSummaries` und `ChallengeParticipants` speichern
+`RatingBefore`, `RatingDelta` und `RatingAfter`. Damit bleibt pro Ergebniszeile
+nachvollziehbar, welcher Ratingstand in die Berechnung einging und welcher
+Stand nach der transaktionalen Persistenz entstand. Serverabbrueche schreiben
+eine neutrale Aenderung mit identischem Before/After-Wert.
+
 ## Motivation
 
 `Missions` besitzen einen stabilen `Key`, der die fachliche Mission definiert.

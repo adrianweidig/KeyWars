@@ -12,6 +12,8 @@ public sealed record RaceResult(
 
 public sealed record RankedRaceResult(RaceResult Result, int Placement);
 
+public sealed record RatingChange(Guid UserProfileId, int RatingBefore, int RatingDelta, int RatingAfter);
+
 public static class RaceRanking
 {
     public static IReadOnlyList<RankedRaceResult> RankClassic(IEnumerable<RaceResult> results)
@@ -54,6 +56,17 @@ public static class RaceRanking
 
 public static class MultiplayerRating
 {
+    public static IReadOnlyDictionary<Guid, RatingChange> CalculatePairwiseEloChanges(
+        IReadOnlyDictionary<Guid, int> currentRatings,
+        IReadOnlyList<RankedRaceResult> rankedResults,
+        int kFactor = 24)
+    {
+        var deltas = CalculatePairwiseElo(currentRatings, rankedResults, kFactor);
+        return currentRatings.ToDictionary(pair =>
+            pair.Key,
+            pair => new RatingChange(pair.Key, pair.Value, deltas[pair.Key], pair.Value + deltas[pair.Key]));
+    }
+
     public static IReadOnlyDictionary<Guid, int> CalculatePairwiseElo(
         IReadOnlyDictionary<Guid, int> currentRatings,
         IReadOnlyList<RankedRaceResult> rankedResults,

@@ -39,8 +39,16 @@ public sealed class LiveRoomCompletionQueueTests
         Assert.Equal(1, profiles[1].RatedMatchCount);
         Assert.True(profiles.Single(item => item.Id == first).ArenaRating > 1000);
         Assert.True(profiles.Single(item => item.Id == second).ArenaRating < 1000);
-        Assert.Equal(profiles.Single(item => item.Id == first).ArenaRating - 1000, participants.Single(item => item.UserProfileId == first).RatingDelta);
-        Assert.Equal(profiles.Single(item => item.Id == second).ArenaRating - 1000, participants.Single(item => item.UserProfileId == second).RatingDelta);
+        var firstProfile = profiles.Single(item => item.Id == first);
+        var secondProfile = profiles.Single(item => item.Id == second);
+        var firstSummary = participants.Single(item => item.UserProfileId == first);
+        var secondSummary = participants.Single(item => item.UserProfileId == second);
+        Assert.Equal(1000, firstSummary.RatingBefore);
+        Assert.Equal(firstProfile.ArenaRating, firstSummary.RatingAfter);
+        Assert.Equal(firstProfile.ArenaRating - firstSummary.RatingBefore, firstSummary.RatingDelta);
+        Assert.Equal(1000, secondSummary.RatingBefore);
+        Assert.Equal(secondProfile.ArenaRating, secondSummary.RatingAfter);
+        Assert.Equal(secondProfile.ArenaRating - secondSummary.RatingBefore, secondSummary.RatingDelta);
         Assert.Equal(2, await db.RewardLedgerEntries.CountAsync(item => item.Source == "arena"));
         Assert.Contains(await db.Missions.ToListAsync(), item => item.UserProfileId == first && item.Key == "daily-arena-or-team" && item.Completed);
     }
@@ -78,6 +86,7 @@ public sealed class LiveRoomCompletionQueueTests
 
         Assert.True(room.AbortedByServer);
         Assert.All(participants, participant => Assert.Equal(0, participant.RatingDelta));
+        Assert.All(participants, participant => Assert.Equal(participant.RatingBefore, participant.RatingAfter));
         Assert.All(profiles, profile => Assert.Equal(1000, profile.ArenaRating));
         Assert.All(profiles, profile => Assert.Equal(0, profile.RatedMatchCount));
     }
