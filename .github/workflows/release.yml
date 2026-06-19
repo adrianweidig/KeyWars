@@ -49,6 +49,7 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository_owner }}/keywars
       - name: Build and push
+        id: push-image
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7
         with:
           context: .
@@ -66,11 +67,44 @@ jobs:
           load: true
           tags: keywars:${{ github.ref_name }}
       - name: Create release notes
+        env:
+          IMAGE_DIGEST: ${{ steps.push-image.outputs.digest }}
+          IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
+          RELEASE_VERSION: ${{ github.ref_name }}
         run: |
           mkdir -p artifacts
           docker save keywars:${{ github.ref_name }} | gzip -c > artifacts/keywars-${{ github.ref_name }}-linux-amd64.tar.gz
           cp compose.yaml .env.example artifacts/
-          sha256sum artifacts/* > artifacts/SHA256SUMS
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          version = os.environ["RELEASE_VERSION"]
+          tags = [line for line in os.environ["IMAGE_TAGS"].splitlines() if line]
+          manifest = {
+              "schema_version": 1,
+              "version": version,
+              "image": {
+                  "repository": "ghcr.io/${{ github.repository_owner }}/keywars",
+                  "tags": tags,
+                  "digest": os.environ["IMAGE_DIGEST"],
+                  "sbom": "registry-attached",
+                  "provenance": "registry-attached",
+              },
+              "offline_archives": [
+                  {
+                      "file": f"keywars-{version}-linux-amd64.tar.gz",
+                      "platform": "linux/amd64",
+                      "format": "docker-save-tar-gzip",
+                  }
+              ],
+          }
+          Path("artifacts/RELEASE_MANIFEST.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+          PY
+          (cd artifacts && sha256sum keywars-${{ github.ref_name }}-linux-amd64.tar.gz compose.yaml .env.example RELEASE_MANIFEST.json > SHA256SUMS)
+      - name: Verify release artifacts
+        run: python scripts/check_release_artifacts.py artifacts "${{ github.ref_name }}"
       - uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
         with:
           generate_release_notes: true
