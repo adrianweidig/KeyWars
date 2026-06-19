@@ -107,17 +107,24 @@ public sealed class ArenaHub(
 
     public async Task<LiveRoomSnapshot?> LeaveRoom(Guid roomId)
     {
-        var profile = await currentUser.RequireProfileAsync(Context.User!, Context.ConnectionAborted);
-        var leave = presence.LeaveRoom(profile.Id, Context.ConnectionId, roomId);
-        await Groups.RemoveFromGroupAsync(Context.ConnectionId, roomId.ToString("N"), Context.ConnectionAborted);
-        if (leave is null || !leave.RoomLostLastConnection)
+        try
         {
-            return rooms.Snapshot(roomId);
-        }
+            var profile = await currentUser.RequireProfileAsync(Context.User!, Context.ConnectionAborted);
+            var leave = presence.LeaveRoom(profile.Id, Context.ConnectionId, roomId);
+            await Groups.RemoveFromGroupAsync(Context.ConnectionId, roomId.ToString("N"), Context.ConnectionAborted);
+            if (leave is null || !leave.RoomLostLastConnection)
+            {
+                return rooms.Snapshot(roomId);
+            }
 
-        var snapshot = rooms.Disconnect(leave.RoomId, leave.ProfileId);
-        await Clients.Group(leave.RoomId.ToString("N")).SendAsync("roomChanged", snapshot, Context.ConnectionAborted);
-        return snapshot;
+            var snapshot = rooms.Disconnect(leave.RoomId, leave.ProfileId);
+            await Clients.Group(leave.RoomId.ToString("N")).SendAsync("roomChanged", snapshot, Context.ConnectionAborted);
+            return snapshot;
+        }
+        catch (OperationCanceledException) when (Context.ConnectionAborted.IsCancellationRequested)
+        {
+            return null;
+        }
     }
 
     public override async Task OnDisconnectedAsync(Exception? exception)
