@@ -65,6 +65,7 @@ public sealed partial class WebSmokeTests : IClassFixture<KeyWarsWebFactory>
         Assert.Contains("Team Sprint", dashboard);
         Assert.Contains("Offen", dashboard);
         Assert.DoesNotContain(">Open<", dashboard);
+        Assert.DoesNotContain("style=", dashboard);
     }
 
     [Fact]
@@ -92,6 +93,7 @@ public sealed partial class WebSmokeTests : IClassFixture<KeyWarsWebFactory>
         Assert.Contains("aria-live=\"polite\"", canonical);
         Assert.Contains("25", canonical);
         Assert.Contains("Ziel", canonical);
+        Assert.DoesNotContain("style=", canonical);
     }
 
     [Fact]
@@ -163,6 +165,7 @@ public sealed partial class WebSmokeTests : IClassFixture<KeyWarsWebFactory>
         Assert.Contains("Bestwerte je Modus", profilePage);
         Assert.Contains("60-Sekunden-Sprint", profilePage);
         Assert.DoesNotContain("Sprint60", profilePage);
+        Assert.DoesNotContain("style=", profilePage);
         Assert.Contains("<svg", profilePage);
     }
 

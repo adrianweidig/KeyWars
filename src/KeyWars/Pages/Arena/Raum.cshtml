@@ -72,10 +72,10 @@
         }
         <div class="race-track @displayMode" data-arena-track aria-label="Rennstrecke mit bestätigtem Fortschritt">
             <div class="race-milestones" aria-hidden="true">
-                <span style="left:25%">25</span>
-                <span style="left:50%">50</span>
-                <span style="left:75%">75</span>
-                <span style="left:100%">Ziel</span>
+                <span class="race-milestone-25">25</span>
+                <span class="race-milestone-50">50</span>
+                <span class="race-milestone-75">75</span>
+                <span class="race-milestone-100">Ziel</span>
             </div>
             @foreach (var participant in visibleParticipants)
             {
@@ -96,7 +96,7 @@
                         }
                     </div>
                     <div class="race-lane-bar" aria-label="@participant.DisplayName: @progress.ToString("0", System.Globalization.CultureInfo.InvariantCulture) Prozent">
-                        <span class="race-position" style="transform:translateX(@progress.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)%);">
+                        <span class="race-position @ProgressClass(progress)">
                             <span>@Initials(participant.DisplayName)</span>
                         </span>
                     </div>
@@ -194,6 +194,12 @@
         value is null ? "-" : value.Value.ToString("0.0", System.Globalization.CultureInfo.GetCultureInfo("de-DE"));
 
     private static string Bool(bool value) => value.ToString().ToLowerInvariant();
+
+    private static string ProgressClass(double value)
+    {
+        var bucket = (int)Math.Round(Math.Clamp(value, 0, 100) / 5d) * 5;
+        return $"race-progress-{bucket}";
+    }
 
     private static string DisplayMode(int participantCount) => participantCount switch
     {

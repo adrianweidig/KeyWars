@@ -35,9 +35,7 @@
             <div class="metric"><span>Level</span><strong>@Model.Profile.Level.ToString("N0", culture)</strong></div>
             <div class="metric"><span>XP</span><strong>@Model.Profile.ExperiencePoints.ToString("N0", culture)</strong></div>
         </div>
-        <div class="progress" aria-label="Fortschritt bis zum nächsten Level">
-            <span style="width:@Model.LevelProgress.ProgressPercent.ToString("0.#", CultureInfo.InvariantCulture)%"></span>
-        </div>
+        <progress class="progress" value="@Model.LevelProgress.ProgressPercent.ToString("0.#", CultureInfo.InvariantCulture)" max="100" aria-label="Fortschritt bis zum nächsten Level">@Model.LevelProgress.ProgressPercent.ToString("0.#", culture) %</progress>
         <p class="muted">Noch @Model.LevelProgress.RemainingXp.ToString("N0", culture) XP bis Level @(Model.Profile.Level + 1).</p>
         <a class="button secondary" asp-page="/Spielen/Index" asp-route-mode="@Model.Recommendation.Mode">Empfehlung starten</a>
     </div>
@@ -76,9 +74,7 @@
             <div class="goal-row">
                 <strong>@mission.Title</strong>
                 <span>@mission.CurrentValue.ToString("N0", culture) / @mission.TargetValue.ToString("N0", culture) · @mission.XpReward.ToString("N0", culture) XP</span>
-                <div class="progress" aria-label="Fortschritt für @mission.Title">
-                    <span style="width:@percent.ToString("0.#", CultureInfo.InvariantCulture)%"></span>
-                </div>
+                <progress class="progress" value="@percent.ToString("0.#", CultureInfo.InvariantCulture)" max="100" aria-label="Fortschritt für @mission.Title">@percent.ToString("0.#", culture) %</progress>
                 <p class="muted">@mission.Description</p>
             </div>
         }

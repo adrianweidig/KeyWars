@@ -32,6 +32,7 @@ export function attachArenaPages() {
     const reactionsEnabled = root.dataset.reactionsEnabled === "true";
     const reducedMotion = root.dataset.reducedMotion === "true" ||
       window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+    const progressClasses = Array.from({ length: 21 }, (_, index) => `race-progress-${index * 5}`);
     root.dataset.motionReduced = reducedMotion ? "true" : "false";
 
     let snapshot = null;
@@ -97,6 +98,11 @@ export function attachArenaPages() {
       }
 
       return Math.max(0, Math.min(100, participant.correctCharacters * 100 / snapshot.targetCharacterCount));
+    };
+
+    const progressClass = (percent) => {
+      const bucket = Math.round(Math.max(0, Math.min(100, percent)) / 5) * 5;
+      return `race-progress-${bucket}`;
     };
 
     const unlockAudio = () => {
@@ -268,7 +274,7 @@ export function attachArenaPages() {
       const bar = document.createElement("div");
       bar.className = "race-lane-bar";
       const position = document.createElement("span");
-      position.className = "race-position";
+      position.className = "race-position race-progress-0";
       position.append(document.createElement("span"));
       bar.append(position);
       lane.append(meta, bar);
@@ -302,7 +308,8 @@ export function attachArenaPages() {
       }
 
       if (position) {
-        position.style.transform = `translateX(${percent}%)`;
+        position.classList.remove(...progressClasses);
+        position.classList.add(progressClass(percent));
         position.querySelector("span").textContent = initials(participant.displayName);
       }
     };

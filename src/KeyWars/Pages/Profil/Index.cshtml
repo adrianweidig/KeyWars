@@ -39,9 +39,7 @@
             <div class="metric"><span>Rating</span><strong>@Model.Profile.ArenaRating.ToString("N0", culture)</strong></div>
             <div class="metric"><span>Serie</span><strong>@Model.Profile.CurrentStreakDays.ToString("N0", culture)</strong></div>
         </div>
-        <div class="progress" aria-label="Fortschritt bis zum nächsten Level">
-            <span style="width:@Model.LevelProgress.ProgressPercent.ToString("0.#", CultureInfo.InvariantCulture)%"></span>
-        </div>
+        <progress class="progress" value="@Model.LevelProgress.ProgressPercent.ToString("0.#", CultureInfo.InvariantCulture)" max="100" aria-label="Fortschritt bis zum nächsten Level">@Model.LevelProgress.ProgressPercent.ToString("0.#", culture) %</progress>
         <p class="muted">@Model.LevelProgress.ProgressXp.ToString("N0", culture) / @((Model.LevelProgress.NextLevelXp - Model.LevelProgress.LevelStartXp).ToString("N0", culture)) XP in diesem Level · noch @Model.LevelProgress.RemainingXp.ToString("N0", culture) XP bis Level @(Model.Profile.Level + 1)</p>
     </article>
 
@@ -178,9 +176,7 @@
             <div class="goal-row">
                 <strong>@mission.Title</strong>
                 <span>@mission.CurrentValue.ToString("N0", culture) / @mission.TargetValue.ToString("N0", culture) · @mission.XpReward.ToString("N0", culture) XP</span>
-                <div class="progress" aria-label="Fortschritt für @mission.Title">
-                    <span style="width:@percent.ToString("0.#", CultureInfo.InvariantCulture)%"></span>
-                </div>
+                <progress class="progress" value="@percent.ToString("0.#", CultureInfo.InvariantCulture)" max="100" aria-label="Fortschritt für @mission.Title">@percent.ToString("0.#", culture) %</progress>
             </div>
         }
         @foreach (var achievement in Model.Insights.FeaturedAchievements)

@@ -37,6 +37,6 @@ Dieser Tracker folgt dem Audit-Paket `2f3379490dcd`.
 | KW-050 | blockiert | offen | Agent-Share-Pruefung | Kein AD-Runbook gefunden |
 | KW-051 | blockiert | offen | HTTP-E2E gruen, Playwright-CLI-Versuch dokumentiert | Lokales Node 8/unvollstaendige Playwright-Runtime |
 | KW-052 | teilweise | offen | `tools/KeyWars.LoadTest` lokal bis 100 Teilnehmende | Echter SignalR-Netzlasttest fehlt |
-| KW-053 | teilweise | offen | Rate-Limits, CSP, LDAP-CA/Timeout-Tests | Real-AD-Verifikation fehlt |
+| KW-053 | teilweise | offen | Rate-Limits, CSP, LDAP-CA/Timeout-Tests; HTTP-Smokes verhindern Inline-Style-Regressionen auf Dashboard, Profil und Arena, Arena-Fortschritt nutzt CSP-sichere CSS-Klassen | Real-AD-Verifikation, vollstaendige Header-/Cookie-Browsermatrix und Container-Haertungstest fehlen |
 | KW-054 | blockiert | offen | Workflow-Review | Docker lokal nicht verfuegbar |
 | KW-055 | teilweise | offen | Release-Workflow mit Hygiene-, Status-, Test- und Load-Gates | Realer Tag/GHCR-Release fehlt |

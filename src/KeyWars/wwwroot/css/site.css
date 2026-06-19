@@ -289,19 +289,29 @@ button:disabled {
 }
 
 .progress {
+  display: block;
   width: 100%;
   height: 10px;
   overflow: hidden;
+  appearance: none;
   border-radius: 999px;
   background: var(--surface-3);
   border: 1px solid var(--line);
   margin: 6px 0 8px;
 }
 
-.progress span {
-  display: block;
-  min-width: 0;
-  height: 100%;
+progress.progress::-webkit-progress-bar {
+  border-radius: inherit;
+  background: var(--surface-3);
+}
+
+progress.progress::-webkit-progress-value {
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+progress.progress::-moz-progress-bar {
+  border-radius: inherit;
   background: var(--accent);
 }
 
@@ -571,6 +581,22 @@ button:focus,
   transform: translateX(-50%);
 }
 
+.race-milestone-25 {
+  left: 25%;
+}
+
+.race-milestone-50 {
+  left: 50%;
+}
+
+.race-milestone-75 {
+  left: 75%;
+}
+
+.race-milestone-100 {
+  left: 100%;
+}
+
 .race-milestones span::before {
   content: "";
   position: absolute;
@@ -683,10 +709,32 @@ button:focus,
   color: #06111f;
   font-size: 0.72rem;
   font-weight: 900;
-  transition: transform var(--motion-fast) var(--ease-standard);
+  transition: left var(--motion-fast) var(--ease-standard);
   translate: -50% -50%;
-  will-change: transform;
+  will-change: left;
 }
+
+.race-progress-0 { left: 0%; }
+.race-progress-5 { left: 5%; }
+.race-progress-10 { left: 10%; }
+.race-progress-15 { left: 15%; }
+.race-progress-20 { left: 20%; }
+.race-progress-25 { left: 25%; }
+.race-progress-30 { left: 30%; }
+.race-progress-35 { left: 35%; }
+.race-progress-40 { left: 40%; }
+.race-progress-45 { left: 45%; }
+.race-progress-50 { left: 50%; }
+.race-progress-55 { left: 55%; }
+.race-progress-60 { left: 60%; }
+.race-progress-65 { left: 65%; }
+.race-progress-70 { left: 70%; }
+.race-progress-75 { left: 75%; }
+.race-progress-80 { left: 80%; }
+.race-progress-85 { left: 85%; }
+.race-progress-90 { left: 90%; }
+.race-progress-95 { left: 95%; }
+.race-progress-100 { left: 100%; }
 
 .race-track.compact .race-position,
 .race-track.focused .race-position {
