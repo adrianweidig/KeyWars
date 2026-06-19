@@ -31,6 +31,23 @@ jobs:
         run: dotnet build -c Release --no-restore
       - name: Test
         run: dotnet test -c Release --no-build --collect:"XPlat Code Coverage" --results-directory TestResults
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install browser test dependencies
+        run: npm ci
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Browser E2E
+        run: npm run test:browser
+      - name: Upload browser artifacts
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-artifacts
+          path: output/playwright
+          if-no-files-found: ignore
       - name: Upload coverage artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

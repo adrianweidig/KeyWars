@@ -1,9 +1,11 @@
 {
   "private": true,
   "scripts": {
+    "test:browser": "playwright test",
     "vendor:signalr": "node -e \"const fs=require('fs'), path=require('path'); const dir='src/KeyWars/wwwroot/vendor/signalr'; dir.split(/[\\\\/]/).reduce((p,s)=>{const n=p?path.join(p,s):s; if(!fs.existsSync(n)) fs.mkdirSync(n); return n;}, ''); fs.copyFileSync('node_modules/@microsoft/signalr/dist/browser/signalr.min.js', path.join(dir,'signalr.min.js')); fs.copyFileSync('node_modules/@microsoft/signalr/dist/browser/signalr.min.js.map', path.join(dir,'signalr.min.js.map'));\""
   },
   "devDependencies": {
-    "@microsoft/signalr": "10.0.0"
+    "@microsoft/signalr": "10.0.0",
+    "@playwright/test": "1.58.2"
   }
 }
