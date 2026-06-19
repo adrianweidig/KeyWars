@@ -15,6 +15,7 @@ Statuswerte:
 | Training Classic/Woerter | teilweise | Serverseitiger Attempt-Lebenszyklus mit Prepare/Begin/Finish vorhanden; Browser-Eingabe-E2E offen |
 | Zeit-Sprints | teilweise | Serverdauer startet beim Begin-Signal; Teiltext nach Zeitablauf zaehlt, Browser-Eingabe-E2E offen |
 | Fehleranalyse | teilweise | Alignment, echte Fehleraggregate und timingbasierte Konsistenz vorhanden; Browser-Visual-E2E und Langzeitaggregation offen |
+| Dashboard | teilweise | Tagesfokus, Mission-Fortschritt, 30-Tage-Aktivitaet und lokalisierte Challenge-Statusnamen vorhanden; Visual-/Fehlerzustandsabnahme offen |
 | Textbibliothek | teilweise | strikter UTF-8-Import, NFC-/Limitvalidierung, Suche/Filter, POST-Kopie, Edit/Delete mit Ownership- und Referenzschutz vorhanden; Browser-E2E/Pagination-Abnahme offen |
 | Challenges | teilweise | Servergebundenes Challenge-Attempt-Binding, Annahme/Ablehnung, Expiry- und Replaytests vorhanden; Best-of/Browser-E2E offen |
 | Live-Arena Lobby | teilweise | Phasen, Countdown, Presence, Hosttransfer, nutzerorientierte Einstiegspfade und konfigurierbare Raumkapazitaet begonnen |

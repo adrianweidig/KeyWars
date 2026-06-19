@@ -592,6 +592,28 @@ button:focus,
   font-size: 0.92rem;
 }
 
+.challenge-list {
+  display: grid;
+  gap: 10px;
+}
+
+.challenge-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.challenge-row:hover {
+  text-decoration: none;
+  border-color: var(--accent);
+}
+
 .section-title-row {
   display: flex;
   align-items: baseline;

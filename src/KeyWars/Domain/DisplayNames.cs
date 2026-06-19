@@ -48,6 +48,16 @@ public static class DisplayNames
         _ => mode.ToString()
     };
 
+    public static string For(ChallengeStatus status) => status switch
+    {
+        ChallengeStatus.Open => "Offen",
+        ChallengeStatus.Running => "Läuft",
+        ChallengeStatus.Finished => "Abgeschlossen",
+        ChallengeStatus.Expired => "Abgelaufen",
+        ChallengeStatus.Cancelled => "Abgebrochen",
+        _ => status.ToString()
+    };
+
     public static string For(TrainingMode mode) => mode switch
     {
         TrainingMode.Sprint15 => "15-Sekunden-Sprint",

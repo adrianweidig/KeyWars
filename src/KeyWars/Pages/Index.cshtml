@@ -1,7 +1,14 @@
 @page
+@using System.Globalization
 @model KeyWars.Pages.IndexModel
 @{
     ViewData["Title"] = "Start";
+    var culture = CultureInfo.GetCultureInfo("de-DE");
+    var recentActivity = Model.Insights.ActivityDays.TakeLast(30).ToList();
+    var activityColumns = 15;
+    var activityStep = 13;
+    var chartWidth = activityColumns * activityStep;
+    var chartHeight = Math.Max(1, (int)Math.Ceiling(recentActivity.Count / (double)activityColumns)) * activityStep;
 }
 
 <section class="page-header">
@@ -19,31 +26,64 @@
 
 <section class="dashboard-grid">
     <div class="card">
-        <h2>Heute</h2>
+        <h2>Tagesfokus</h2>
         <div class="metric-row">
             <div class="metric"><span>Letzte WPM</span><strong>@Model.LastWpm</strong></div>
             <div class="metric"><span>Genauigkeit</span><strong>@Model.LastAccuracy %</strong></div>
-            <div class="metric"><span>Serie</span><strong>@Model.Profile.CurrentStreakDays Tage</strong></div>
-            <div class="metric"><span>Arena</span><strong>@Model.Profile.ArenaRating</strong></div>
-            <div class="metric"><span>Level</span><strong>@Model.Profile.Level</strong></div>
-            <div class="metric"><span>XP</span><strong>@Model.Profile.ExperiencePoints</strong></div>
+            <div class="metric"><span>Serie</span><strong>@Model.Profile.CurrentStreakDays.ToString("N0", culture) Tage</strong></div>
+            <div class="metric"><span>Arena</span><strong>@Model.Insights.Division · @Model.Profile.ArenaRating.ToString("N0", culture)</strong></div>
+            <div class="metric"><span>Level</span><strong>@Model.Profile.Level.ToString("N0", culture)</strong></div>
+            <div class="metric"><span>XP</span><strong>@Model.Profile.ExperiencePoints.ToString("N0", culture)</strong></div>
         </div>
         <div class="progress" aria-label="Fortschritt bis zum nächsten Level">
-            <span style="width:@Model.LevelProgress.ProgressPercent.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)%"></span>
+            <span style="width:@Model.LevelProgress.ProgressPercent.ToString("0.#", CultureInfo.InvariantCulture)%"></span>
         </div>
-        <p class="muted">Noch @Model.LevelProgress.RemainingXp XP bis Level @(Model.Profile.Level + 1).</p>
-        <h3>Missionen</h3>
-        <div class="grid">
-            @foreach (var mission in Model.Missions)
-            {
-                <div class="metric">
-                    <strong>@mission.Title</strong>
-                    <span>@mission.CurrentValue / @mission.TargetValue</span>
-                    <p class="muted">@mission.Description</p>
-                </div>
-            }
-        </div>
+        <p class="muted">Noch @Model.LevelProgress.RemainingXp.ToString("N0", culture) XP bis Level @(Model.Profile.Level + 1).</p>
+        <a class="button secondary" asp-page="/Spielen/Index" asp-route-mode="@Model.Recommendation.Mode">Empfehlung starten</a>
     </div>
+
+    <aside class="card">
+        <h2>30-Tage-Übersicht</h2>
+        @if (recentActivity.All(item => item.Intensity == 0))
+        {
+            <p class="muted">Noch keine Aktivität in den letzten 30 Tagen.</p>
+        }
+        else
+        {
+            <svg class="activity-chart" viewBox="0 0 @chartWidth @chartHeight" role="img" aria-labelledby="dashboardActivityTitle">
+                <title id="dashboardActivityTitle">Training, Arena und Ziele der letzten 30 Tage</title>
+                @for (var index = 0; index < recentActivity.Count; index++)
+                {
+                    var day = recentActivity[index];
+                    var x = index % activityColumns * activityStep;
+                    var y = index / activityColumns * activityStep;
+                    <rect x="@x" y="@y" width="10" height="10" rx="2" class="@ActivityClass(day.Intensity)">
+                        <title>@day.Date.ToString("d", culture): @day.TrainingAttempts Training, @day.ArenaRuns Arena, @day.CompletedGoals Ziele</title>
+                    </rect>
+                }
+            </svg>
+        }
+        <p class="muted">@Model.Insights.Totals.CompletedAttempts.ToString("N0", culture) abgeschlossene Versuche · @Model.Insights.Totals.TypedCharacters.ToString("N0", culture) Zeichen</p>
+    </aside>
+</section>
+
+<section class="grid stack-spaced">
+    <article class="card">
+        <h2>Missionen</h2>
+        @foreach (var mission in Model.Missions)
+        {
+            var percent = mission.TargetValue <= 0 ? 0 : Math.Min(100, mission.CurrentValue * 100d / mission.TargetValue);
+            <div class="goal-row">
+                <strong>@mission.Title</strong>
+                <span>@mission.CurrentValue.ToString("N0", culture) / @mission.TargetValue.ToString("N0", culture) · @mission.XpReward.ToString("N0", culture) XP</span>
+                <div class="progress" aria-label="Fortschritt für @mission.Title">
+                    <span style="width:@percent.ToString("0.#", CultureInfo.InvariantCulture)%"></span>
+                </div>
+                <p class="muted">@mission.Description</p>
+            </div>
+        }
+    </article>
+
     <aside class="card">
         <h2>Offene Wettbewerbe</h2>
         @if (Model.Challenges.Count == 0)
@@ -52,18 +92,26 @@
         }
         else
         {
-            <table class="table">
-                <thead><tr><th>Titel</th><th>Status</th></tr></thead>
-                <tbody>
-                @foreach (var challenge in Model.Challenges)
-                {
-                    <tr>
-                        <td><a asp-page="/Herausforderungen/Details" asp-route-id="@challenge.Id">@challenge.Title</a></td>
-                        <td><span class="pill">@challenge.Status</span></td>
-                    </tr>
-                }
-                </tbody>
-            </table>
+            <div class="challenge-list">
+            @foreach (var challenge in Model.Challenges.Take(6))
+            {
+                <a class="challenge-row" asp-page="/Herausforderungen/Details" asp-route-id="@challenge.Id">
+                    <span>@challenge.Title</span>
+                    <span class="pill">@DisplayNames.For(challenge.Status)</span>
+                </a>
+            }
+            </div>
         }
     </aside>
 </section>
+
+@functions {
+    private static string ActivityClass(int intensity) => intensity switch
+    {
+        >= 6 => "activity-cell-4",
+        >= 4 => "activity-cell-3",
+        >= 2 => "activity-cell-2",
+        >= 1 => "activity-cell-1",
+        _ => "activity-cell-0"
+    };
+}

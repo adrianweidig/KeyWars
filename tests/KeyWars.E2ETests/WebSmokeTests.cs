@@ -25,11 +25,46 @@ public sealed partial class WebSmokeTests : IClassFixture<KeyWarsWebFactory>
         var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
 
         var response = await LoginAsync(client);
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<KeyWarsDbContext>();
+        var profile = await db.UserProfiles.SingleAsync(item => item.SamAccountName == "max.mustermann");
+        var text = new TrainingText
+        {
+            OwnerProfileId = profile.Id,
+            Title = "Dashboard Text",
+            Body = "Dashboard Text",
+            CharacterCount = 14,
+            Visibility = TrainingTextVisibility.Private
+        };
+        db.TrainingTexts.Add(text);
+        var challenge = new Challenge
+        {
+            CreatorProfileId = profile.Id,
+            TrainingTextId = text.Id,
+            Title = "Team Sprint",
+            Status = ChallengeStatus.Open,
+            CreatedAt = DateTimeOffset.UtcNow,
+            ExpiresAt = DateTimeOffset.UtcNow.AddDays(7)
+        };
+        db.Challenges.Add(challenge);
+        db.ChallengeParticipants.Add(new ChallengeParticipant
+        {
+            ChallengeId = challenge.Id,
+            UserProfileId = profile.Id,
+            Status = ParticipantStatus.Joined,
+            InvitedAt = DateTimeOffset.UtcNow
+        });
+        await db.SaveChangesAsync();
 
         Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
         var dashboard = await client.GetStringAsync("/");
         Assert.Contains("Max Mustermann", dashboard);
         Assert.Contains("Sofort tippen", dashboard);
+        Assert.Contains("Tagesfokus", dashboard);
+        Assert.Contains("30-Tage-Übersicht", dashboard);
+        Assert.Contains("Team Sprint", dashboard);
+        Assert.Contains("Offen", dashboard);
+        Assert.DoesNotContain(">Open<", dashboard);
     }
 
     [Fact]

@@ -18,7 +18,7 @@ Dieser Tracker folgt dem Audit-Paket `2f3379490dcd`.
 | KW-017 | teilweise | offen | Unit-Tests fuer Raumcodevalidierung; HTTP-Smoke fuer Redirect der alten `/arena/{id}/rennen`-Route und kanonische Seite ohne manuellen Finish-Fallback; Build/Test gruen; DNF-Aktion und differenzierte Raumfehler umgesetzt | Rollenbasierte Browser-E2E, Copy-to-Clipboard und Slow-network-/Double-click-Evidenz fehlen |
 | KW-018 | teilweise | offen | Concurrency-Tests fuer Einzelrundenvertrag und Ablehnung von 3/5-Runden-Serien; Build/Test gruen | Serienlogik, Best-of, Revanche und Browser-E2E fehlen |
 | KW-020 | teilweise | offen | HTTP-Smokes fuer App-Shell-Aenderungen; Navy/Cyan/Violett-Tokens, aktive Navigation, Nutzerchip, Badge-, Empty-State- und Raumkarten-Komponenten umgesetzt; Build/Test gruen | Vollstaendiges Komponenteninventar, Kontrast-/Zoom-/Visualtests und breite Tabellenumstellung fehlen |
-| KW-021 | offen | offen | keine | Dashboard-Slice fehlt |
+| KW-021 | teilweise | offen | HTTP-Smoke fuer Tagesfokus, 30-Tage-Uebersicht und deutsche Challenge-Statusnamen; Dashboard nutzt ProfileInsights statt vollstaendigem Attempt-Load; Build/Test gruen | Browser-Visualtests, Backendfehlerzustand, Skeletons, Wochenziel-Ring und vollstaendige Progressionsmechaniken fehlen |
 | KW-022 | teilweise | offen | HTTP-Smokes fuer Lobby ohne Infrastrukturtext, Einstiegspfade, Raumkapazitaet und konfiguriertes Teilnehmerlimit; Build/Test gruen | Code-Copy/Share, Zwei-Nutzer-Browserfluss, voller Raum, Live-Aktualisierung und Visualtests fehlen |
 | KW-023 | offen | offen | keine | Rennstrecke fehlt |
 | KW-024 | offen | offen | keine | HUD/Deltas fehlen |
