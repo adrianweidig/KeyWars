@@ -15,7 +15,7 @@ Dieser Tracker folgt dem Audit-Paket `2f3379490dcd`.
 | KW-014 | teilweise | offen | Concurrency-Tests | Sequenz-/Fuzztests fehlen |
 | KW-015 | teilweise | offen | Unit-Tests fuer Progress-Koaleszierung und Pending-Drop; Concurrency-Test fuer Delta-Pfad ohne Vollsnapshot; Build/Test gruen | Vollstaendige RoomCommand-Pipeline, echter SignalR-Netzlasttest und Soak-Evidenz fehlen |
 | KW-016 | teilweise | offen | Integrationstests fuer Completion-Queue, Idempotenz, transienten SQLite-Retry, Shutdown-Flush, Serverabbruch ohne Rating und konkurrierende Raeume; Concurrency-Tests fuer einmaliges Enqueue und Cleanup | Mehrfachrunden-/Serienpersistenz und vollstaendige Browser-E2E-Abnahme fehlen |
-| KW-017 | teilweise | offen | Unit-Tests fuer Raumcodevalidierung, Build/Test gruen; POST-Finish-Fallback entfernt; DNF-Aktion und differenzierte Raumfehler umgesetzt | Rollenbasierte Browser-E2E, Copy-to-Clipboard und Slow-network-/Double-click-Evidenz fehlen |
+| KW-017 | teilweise | offen | Unit-Tests fuer Raumcodevalidierung; HTTP-Smoke fuer Redirect der alten `/arena/{id}/rennen`-Route und kanonische Seite ohne manuellen Finish-Fallback; Build/Test gruen; DNF-Aktion und differenzierte Raumfehler umgesetzt | Rollenbasierte Browser-E2E, Copy-to-Clipboard und Slow-network-/Double-click-Evidenz fehlen |
 | KW-018 | teilweise | offen | Concurrency-Tests fuer Einzelrundenvertrag und Ablehnung von 3/5-Runden-Serien; Build/Test gruen | Serienlogik, Best-of, Revanche und Browser-E2E fehlen |
 | KW-020 | offen | offen | keine | Designsystem fehlt |
 | KW-021 | offen | offen | keine | Dashboard-Slice fehlt |
