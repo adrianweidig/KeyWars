@@ -57,6 +57,89 @@ public sealed class LiveRoomConcurrencyTests
     }
 
     [Fact]
+    public void CreateRoomInitializesLobbySnapshotWithoutTargetText()
+    {
+        var now = DateTimeOffset.Parse("2026-06-18T12:00:00Z");
+        var time = new ManualTimeProvider(now);
+        var manager = CreateManager(timeProvider: time);
+        var creator = Guid.CreateVersion7();
+
+        var room = manager.CreateRoom(new CreateLiveRoomRequest(creator, "A", "Raum", "Ärger", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 8));
+
+        Assert.Equal(LiveRoomPhase.Lobby, room.Phase);
+        Assert.False(room.Started);
+        Assert.False(room.Finished);
+        Assert.Equal(1, room.RoundCount);
+        Assert.Equal(1, room.CurrentRound);
+        Assert.Equal(1, room.RoundVersion);
+        Assert.Equal("", room.TargetText);
+        Assert.Equal(5, room.TargetCharacterCount);
+        Assert.Equal(now, room.PhaseChangedAt);
+        Assert.Null(room.CountdownStartsAt);
+        Assert.Null(room.RaceStartsAt);
+        Assert.Null(room.StartedAt);
+        Assert.Null(room.FinishedAt);
+
+        var participant = Assert.Single(room.Participants);
+        Assert.Equal(creator, participant.ProfileId);
+        Assert.Equal(ParticipantStatus.Joined, participant.Status);
+        Assert.False(participant.Ready);
+    }
+
+    [Fact]
+    public async Task ConcurrentStartsShareSingleCountdownTransition()
+    {
+        var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-06-18T12:00:00Z"));
+        var manager = CreateManager(new LiveOptions { CountdownSeconds = 3 }, time);
+        var first = Guid.CreateVersion7();
+        var second = Guid.CreateVersion7();
+        var room = manager.CreateRoom(new CreateLiveRoomRequest(first, "A", "Raum", "Text", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 8));
+        manager.Join(room.RoomId, second, "B");
+        manager.SetReady(room.RoomId, first, true);
+        manager.SetReady(room.RoomId, second, true);
+
+        var starts = await Task.WhenAll(Enumerable.Range(0, 32).Select(_ => Task.Run(() => manager.Start(room.RoomId, first))));
+
+        var raceStart = Assert.Single(starts.Select(item => item.RaceStartsAt).Distinct());
+        var countdownStart = Assert.Single(starts.Select(item => item.CountdownStartsAt).Distinct());
+        Assert.NotNull(raceStart);
+        Assert.NotNull(countdownStart);
+        Assert.All(starts, snapshot => Assert.Equal(LiveRoomPhase.Countdown, snapshot.Phase));
+        Assert.All(starts, snapshot => Assert.False(snapshot.Started));
+
+        var final = manager.Snapshot(room.RoomId);
+        Assert.Equal(LiveRoomPhase.Countdown, final.Phase);
+        Assert.Equal(2, final.RoundVersion);
+        Assert.Equal(raceStart, final.RaceStartsAt);
+        Assert.Equal(countdownStart, final.CountdownStartsAt);
+    }
+
+    [Fact]
+    public async Task ConcurrentSnapshotsAdvanceCountdownToRunningOnce()
+    {
+        var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-06-18T12:00:00Z"));
+        var manager = CreateManager(new LiveOptions { CountdownSeconds = 1 }, time);
+        var first = Guid.CreateVersion7();
+        var second = Guid.CreateVersion7();
+        var room = manager.CreateRoom(new CreateLiveRoomRequest(first, "A", "Raum", "Text", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 8));
+        manager.Join(room.RoomId, second, "B");
+        manager.SetReady(room.RoomId, first, true);
+        manager.SetReady(room.RoomId, second, true);
+        manager.Start(room.RoomId, first);
+        time.Advance(TimeSpan.FromSeconds(1));
+
+        var snapshots = await Task.WhenAll(Enumerable.Range(0, 32).Select(_ => Task.Run(() => manager.Snapshot(room.RoomId))));
+
+        Assert.All(snapshots, snapshot => Assert.Equal(LiveRoomPhase.Running, snapshot.Phase));
+        Assert.All(snapshots, snapshot => Assert.True(snapshot.Started));
+        var final = manager.Snapshot(room.RoomId);
+        Assert.Equal(LiveRoomPhase.Running, final.Phase);
+        Assert.Equal(3, final.RoundVersion);
+        Assert.Equal(final.RaceStartsAt, final.StartedAt);
+        Assert.All(final.Participants, participant => Assert.Equal(ParticipantStatus.Running, participant.Status));
+    }
+
+    [Fact]
     public void DuplicateFinishDoesNotCreateNewPlacement()
     {
         var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-06-18T12:00:00Z"));
@@ -101,6 +184,10 @@ public sealed class LiveRoomConcurrencyTests
         Assert.Equal(room.RoomId, record.Id);
         Assert.Equal(1, record.RoundNumber);
         Assert.Equal(2, record.Participants.Count);
+        var final = manager.Snapshot(room.RoomId);
+        Assert.Equal(LiveRoomPhase.SeriesResults, final.Phase);
+        Assert.True(final.Finished);
+        Assert.NotNull(final.FinishedAt);
     }
 
     [Fact]
@@ -125,6 +212,8 @@ public sealed class LiveRoomConcurrencyTests
         var record = Assert.Single(sink.Records);
         Assert.All(record.Participants, participant => Assert.Equal(ParticipantStatus.AbortedByServer, participant.Status));
         Assert.Equal(LiveRoomPhase.Aborted, manager.Snapshot(room.RoomId).Phase);
+        Assert.Equal(0, manager.AbortActiveRooms());
+        Assert.Single(sink.Records);
     }
 
     [Fact]

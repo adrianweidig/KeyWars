@@ -8,7 +8,7 @@ Dieser Tracker folgt dem Audit-Paket `2f3379490dcd`.
 | KW-001 | teilweise | offen | `scripts/check_repository_hygiene.py` | Historienrotation dokumentieren |
 | KW-002 | erledigt | offen | `docs/configuration.md`, Build/Test gruen | keine |
 | KW-003 | teilweise | offen | Build/Test gruen | Browser-E2E und Container-Smoke fehlen |
-| KW-010 | teilweise | offen | Concurrency-Tests | Zustandsmaschine vertiefen |
+| KW-010 | teilweise | offen | Concurrency-Tests fuer Lobby-Vertrag, idempotenten Start, parallelen Start, einmaligen Countdown-zu-Running-Uebergang, Serienabschluss und Serverabbruch ohne doppelte Persistenz | Rollen-/Fehlerpfad-Matrix, Hub-/Browser-E2E und Fuzzer fuer erlaubte Zustandsuebergaenge fehlen |
 | KW-011 | teilweise | offen | Offizieller lokaler SignalR-Client, Build/Test gruen | Reconnect-E2E fehlt |
 | KW-012 | teilweise | offen | Concurrency-Tests fuer Presence, Limit, Raumwechsel, Hosttransfer und Grace-Sweep | Zwei-Tab-Browser-E2E und Presence-Deltas fehlen |
 | KW-013 | teilweise | offen | Concurrency-Tests | Zwei-Browser-E2E fehlt |
