@@ -22,8 +22,10 @@ KEYWARS__LDAP__OPERATION_TIMEOUT_SECONDS=10
 
 Wenn `KEYWARS__LDAP__CA_CERTIFICATE_PATH` gesetzt ist, muss die Datei beim
 Start existieren. KeyWars baut dann eine Zertifikatskette gegen diese Root-CA
-und prueft den Hostnamen des Domain Controllers. Ohne diese Variable gilt die
-Zertifikatspruefung des Betriebssystems.
+und prüft den Hostnamen des Domain Controllers. Ohne diese Variable gilt die
+Zertifikatsprüfung des Betriebssystems.
+In Linux-Containern wird der Pfad für OpenLDAP zusätzlich als `LDAPTLS_CACERT`
+gesetzt; unter Windows nutzt KeyWars den .NET-Zertifikatscallback.
 
 Ablauf:
 

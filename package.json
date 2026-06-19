@@ -2,6 +2,7 @@
   "private": true,
   "scripts": {
     "test:browser": "playwright test",
+    "test:real-ad": "playwright test -c playwright.real-ad.config.js",
     "vendor:signalr": "node -e \"const fs=require('fs'), path=require('path'); const dir='src/KeyWars/wwwroot/vendor/signalr'; dir.split(/[\\\\/]/).reduce((p,s)=>{const n=p?path.join(p,s):s; if(!fs.existsSync(n)) fs.mkdirSync(n); return n;}, ''); fs.copyFileSync('node_modules/@microsoft/signalr/dist/browser/signalr.min.js', path.join(dir,'signalr.min.js')); fs.copyFileSync('node_modules/@microsoft/signalr/dist/browser/signalr.min.js.map', path.join(dir,'signalr.min.js.map'));\""
   },
   "devDependencies": {

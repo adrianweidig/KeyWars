@@ -9,7 +9,7 @@ Statuswerte:
 
 | Bereich | Status | Hinweise |
 | --- | --- | --- |
-| LDAP/LDAPS-Login | teilweise | Real-AD-E2E ist KW-050 und derzeit blockiert |
+| LDAP/LDAPS-Login | verfügbar | Real-AD-E2E gegen LDAPS-Production-Instanz mit zwei AD-Nutzern, deaktiviertem Konto und DB-Evidenz vorhanden |
 | JIT-Provisionierung | verfügbar | per Directory-GUID getestet |
 | Lokaler Development-Login | verfügbar | nur in `Development` |
 | Training Classic/Wörter | teilweise | Serverseitiger Attempt-Lebenszyklus mit Prepare/Begin/Finish vorhanden; Browser-Eingabe-E2E offen |

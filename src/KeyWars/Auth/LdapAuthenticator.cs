@@ -78,7 +78,7 @@ public sealed class LdapAuthenticator(IOptions<LdapOptions> options, ILogger<Lda
     {
         var port = url.Port > 0 ? url.Port : url.Scheme.Equals("ldaps", StringComparison.OrdinalIgnoreCase) ? 636 : 389;
         var identifier = new LdapDirectoryIdentifier(url.Host, port, fullyQualifiedDnsHostName: false, connectionless: false);
-        using var caCertificate = LoadCaCertificate(ldapOptions.CaCertificatePath);
+        using var caCertificate = ConfigureCertificateValidation(ldapOptions.CaCertificatePath);
         using var connection = new LdapConnection(identifier)
         {
             AuthType = AuthType.Basic,
@@ -247,6 +247,22 @@ public sealed class LdapAuthenticator(IOptions<LdapOptions> options, ILogger<Lda
         return string.IsNullOrWhiteSpace(path)
             ? null
             : X509CertificateLoader.LoadCertificateFromFile(path);
+    }
+
+    private static X509Certificate2? ConfigureCertificateValidation(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
+        if (!OperatingSystem.IsWindows())
+        {
+            Environment.SetEnvironmentVariable("LDAPTLS_CACERT", path);
+            return null;
+        }
+
+        return LoadCaCertificate(path);
     }
 
     private static bool VerifyServerCertificate(string host, X509Certificate certificate, X509Certificate2 caCertificate)
