@@ -155,6 +155,17 @@ builder.Services.AddRateLimiter(options =>
     });
     options.AddPolicy("keywars-login", httpContext =>
     {
+        if (!HttpMethods.IsPost(httpContext.Request.Method))
+        {
+            return RateLimitPartition.GetFixedWindowLimiter("login-page", _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 10_000,
+                QueueLimit = 0,
+                Window = TimeSpan.FromMinutes(1),
+                AutoReplenishment = true
+            });
+        }
+
         var key = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
         return RateLimitPartition.GetFixedWindowLimiter(key, _ => new FixedWindowRateLimiterOptions
         {

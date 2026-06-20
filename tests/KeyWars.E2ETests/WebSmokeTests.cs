@@ -69,6 +69,23 @@ public sealed partial class WebSmokeTests : IClassFixture<KeyWarsWebFactory>
     }
 
     [Fact]
+    public async Task LoginPageCanBeRenderedRepeatedlyWithoutConsumingLoginAttemptLimit()
+    {
+        using var isolatedFactory = new KeyWarsWebFactory();
+        var client = isolatedFactory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+
+        for (var index = 0; index < 20; index++)
+        {
+            var response = await client.GetAsync("/anmelden");
+            var body = WebUtility.HtmlDecode(await response.Content.ReadAsStringAsync());
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Contains("Benutzername", body);
+            Assert.Contains("Passwort", body);
+        }
+    }
+
+    [Fact]
     public async Task LegacyArenaRaceRouteRedirectsToCanonicalRoomWithoutManualFinishFallback()
     {
         var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
