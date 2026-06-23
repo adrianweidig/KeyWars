@@ -50,6 +50,7 @@ export function attachArenaPages() {
     let audioContext = null;
     let readyPending = false;
     let startPending = false;
+    let unavailable = false;
 
     const renderTarget = () => {
       if (!snapshot || !target || !input) {
@@ -544,6 +545,10 @@ export function attachArenaPages() {
     };
 
     const applySnapshot = (next) => {
+      if (!next || unavailable) {
+        return;
+      }
+
       snapshot = camelize(next);
       renderPhaseFeedback();
       renderTarget();
@@ -552,6 +557,30 @@ export function attachArenaPages() {
       renderHud();
       renderPodium();
       renderState();
+    };
+
+    const handleRoomUnavailable = (message) => {
+      if (unavailable) {
+        return;
+      }
+
+      unavailable = true;
+      clearTimeout(progressTimer);
+      clearTimeout(startRefreshTimer);
+      cancelAnimationFrame(timerFrame);
+      if (input) {
+        input.disabled = true;
+      }
+
+      readyForm?.querySelector("button")?.setAttribute("disabled", "disabled");
+      startForm?.querySelector("button")?.setAttribute("disabled", "disabled");
+      dnfButton?.setAttribute("disabled", "disabled");
+      leaveButton?.setAttribute("disabled", "disabled");
+      setText(connectionQuality, "Verbindung: Raum nicht verfügbar");
+      showConnectionError(new Error(message || "Der Live-Raum wurde nicht gefunden."));
+      window.setTimeout(() => {
+        window.location.href = "/arena";
+      }, 2500);
     };
 
     const applyProgressBatch = (next) => {
@@ -729,6 +758,7 @@ export function attachArenaPages() {
     connection.on("roomChanged", applySnapshot);
     connection.on("progressChanged", applyProgressBatch);
     connection.on("reactionReceived", renderReaction);
+    connection.on("roomUnavailable", handleRoomUnavailable);
     connection.onReconnect(async () => {
       try {
         setText(connectionQuality, "Verbindung: neu verbunden");

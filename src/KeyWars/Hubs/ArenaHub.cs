@@ -13,11 +13,21 @@ public sealed class ArenaHub(
     LiveProgressBroadcaster progress,
     LiveReactionService reactions) : Hub
 {
-    public async Task<LiveRoomSnapshot> JoinRoom(Guid roomId)
+    public async Task<LiveRoomSnapshot?> JoinRoom(Guid roomId)
     {
         var profile = await currentUser.RequireProfileAsync(Context.User!, Context.ConnectionAborted);
         presence.EnsureCanConnect(profile.Id, Context.ConnectionId);
-        var snapshot = rooms.Join(roomId, profile.Id, profile.DisplayName);
+        LiveRoomSnapshot snapshot;
+        try
+        {
+            snapshot = rooms.Join(roomId, profile.Id, profile.DisplayName);
+        }
+        catch (InvalidOperationException ex) when (IsRoomNotFound(ex))
+        {
+            await NotifyRoomUnavailableAsync(ex.Message);
+            return null;
+        }
+
         await ApplyRoomSwitchAsync(profile.Id, presence.EnterRoom(profile.Id, Context.ConnectionId, roomId));
         await Groups.AddToGroupAsync(Context.ConnectionId, roomId.ToString("N"), Context.ConnectionAborted);
         await Clients.Group(roomId.ToString("N")).SendAsync("roomChanged", snapshot, Context.ConnectionAborted);
@@ -114,7 +124,15 @@ public sealed class ArenaHub(
             await Groups.RemoveFromGroupAsync(Context.ConnectionId, roomId.ToString("N"), Context.ConnectionAborted);
             if (leave is null || !leave.RoomLostLastConnection)
             {
-                return rooms.Snapshot(roomId);
+                try
+                {
+                    return rooms.Snapshot(roomId);
+                }
+                catch (InvalidOperationException ex) when (IsRoomNotFound(ex))
+                {
+                    await NotifyRoomUnavailableAsync(ex.Message);
+                    return null;
+                }
             }
 
             var snapshot = rooms.Disconnect(leave.RoomId, leave.ProfileId);
@@ -132,8 +150,14 @@ public sealed class ArenaHub(
         var leave = presence.RemoveConnection(Context.ConnectionId);
         if (leave is not null && leave.RoomLostLastConnection)
         {
-            var snapshot = rooms.Disconnect(leave.RoomId, leave.ProfileId);
-            await Clients.Group(leave.RoomId.ToString("N")).SendAsync("roomChanged", snapshot);
+            try
+            {
+                var snapshot = rooms.Disconnect(leave.RoomId, leave.ProfileId);
+                await Clients.Group(leave.RoomId.ToString("N")).SendAsync("roomChanged", snapshot);
+            }
+            catch (InvalidOperationException ex) when (IsRoomNotFound(ex))
+            {
+            }
         }
 
         await base.OnDisconnectedAsync(exception);
@@ -152,7 +176,23 @@ public sealed class ArenaHub(
             return;
         }
 
-        var snapshot = rooms.Disconnect(previousRoomId, profileId);
-        await Clients.Group(previousRoomId.ToString("N")).SendAsync("roomChanged", snapshot, Context.ConnectionAborted);
+        try
+        {
+            var snapshot = rooms.Disconnect(previousRoomId, profileId);
+            await Clients.Group(previousRoomId.ToString("N")).SendAsync("roomChanged", snapshot, Context.ConnectionAborted);
+        }
+        catch (InvalidOperationException ex) when (IsRoomNotFound(ex))
+        {
+        }
+    }
+
+    private Task NotifyRoomUnavailableAsync(string message)
+    {
+        return Clients.Caller.SendAsync("roomUnavailable", message, Context.ConnectionAborted);
+    }
+
+    private static bool IsRoomNotFound(InvalidOperationException exception)
+    {
+        return exception.Message.Contains("nicht gefunden", StringComparison.OrdinalIgnoreCase);
     }
 }
