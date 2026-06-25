@@ -17,6 +17,24 @@ function displayName(username) {
     .join(" ");
 }
 
+function firstGraphemes(value, count) {
+  return Array.from(value).slice(0, count).join("");
+}
+
+function firstStableGraphemes(value, count) {
+  const graphemes = Array.from(value);
+  let length = Math.min(count, graphemes.length);
+  while (length < graphemes.length && /\s/u.test(graphemes[length - 1])) {
+    length += 1;
+  }
+
+  return graphemes.slice(0, length).join("");
+}
+
+function wrongCharacterFor(value) {
+  return value === "x" ? "y" : "x";
+}
+
 test("Dashboard und Einstellungen rendern im echten Browser", async ({ page }) => {
   await login(page, "browser.smoke");
 
@@ -31,6 +49,15 @@ test("Dashboard und Einstellungen rendern im echten Browser", async ({ page }) =
 test("Raumformular blockiert doppelte Submit-Aktion im echten Browser", async ({ page }) => {
   await login(page, "browser.submit.guard");
   await page.goto("/arena/neu");
+  await expect(page.getByText("Textvorschau")).toBeVisible();
+  await expect(page.getByText("Klassisches Rennen", { exact: true })).toBeVisible();
+  await expect(page.getByText("So sieht der Raum aus")).toBeVisible();
+  const textSelect = page.locator("[data-arena-text-select]");
+  const optionCount = await textSelect.locator("option").count();
+  expect(optionCount).toBeGreaterThan(1);
+  const previewBefore = (await page.locator("[data-text-preview-body]").textContent())?.trim();
+  await textSelect.selectOption({ index: 1 });
+  await expect.poll(async () => (await page.locator("[data-text-preview-body]").textContent())?.trim()).not.toBe(previewBefore);
   await page.getByLabel("Titel").fill("Submit Guard Browser");
   await page.getByLabel("Maximale Teilnehmer").fill("2");
 
@@ -99,6 +126,7 @@ test("Arena läuft mit zwei getrennten Browserkontexten über SignalR", async ({
     await host.getByRole("button", { name: "Raum erstellen" }).click();
     await expect(host).toHaveURL(/\/arena\/[0-9a-f-]{36}$/i);
     await expect(host.getByRole("button", { name: "Starten" })).toBeVisible();
+    await expect(host.locator("[data-arena-timer] strong")).not.toHaveText("00:00.0");
 
     const roomUrl = host.url();
     const roomCode = (await host.locator(".room-code strong").textContent()).trim();
@@ -128,6 +156,43 @@ test("Arena läuft mit zwei getrennten Browserkontexten über SignalR", async ({
     const guestTarget = (await guest.locator("[data-arena-target]").textContent()).trim();
     await expect(host.locator("[data-arena-input]")).toBeEnabled();
     await expect(guest.locator("[data-arena-input]")).toBeEnabled();
+    await expect.poll(async () => (await host.locator("[data-arena-timer] strong").textContent()).trim()).not.toBe("00:00.0");
+
+    const layoutOrder = await host.evaluate(() => {
+      const target = document.querySelector("[data-arena-target]")?.getBoundingClientRect();
+      const input = document.querySelector("[data-arena-input]")?.getBoundingClientRect();
+      const track = document.querySelector("[data-arena-track]")?.getBoundingClientRect();
+      if (!target || !input || !track) {
+        throw new Error("Arena-Layout-Elemente fehlen.");
+      }
+
+      return {
+        inputBeforeTrack: input.top < track.top,
+        targetBeforeInput: target.top < input.top,
+        targetInUpperViewport: target.top < window.innerHeight * 0.5
+      };
+    });
+    expect(layoutOrder).toEqual({
+      inputBeforeTrack: true,
+      targetBeforeInput: true,
+      targetInUpperViewport: true
+    });
+
+    const hostRowOnGuest = guest.locator(".live-typing-row").filter({ hasText: displayName(hostName) });
+    const hostPreviewOnGuest = hostRowOnGuest.locator("[data-live-preview]");
+    const firstStableInput = firstStableGraphemes(hostTarget, 3);
+    await host.locator("[data-arena-input]").fill(firstStableInput);
+    await expect(hostPreviewOnGuest.locator(".correct")).toHaveCount(Array.from(firstStableInput).length, { timeout: 12_000 });
+
+    const targetGraphemes = Array.from(hostTarget);
+    const wrongInput = `${targetGraphemes.slice(0, 2).join("")}${wrongCharacterFor(targetGraphemes[2])}`;
+    await host.locator("[data-arena-input]").fill(wrongInput);
+    await expect(hostPreviewOnGuest.locator(".wrong")).toHaveCount(1, { timeout: 12_000 });
+
+    await host.locator("[data-arena-input]").fill(firstGraphemes(hostTarget, 2));
+    await expect(hostPreviewOnGuest.locator(".wrong")).toHaveCount(0, { timeout: 12_000 });
+    await expect(hostPreviewOnGuest.locator(".correct")).toHaveCount(2, { timeout: 12_000 });
+
     await host.locator("[data-arena-input]").fill(hostTarget);
     await guest.locator("[data-arena-input]").fill(guestTarget);
 

@@ -34,8 +34,11 @@ persistiert, verändern aber kein Rating. Lobby-Räume werden weiterhin nur als
 flüchtiger Arbeitsspeicherzustand verworfen.
 
 Hochfrequenter Schreibfortschritt wird als kompaktes `progressChanged`-Batch
-übertragen: Raumversion, Profil-ID, Fortschritt, WPM, Genauigkeit und
-Ranghinweis. Der Broadcast-Takt ist durch
+übertragen: Raumversion, Profil-ID, Fortschritt, transiente Textpreview,
+WPM, Genauigkeit und Ranghinweis. Die Textpreview ist kein gespeichertes
+Keystroke-Replay, sondern ein flüchtiger Zustandsstring für die sichtbare
+10FastFingers-artige Zieltextmarkierung im aktiven Raum. SQLite erhält diese
+Preview nicht. Der Broadcast-Takt ist durch
 `KEYWARS__LIVE__PROGRESS_BROADCAST_HZ` begrenzt. Innerhalb eines Takts wird nur
 das neueste Delta je Person behalten; bei voller Pending-Kapazität werden neue
 nichtkritische Progress-Deltas verworfen und unter `/health/arena-progress`
@@ -43,9 +46,10 @@ sichtbar. Zuverlässige Ereignisse wie Start, Finish, Leave und Phasenwechsel
 nutzen weiterhin Vollsnapshots.
 
 Die kanonische Raumseite rendert dieselben serverbestätigten Daten als
-Rennstrecke, persönliches HUD, Rangliste und Podium-Container. Deltas
-aktualisieren die Positionen per CSS-Transform und die textuelle Live-Region
-gedrosselt; Reduced-Motion deaktiviert gleitende Positionsübergänge.
+oberen Tippbereich, Live-Textboard, Rennstrecke, persönliches HUD, Rangliste
+und Podium-Container. Deltas aktualisieren die Zieltextmarkierungen,
+Positionen per CSS-Transform und die textuelle Live-Region gedrosselt;
+Reduced-Motion deaktiviert gleitende Positionsübergänge.
 
 Die Darstellung skaliert nach Teilnehmerfeld: bis acht Personen bleibt die
 Detailansicht aktiv, neun bis 24 Personen nutzen eine kompaktere Strecke, und

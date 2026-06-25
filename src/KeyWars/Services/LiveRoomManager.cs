@@ -12,6 +12,7 @@ public sealed record LiveParticipantSnapshot(
     bool Ready,
     int Sequence,
     int CorrectCharacters,
+    string TypedTextPreview,
     double Wpm,
     int? Placement,
     int DurationMilliseconds,
@@ -267,6 +268,7 @@ public sealed class LiveRoomManager(
 
                 participant.Status = ParticipantStatus.Finished;
                 participant.Ready = true;
+                participant.TypedTextPreview = BuildTypedTextPreview(room.TargetElements, TypingEngine.SplitGraphemes(normalizedInput));
                 participant.FinishedAt = now;
                 participant.DurationMilliseconds = metrics.DurationMilliseconds;
                 participant.Accuracy = metrics.Accuracy;
@@ -541,6 +543,7 @@ public sealed class LiveRoomManager(
                 var correctCharacters = CountCorrectPrefix(room.TargetElements, inputElements);
                 participant.Sequence = sequence;
                 participant.CorrectCharacters = correctCharacters;
+                participant.TypedTextPreview = BuildTypedTextPreview(room.TargetElements, inputElements);
                 participant.Accuracy = CalculateProgressAccuracy(correctCharacters, inputElements.Count);
                 participant.Wpm = CalculateWpm(participant.CorrectCharacters, room.StartedAt, now);
                 delta = new LiveProgressDelta(
@@ -548,6 +551,7 @@ public sealed class LiveRoomManager(
                     room.RoundVersion,
                     participant.ProfileId,
                     participant.CorrectCharacters,
+                    participant.TypedTextPreview,
                     participant.Wpm,
                     participant.Accuracy,
                     CalculateRankHint(room, participant.ProfileId));
@@ -763,6 +767,7 @@ public sealed class LiveRoomManager(
                     item.Ready,
                     item.Sequence,
                     item.CorrectCharacters,
+                    exposeTargetText ? item.TypedTextPreview : "",
                     item.Wpm,
                     item.Placement,
                     item.DurationMilliseconds,
@@ -824,6 +829,25 @@ public sealed class LiveRoomManager(
         }
 
         return count;
+    }
+
+    private static string BuildTypedTextPreview(IReadOnlyList<string> targetElements, IReadOnlyList<string> inputElements)
+    {
+        var length = Math.Min(targetElements.Count, inputElements.Count);
+        if (length == 0)
+        {
+            return "";
+        }
+
+        return string.Create(length, (targetElements, inputElements), (buffer, state) =>
+        {
+            for (var index = 0; index < buffer.Length; index++)
+            {
+                buffer[index] = StringComparer.Ordinal.Equals(state.targetElements[index], state.inputElements[index])
+                    ? 'c'
+                    : 'w';
+            }
+        });
     }
 
     private static double CalculateWpm(int correctCharacters, DateTimeOffset? startedAt, DateTimeOffset now)
@@ -983,6 +1007,7 @@ internal sealed class LiveParticipantState(Guid profileId, string displayName, P
     public bool Ready { get; set; }
     public int Sequence { get; set; }
     public int CorrectCharacters { get; set; }
+    public string TypedTextPreview { get; set; } = "";
     public double Wpm { get; set; }
     public int? Placement { get; set; }
     public DateTimeOffset? FinishedAt { get; set; }

@@ -80,6 +80,38 @@ function attachSubmitGuards() {
   });
 }
 
+function attachArenaCreateForms() {
+  document.querySelectorAll("[data-arena-create-form]").forEach((form) => {
+    const select = form.querySelector("[data-arena-text-select]");
+    const title = form.querySelector("[data-text-preview-title]");
+    const stats = form.querySelector("[data-text-preview-stats]");
+    const body = form.querySelector("[data-text-preview-body]");
+    if (!select || !title || !stats || !body) {
+      return;
+    }
+
+    const updatePreview = () => {
+      const option = select.selectedOptions?.[0];
+      if (!option) {
+        title.textContent = "Kein Text verfügbar";
+        stats.textContent = "";
+        body.textContent = "Lege zuerst einen Trainingstext an.";
+        return;
+      }
+
+      const words = option.dataset.words || "0";
+      const characters = option.dataset.characters || "0";
+      const duration = option.dataset.duration || "0";
+      title.textContent = option.dataset.title || option.textContent.trim();
+      stats.textContent = `${words} Wörter · ${characters} Zeichen · ca. ${duration} s`;
+      body.textContent = option.dataset.preview || "";
+    };
+
+    select.addEventListener("change", updatePreview);
+    updatePreview();
+  });
+}
+
 async function copyText(text) {
   if (navigator.clipboard && window.isSecureContext) {
     await navigator.clipboard.writeText(text);
@@ -117,6 +149,7 @@ function absoluteUrl(value) {
 
 attachTypingApps();
 attachArenaPages();
+attachArenaCreateForms();
 attachRoomCodeInputs();
 attachCopyButtons();
 attachShareButtons();

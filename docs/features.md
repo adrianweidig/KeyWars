@@ -21,6 +21,7 @@ Statuswerte:
 | Live-Arena Lobby | teilweise | Phasen, Countdown, Presence, Hosttransfer, nutzerorientierte Einstiegspfade und konfigurierbare Raumkapazität begonnen |
 | Live-Arena Countdown | teilweise | Serverzeit vorhanden, Browser-E2E fehlt |
 | Live-Arena grafische Strecke | teilweise | DOM-basierte Rennstrecke mit Meilensteinen, eigener Spur und CSS-Transform-Fortschritt vorhanden; Visual-/Performance-Evidenz offen |
+| Live-Arena Live-Text | teilweise | 10FastFingers-artiger oberer Tippbereich mit transienten Textpreviews, grüner/roter Zieltextmarkierung und Browser-E2E für Zwei-Nutzer-Fehlerkorrektur vorhanden; Visual-/Performance-Matrix offen |
 | Live-Arena adaptive Großraumansicht | teilweise | 2-8 Detailansicht, 9-24 kompakte Ansicht und ab 25 fokussiertes Fenster mit Top-Plätzen, eigener Position und Nachbarn vorhanden; 64er Visual-/Performance-Evidenz offen |
 | Live-HUD und Podium | teilweise | Persönliches HUD, Ranglisten-Updates, Live-Region und Podium-Container vorhanden; echte Überhol-/Belohnungs-E2E offen |
 | Motion, Sound und Reaktionen | teilweise | Profilsettings, synthetische Opt-in-Sounds nach Nutzerinteraktion, Motion-Tokens und feste serverseitig begrenzte Arena-Reaktionen vorhanden; vollständige Browser-A11y-/Soundabnahme offen |

@@ -10,6 +10,7 @@ public sealed record LiveProgressDelta(
     int RoomVersion,
     Guid ParticipantId,
     int CorrectCharacters,
+    string TypedTextPreview,
     double Wpm,
     double Accuracy,
     int? RankHint);

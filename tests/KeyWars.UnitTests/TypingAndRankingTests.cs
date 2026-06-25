@@ -189,4 +189,22 @@ public sealed class TypingAndRankingTests
         Assert.Equal(changes[runnerUp].RatingBefore + changes[runnerUp].RatingDelta, changes[runnerUp].RatingAfter);
         Assert.Equal(0, changes.Values.Sum(item => item.RatingDelta));
     }
+
+    [Fact]
+    public void StandardTextsAreMeaningfulLongExamples()
+    {
+        Assert.True(GermanWordBank.StandardTexts.Length >= 6);
+        Assert.Equal(
+            GermanWordBank.StandardTexts.Length,
+            GermanWordBank.StandardTexts.Select(text => text.Key).Distinct(StringComparer.Ordinal).Count());
+
+        foreach (var text in GermanWordBank.StandardTexts)
+        {
+            var normalized = TypingEngine.NormalizeText(text.Body);
+            Assert.False(string.IsNullOrWhiteSpace(text.Title), $"{text.Key} braucht einen Titel.");
+            Assert.False(text.Title.Contains("Kurztext", StringComparison.OrdinalIgnoreCase), $"{text.Key} darf kein Kurztext-Placeholder sein.");
+            Assert.True(TypingEngine.CountWords(normalized) >= 55, $"{text.Key} ist zu kurz.");
+            Assert.True(TypingEngine.SplitGraphemes(normalized).Count >= 350, $"{text.Key} braucht einen größeren Beispieltext.");
+        }
+    }
 }

@@ -55,24 +55,48 @@ public sealed class DatabaseInitializer(
 
     private static async Task SeedStandardTextsAsync(KeyWarsDbContext db, CancellationToken cancellationToken)
     {
+        var now = DateTimeOffset.UtcNow;
         foreach (var standardText in GermanWordBank.StandardTexts)
         {
-            var exists = await db.TrainingTexts.AnyAsync(text => text.SourceKey == standardText.Key, cancellationToken);
-            if (exists)
+            var normalized = TypingEngine.NormalizeText(standardText.Body);
+            var characterCount = TypingEngine.SplitGraphemes(normalized).Count;
+            var existing = await db.TrainingTexts.SingleOrDefaultAsync(text => text.SourceKey == standardText.Key, cancellationToken);
+            if (existing is null)
+            {
+                db.TrainingTexts.Add(new TrainingText
+                {
+                    Title = standardText.Title,
+                    SourceKey = standardText.Key,
+                    Body = normalized,
+                    CharacterCount = characterCount,
+                    IsStandard = true,
+                    RatingEligible = true,
+                    Visibility = TrainingTextVisibility.Organization,
+                    CreatedAt = now,
+                    UpdatedAt = now
+                });
+                continue;
+            }
+
+            if (existing.Title == standardText.Title &&
+                existing.Body == normalized &&
+                existing.CharacterCount == characterCount &&
+                existing.OwnerProfileId is null &&
+                existing.IsStandard &&
+                existing.RatingEligible &&
+                existing.Visibility == TrainingTextVisibility.Organization)
             {
                 continue;
             }
 
-            db.TrainingTexts.Add(new TrainingText
-            {
-                Title = standardText.Title,
-                SourceKey = standardText.Key,
-                Body = TypingEngine.NormalizeText(standardText.Body),
-                CharacterCount = TypingEngine.SplitGraphemes(standardText.Body).Count,
-                IsStandard = true,
-                RatingEligible = true,
-                Visibility = TrainingTextVisibility.Organization
-            });
+            existing.OwnerProfileId = null;
+            existing.Title = standardText.Title;
+            existing.Body = normalized;
+            existing.CharacterCount = characterCount;
+            existing.IsStandard = true;
+            existing.RatingEligible = true;
+            existing.Visibility = TrainingTextVisibility.Organization;
+            existing.UpdatedAt = now;
         }
 
         await db.SaveChangesAsync(cancellationToken);

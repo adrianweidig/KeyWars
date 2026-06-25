@@ -317,6 +317,7 @@ public sealed class LiveRoomConcurrencyTests
 
         Assert.Equal(LiveRoomPhase.Countdown, beforeStart.Phase);
         Assert.Equal(0, beforeStart.Participants.Single(item => item.ProfileId == first).CorrectCharacters);
+        Assert.Equal("", beforeStart.Participants.Single(item => item.ProfileId == first).TypedTextPreview);
     }
 
     [Fact]
@@ -338,6 +339,7 @@ public sealed class LiveRoomConcurrencyTests
 
         Assert.Equal(LiveRoomPhase.Running, corrected.Phase);
         Assert.Equal(2, corrected.Participants.Single(item => item.ProfileId == first).CorrectCharacters);
+        Assert.Equal("cc", corrected.Participants.Single(item => item.ProfileId == first).TypedTextPreview);
     }
 
     [Fact]
@@ -361,8 +363,21 @@ public sealed class LiveRoomConcurrencyTests
         Assert.Equal(room.RoomId, result.Delta.RoomId);
         Assert.Equal(first, result.Delta.ParticipantId);
         Assert.Equal(4, result.Delta.CorrectCharacters);
+        Assert.Equal("cccc", result.Delta.TypedTextPreview);
         Assert.Equal(100, result.Delta.Accuracy);
         Assert.Equal(1, result.Delta.RankHint);
+    }
+
+    [Fact]
+    public void ProgressPreviewMarksWrongTargetPositions()
+    {
+        var (manager, room, first, _, _) = CreateRunningRoom();
+
+        var result = manager.SubmitProgressDelta(room.RoomId, first, 1, "Tert");
+
+        Assert.NotNull(result.Delta);
+        Assert.Equal(2, result.Delta.CorrectCharacters);
+        Assert.Equal("ccwc", result.Delta.TypedTextPreview);
     }
 
     [Fact]
@@ -403,6 +418,7 @@ public sealed class LiveRoomConcurrencyTests
 
         Assert.Equal(1, participant.CorrectCharacters);
         Assert.Equal(100, participant.Accuracy);
+        Assert.Equal("c", participant.TypedTextPreview);
     }
 
     [Fact]
@@ -416,6 +432,7 @@ public sealed class LiveRoomConcurrencyTests
 
         Assert.Equal(1, participant.Sequence);
         Assert.Equal(2, participant.CorrectCharacters);
+        Assert.Equal("cc", participant.TypedTextPreview);
     }
 
     [Fact]
@@ -429,6 +446,7 @@ public sealed class LiveRoomConcurrencyTests
 
         Assert.Equal(2, participant.Sequence);
         Assert.Equal(4, participant.CorrectCharacters);
+        Assert.Equal("cccc", participant.TypedTextPreview);
     }
 
     [Fact]

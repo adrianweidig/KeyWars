@@ -9,6 +9,7 @@ export function attachArenaPages() {
     const timer = root.querySelector("[data-arena-timer]");
     const track = root.querySelector("[data-arena-track]");
     const hud = root.querySelector("[data-arena-hud]");
+    const liveBoard = root.querySelector("[data-arena-live-board]");
     const podium = root.querySelector("[data-arena-podium]");
     const liveRegion = root.querySelector("[data-arena-live-region]");
     const modeLabel = root.querySelector("[data-arena-mode-label]");
@@ -40,6 +41,9 @@ export function attachArenaPages() {
     let progressTimer = 0;
     let timerFrame = 0;
     let startRefreshTimer = 0;
+    let timerKey = "";
+    let clockOffset = 0;
+    let countdownRefreshScheduled = false;
     let backspaces = 0;
     let focusLosses = 0;
     let finishedLocally = false;
@@ -101,6 +105,17 @@ export function attachArenaPages() {
       }
 
       return Math.max(0, Math.min(100, participant.correctCharacters * 100 / snapshot.targetCharacterCount));
+    };
+
+    const updateClockOffset = (serverNow) => {
+      if (!serverNow) {
+        return;
+      }
+
+      const serverTime = new Date(serverNow).getTime();
+      if (Number.isFinite(serverTime)) {
+        clockOffset = serverTime - Date.now();
+      }
     };
 
     const progressClass = (percent) => {
@@ -237,6 +252,7 @@ export function attachArenaPages() {
       root.dataset.arenaDisplayMode = mode;
       ["detailed", "compact", "focused"].forEach((name) => {
         track?.classList.toggle(name, mode === name);
+        liveBoard?.classList.toggle(name, mode === name);
         participantList?.classList.toggle(name, mode === name);
       });
       setText(modeLabel, modeTitle(mode));
@@ -317,6 +333,74 @@ export function attachArenaPages() {
       }
     };
 
+    const liveTypingRow = (participant) => {
+      const row = document.createElement("article");
+      row.className = "live-typing-row";
+      row.dataset.liveParticipantId = participant.profileId;
+      const meta = document.createElement("div");
+      meta.className = "live-typing-meta";
+      const preview = document.createElement("div");
+      preview.className = "live-typing-preview";
+      preview.dataset.livePreview = "";
+      row.append(meta, preview);
+      return row;
+    };
+
+    const updateLiveTypingRow = (row, participant) => {
+      const meta = row.querySelector(".live-typing-meta");
+      const preview = row.querySelector("[data-live-preview]");
+      const percent = Math.round(progressPercent(participant));
+      row.classList.toggle("current", participant.profileId === currentProfileId);
+      row.dataset.liveParticipantId = participant.profileId;
+      if (meta) {
+        const token = element("span", initials(participant.displayName));
+        token.className = "race-token";
+        const identity = document.createElement("div");
+        const name = document.createElement("strong");
+        name.textContent = participant.displayName;
+        const detail = document.createElement("span");
+        detail.textContent = `${statusLabel(participant.status)} · ${percent} %`;
+        identity.append(name, detail);
+        const children = [token, identity];
+        if (participant.profileId === snapshot.creatorProfileId) {
+          children.push(badge("Host"));
+        }
+
+        meta.replaceChildren(...children);
+      }
+
+      if (preview) {
+        renderTypingPreview(preview, participant);
+      }
+    };
+
+    const renderTypingPreview = (container, participant) => {
+      const expected = splitGraphemes(snapshot?.targetText || "");
+      const states = String(participant?.typedTextPreview || "");
+      if (expected.length === 0) {
+        container.replaceChildren(textSpan("Der Text wird zum Start freigegeben.", "muted"));
+        return;
+      }
+
+      const typedLength = Math.min(states.length, expected.length);
+      container.replaceChildren(...expected.map((char, index) => {
+        const span = document.createElement("span");
+        span.textContent = char;
+        const state = states[index];
+        if (state === "c") {
+          span.className = "correct";
+        } else if (state === "w") {
+          span.className = "wrong";
+        } else if (index === typedLength && participant?.status === "Running") {
+          span.className = "current";
+        } else {
+          span.className = "pending";
+        }
+
+        return span;
+      }));
+    };
+
     const announceRankChange = (rank) => {
       if (!showLiveRankChanges || !liveRegion || rank === "-" || rank === previousCurrentRank) {
         previousCurrentRank = rank;
@@ -382,6 +466,29 @@ export function attachArenaPages() {
       track.querySelectorAll("[data-track-participant-id]").forEach((lane) => {
         if (!expectedIds.has(lane.dataset.trackParticipantId)) {
           lane.remove();
+        }
+      });
+    };
+
+    const renderLiveTypingBoard = () => {
+      if (!snapshot || !liveBoard) {
+        return;
+      }
+
+      const expectedIds = new Set();
+      const ranked = rankedParticipants();
+      const visible = visibleParticipantWindow(ranked);
+      renderRosterMode(ranked, visible);
+      visible.forEach((participant) => {
+        expectedIds.add(participant.profileId);
+        const row = liveBoard.querySelector(`[data-live-participant-id="${participant.profileId}"]`) || liveTypingRow(participant);
+        updateLiveTypingRow(row, participant);
+        liveBoard.append(row);
+      });
+
+      liveBoard.querySelectorAll("[data-live-participant-id]").forEach((row) => {
+        if (!expectedIds.has(row.dataset.liveParticipantId)) {
+          row.remove();
         }
       });
     };
@@ -494,26 +601,42 @@ export function attachArenaPages() {
         return;
       }
 
-      cancelAnimationFrame(timerFrame);
       const value = timer.querySelector("strong");
       const label = timer.querySelector("span");
       if (!value || !label) {
         return;
       }
 
+      const nextTimerKey = [
+        snapshot.phase,
+        snapshot.raceStartsAt || "",
+        snapshot.startedAt || "",
+        snapshot.finishedAt || "",
+        snapshot.finished ? "finished" : "active"
+      ].join("|");
+      if (nextTimerKey === timerKey) {
+        return;
+      }
+
+      timerKey = nextTimerKey;
+      countdownRefreshScheduled = false;
+      cancelAnimationFrame(timerFrame);
+
       if (snapshot.phase === "Countdown" && snapshot.raceStartsAt) {
         const raceStartsAt = new Date(snapshot.raceStartsAt).getTime();
-        const serverNow = new Date(snapshot.serverNow).getTime();
-        const offset = serverNow - Date.now();
         const tick = () => {
-          const remaining = Math.max(0, raceStartsAt - (Date.now() + offset));
+          const remaining = Math.max(0, raceStartsAt - (Date.now() + clockOffset));
           value.textContent = remaining <= 0 ? "LOS" : Math.ceil(remaining / 1000).toString();
-          label.textContent = "Start";
+          label.textContent = "Countdown";
           if (remaining <= 0) {
-            window.clearTimeout(startRefreshTimer);
-            startRefreshTimer = window.setTimeout(() => {
-              connection.invoke("JoinRoom", [roomId]).then(applySnapshot).catch(showConnectionError);
-            }, 80);
+            if (!countdownRefreshScheduled) {
+              countdownRefreshScheduled = true;
+              window.clearTimeout(startRefreshTimer);
+              startRefreshTimer = window.setTimeout(() => {
+                connection.invoke("JoinRoom", [roomId]).then(applySnapshot).catch(showConnectionError);
+              }, 80);
+            }
+
             return;
           }
 
@@ -524,17 +647,14 @@ export function attachArenaPages() {
       }
 
       if (!snapshot.startedAt) {
-        value.textContent = "00:00.0";
-        label.textContent = phaseLabel(snapshot.phase);
+        value.textContent = snapshot.phase === "Lobby" ? "Bereit" : "-";
+        label.textContent = snapshot.phase === "Lobby" ? "Lobby" : phaseLabel(snapshot.phase);
         return;
       }
 
       const startedAt = new Date(snapshot.startedAt).getTime();
-      const serverNow = new Date(snapshot.serverNow).getTime();
-      const localNow = Date.now();
-      const offset = serverNow - localNow;
       const tick = () => {
-        const end = snapshot.finishedAt ? new Date(snapshot.finishedAt).getTime() : Date.now() + offset;
+        const end = snapshot.finishedAt ? new Date(snapshot.finishedAt).getTime() : Date.now() + clockOffset;
         value.textContent = formatDuration(Math.max(0, end - startedAt));
         label.textContent = snapshot.finished ? "Dauer" : "vergangen";
         if (!snapshot.finished) {
@@ -550,8 +670,10 @@ export function attachArenaPages() {
       }
 
       snapshot = camelize(next);
+      updateClockOffset(snapshot.serverNow);
       renderPhaseFeedback();
       renderTarget();
+      renderLiveTypingBoard();
       renderParticipants();
       renderTrack();
       renderHud();
@@ -593,6 +715,7 @@ export function attachArenaPages() {
         return;
       }
 
+      updateClockOffset(batch.serverNow);
       snapshot.roundVersion = Math.max(snapshot.roundVersion, batch.roomVersion);
       batch.deltas.forEach((delta) => {
         const participant = snapshot.participants?.find((item) => item.profileId === delta.participantId);
@@ -601,10 +724,12 @@ export function attachArenaPages() {
         }
 
         participant.correctCharacters = delta.correctCharacters;
+        participant.typedTextPreview = delta.typedTextPreview || "";
         participant.wpm = delta.wpm;
         participant.accuracy = delta.accuracy;
         participant.rankHint = delta.rankHint;
       });
+      renderLiveTypingBoard();
       renderParticipants();
       renderTrack();
       renderHud();

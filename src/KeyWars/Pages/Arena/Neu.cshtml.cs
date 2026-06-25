@@ -11,6 +11,8 @@ namespace KeyWars.Pages.Arena;
 public sealed class NeuModel(CurrentUser currentUser, TextLibraryService texts, LiveRoomManager rooms, IOptions<LiveOptions> liveOptions) : PageModel
 {
     public IReadOnlyList<TrainingText> Texts { get; private set; } = [];
+    public IReadOnlyList<ArenaTextOption> TextOptions { get; private set; } = [];
+    public ArenaTextOption? SelectedTextOption => TextOptions.FirstOrDefault(text => text.Id == Input.TrainingTextId) ?? TextOptions.FirstOrDefault();
     public int MaxParticipantsLimit { get; private set; }
 
     [BindProperty]
@@ -21,6 +23,7 @@ public sealed class NeuModel(CurrentUser currentUser, TextLibraryService texts, 
         ApplyConfiguredLimits();
         var profile = await currentUser.RequireProfileAsync(User, cancellationToken);
         Texts = await texts.ListVisibleAsync(profile.Id, cancellationToken);
+        BuildTextOptions();
         Input.TrainingTextId = Texts.FirstOrDefault()?.Id ?? Guid.Empty;
         Input.MaxParticipants = Math.Min(Input.MaxParticipants, MaxParticipantsLimit);
     }
@@ -30,6 +33,7 @@ public sealed class NeuModel(CurrentUser currentUser, TextLibraryService texts, 
         ApplyConfiguredLimits();
         var profile = await currentUser.RequireProfileAsync(User, cancellationToken);
         Texts = await texts.ListVisibleAsync(profile.Id, cancellationToken);
+        BuildTextOptions();
         if (Input.MaxParticipants < 2 || Input.MaxParticipants > MaxParticipantsLimit)
         {
             ModelState.AddModelError($"{nameof(Input)}.{nameof(Input.MaxParticipants)}", $"Erlaubt sind 2 bis {MaxParticipantsLimit} Personen.");
@@ -38,6 +42,10 @@ public sealed class NeuModel(CurrentUser currentUser, TextLibraryService texts, 
         if (Texts.Count == 0)
         {
             ModelState.AddModelError(string.Empty, "Erstelle zuerst einen Trainingstext, bevor du einen Live-Raum startest.");
+        }
+        else if (Texts.All(text => text.Id != Input.TrainingTextId))
+        {
+            ModelState.AddModelError($"{nameof(Input)}.{nameof(Input.TrainingTextId)}", "Der ausgewählte Text ist nicht verfügbar.");
         }
 
         if (!ModelState.IsValid)
@@ -62,6 +70,38 @@ public sealed class NeuModel(CurrentUser currentUser, TextLibraryService texts, 
     {
         MaxParticipantsLimit = Math.Max(2, liveOptions.Value.MaxParticipantsPerRoom);
     }
+
+    private void BuildTextOptions()
+    {
+        TextOptions = Texts.Select(ToTextOption).ToArray();
+    }
+
+    private static ArenaTextOption ToTextOption(TrainingText text)
+    {
+        var words = TypingEngine.CountWords(text.Body);
+        var estimatedSeconds = Math.Max(10, (int)Math.Ceiling(words / 45d * 60d));
+        return new ArenaTextOption(
+            text.Id,
+            text.Title,
+            text.CharacterCount,
+            words,
+            estimatedSeconds,
+            BuildPreview(text.Body));
+    }
+
+    private static string BuildPreview(string body)
+    {
+        var normalized = TypingEngine.NormalizeText(body).Replace('\n', ' ');
+        const int maxPreviewCharacters = 280;
+        if (normalized.Length <= maxPreviewCharacters)
+        {
+            return normalized;
+        }
+
+        return normalized[..maxPreviewCharacters].TrimEnd() + " ...";
+    }
+
+    public sealed record ArenaTextOption(Guid Id, string Title, int CharacterCount, int WordCount, int EstimatedSeconds, string Preview);
 
     public sealed class RoomInput
     {

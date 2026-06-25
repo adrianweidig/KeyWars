@@ -2,6 +2,10 @@
 @model KeyWars.Pages.Arena.NeuModel
 @{
     ViewData["Title"] = "Live-Raum starten";
+    var selectedText = Model.SelectedTextOption;
+    var selectedTextStats = selectedText is null
+        ? ""
+        : $"{selectedText.WordCount} Wörter · {selectedText.CharacterCount} Zeichen · ca. {selectedText.EstimatedSeconds} s";
 }
 
 <section class="page-header">
@@ -11,8 +15,8 @@
     </div>
 </section>
 
-<section class="card">
-    <form method="post" class="form-grid" data-submit-guard data-submit-busy-text="Raum wird erstellt...">
+<section class="arena-create-layout">
+    <form method="post" class="card form-grid arena-create-form" data-arena-create-form data-submit-guard data-submit-busy-text="Raum wird erstellt...">
         <div asp-validation-summary="ModelOnly"></div>
         <label>
             Titel
@@ -21,14 +25,54 @@
         </label>
         <label>
             Text
-            <select asp-for="Input.TrainingTextId">
-                @foreach (var text in Model.Texts)
+            <select asp-for="Input.TrainingTextId" data-arena-text-select aria-describedby="text-preview-title text-preview-body">
+                @foreach (var text in Model.TextOptions)
                 {
-                    <option value="@text.Id">@text.Title</option>
+                    <option value="@text.Id"
+                            data-title="@text.Title"
+                            data-preview="@text.Preview"
+                            data-characters="@text.CharacterCount"
+                            data-words="@text.WordCount"
+                            data-duration="@text.EstimatedSeconds">@text.Title</option>
                 }
             </select>
             <span asp-validation-for="Input.TrainingTextId"></span>
         </label>
+        <fieldset class="arena-mode-picker" aria-describedby="arena-mode-help">
+            <legend>Modus</legend>
+            <p id="arena-mode-help" class="muted">Wähle, wie der Raum abläuft. Aktuell ist das klassische gemeinsame Rennen aktiv.</p>
+            <label class="arena-mode-card selected">
+                <input asp-for="Input.Mode" type="radio" value="Classic" />
+                <span class="arena-mode-card-header">
+                    <strong>Klassisches Rennen</strong>
+                    <span>Aktiv</span>
+                </span>
+                <span>Alle tippen denselben Text nach einem Countdown. Fortschritt, Fehler und Zieleinlauf werden live sichtbar.</span>
+                <span class="arena-mode-steps">Lobby → Countdown → Rennen → Ergebnis</span>
+            </label>
+            <div class="arena-mode-card is-disabled" aria-disabled="true">
+                <span class="arena-mode-card-header">
+                    <strong>Serienrennen</strong>
+                    <span>Geplant</span>
+                </span>
+                <span>Mehrere Runden mit Gesamtauswertung. Der Modus ist vorbereitet, aber noch nicht auswählbar.</span>
+            </div>
+            <div class="arena-mode-card is-disabled" aria-disabled="true">
+                <span class="arena-mode-card-header">
+                    <strong>Teamwertung</strong>
+                    <span>Geplant</span>
+                </span>
+                <span>Gruppen treten gemeinsam an. Der aktuelle Raum bleibt bewusst eine klare Einzelwertung.</span>
+            </div>
+        </fieldset>
+        <div class="text-preview-box" data-arena-text-preview>
+            <div class="text-preview-meta">
+                <span>Textvorschau</span>
+                <strong id="text-preview-title" data-text-preview-title>@(selectedText?.Title ?? "Kein Text verfügbar")</strong>
+                <small data-text-preview-stats>@selectedTextStats</small>
+            </div>
+            <p id="text-preview-body" data-text-preview-body>@(selectedText?.Preview ?? "Lege zuerst einen Trainingstext an.")</p>
+        </div>
         <label>
             Sichtbarkeit
             <select asp-for="Input.Visibility">
@@ -41,12 +85,37 @@
             <input asp-for="Input.MaxParticipants" type="number" min="2" max="@Model.MaxParticipantsLimit" />
             <span asp-validation-for="Input.MaxParticipants"></span>
         </label>
-        <div class="form-note">
-            <strong>Klassisches Rennen</strong>
-            <span>Eine Runde, alle starten gemeinsam nach dem Countdown.</span>
-        </div>
-        <input type="hidden" asp-for="Input.Mode" />
         <input type="hidden" asp-for="Input.RoundCount" />
         <button type="submit">Raum erstellen</button>
     </form>
+    <aside class="card arena-create-preview" aria-label="Beispielansicht des klassischen Rennens">
+        <h2>So sieht der Raum aus</h2>
+        <p class="muted">Der Zieltext steht oben, die Eingabe direkt darunter. Im Live-Textboard siehst du den Fortschritt der anderen nicht als WPM-Zahl, sondern am Text selbst.</p>
+        <div class="arena-mode-example">
+            <div class="mode-example-strip">
+                <span>Warten</span>
+                <span>3</span>
+                <span>2</span>
+                <span>1</span>
+                <strong>LOS</strong>
+            </div>
+            <div class="mode-example-target">
+                <span class="correct">Alle tippen denselben Text.</span><span class="mode-example-cursor" aria-hidden="true"></span><span class="pending"> Der Fortschritt wird live sichtbar.</span>
+            </div>
+            <div class="mode-example-board">
+                <div class="mode-example-row current">
+                    <strong>Du</strong>
+                    <p><span class="correct">Alle tippen denselben Text.</span><span class="mode-example-cursor" aria-hidden="true"></span><span class="pending"> Der Fortschritt wird live sichtbar.</span></p>
+                </div>
+                <div class="mode-example-row">
+                    <strong>Gegnerin</strong>
+                    <p><span class="correct">Alle tippen denselben</span><span class="wrong"> Texr</span><span class="mode-example-cursor" aria-hidden="true"></span><span class="pending">. Der Fortschritt wird live sichtbar.</span></p>
+                </div>
+                <div class="mode-example-row">
+                    <strong>Gast</strong>
+                    <p><span class="correct">Alle tippen</span><span class="mode-example-cursor" aria-hidden="true"></span><span class="pending"> denselben Text. Der Fortschritt wird live sichtbar.</span></p>
+                </div>
+            </div>
+        </div>
+    </aside>
 </section>

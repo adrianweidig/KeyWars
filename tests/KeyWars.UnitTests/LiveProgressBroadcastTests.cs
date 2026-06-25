@@ -27,6 +27,7 @@ public sealed class LiveProgressBroadcastTests
         Assert.Equal(2, sender.Batches.Count);
         Assert.Equal(10, sender.Batches[0].Deltas.Single().CorrectCharacters);
         Assert.Equal(15, sender.Batches[1].Deltas.Single().CorrectCharacters);
+        Assert.Equal("ccccccccccccccc", sender.Batches[1].Deltas.Single().TypedTextPreview);
         Assert.True(broadcaster.Snapshot().CoalescedProgressMessages >= 1);
     }
 
@@ -56,6 +57,7 @@ public sealed class LiveProgressBroadcastTests
         2,
         participantId,
         correctCharacters,
+        new string('c', correctCharacters),
         42,
         100,
         1);

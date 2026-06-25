@@ -6,7 +6,7 @@
     <title>@ViewData["Title"] - KeyWars</title>
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
 </head>
-<body>
+<body class="@(ViewData["BodyClass"] as string ?? "")">
 @{
     var currentPage = ViewContext.RouteData.Values["page"]?.ToString() ?? "";
     var isActive = (string prefix) => currentPage.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);

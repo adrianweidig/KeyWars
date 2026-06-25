@@ -2,6 +2,7 @@
 @model KeyWars.Pages.Arena.RaumModel
 @{
     ViewData["Title"] = Model.Snapshot.Title;
+    ViewData["BodyClass"] = "arena-room-page";
     var currentParticipant = Model.Snapshot.Participants.FirstOrDefault(item => item.ProfileId == Model.CurrentProfileId);
     var isHost = Model.Snapshot.CreatorProfileId == Model.CurrentProfileId;
     var inLobby = Model.Snapshot.Phase == LiveRoomPhase.Lobby;
@@ -16,7 +17,7 @@
     var hiddenParticipants = Math.Max(0, rankedParticipants.Count - visibleParticipants.Count);
 }
 
-<section class="page-header">
+<section class="page-header arena-page-header">
     <div>
         <h1>@Model.Snapshot.Title</h1>
         <p class="lead">@DisplayNames.For(Model.Snapshot.Mode) · Runde @Model.Snapshot.CurrentRound von @Model.Snapshot.RoundCount · @Model.Snapshot.Participants.Count @(Model.Snapshot.Participants.Count == 1 ? "Person" : "Personen")</p>
@@ -46,10 +47,64 @@
 
 <div asp-validation-summary="ModelOnly"></div>
 
-<section class="dashboard-grid" data-arena-room data-room-id="@Model.Snapshot.RoomId" data-current-profile-id="@Model.CurrentProfileId" data-arena-display-mode="@displayMode" data-max-participants="@Model.Snapshot.MaxParticipants" data-show-live-wpm="@Bool(Model.ShowLiveWpm)" data-show-live-rank-changes="@Bool(Model.ShowLiveRankChanges)" data-sound-enabled="@Bool(Model.SoundEnabled)" data-sound-volume="@Model.SoundVolumePercent" data-reactions-enabled="@Bool(Model.ReactionsEnabled)" data-reduced-motion="@Bool(Model.ReducedMotion)">
-    <div class="card">
-        <h2>Rennen</h2>
-        <p class="muted" data-arena-state>@DisplayNames.For(Model.Snapshot.Phase)</p>
+<section class="arena-layout" data-arena-room data-room-id="@Model.Snapshot.RoomId" data-current-profile-id="@Model.CurrentProfileId" data-arena-display-mode="@displayMode" data-max-participants="@Model.Snapshot.MaxParticipants" data-show-live-wpm="@Bool(Model.ShowLiveWpm)" data-show-live-rank-changes="@Bool(Model.ShowLiveRankChanges)" data-sound-enabled="@Bool(Model.SoundEnabled)" data-sound-volume="@Model.SoundVolumePercent" data-reactions-enabled="@Bool(Model.ReactionsEnabled)" data-reduced-motion="@Bool(Model.ReducedMotion)">
+    <div class="card arena-workbench">
+        <div class="arena-status-bar">
+            <div>
+                <h2>Rennen</h2>
+                <p class="muted" data-arena-state>@DisplayNames.For(Model.Snapshot.Phase)</p>
+            </div>
+            <div class="typing-timer" data-arena-timer>
+                <strong>@InitialTimerValue(Model.Snapshot)</strong>
+                <span>@InitialTimerLabel(Model.Snapshot)</span>
+            </div>
+        </div>
+        <div class="typing-target" data-arena-target>
+            @if (string.IsNullOrEmpty(Model.Snapshot.TargetText))
+            {
+                <span class="muted">Der Text wird zum Start freigegeben.</span>
+            }
+            else
+            {
+                @Model.Snapshot.TargetText
+            }
+        </div>
+        <div class="form-grid form-grid-spaced">
+            <label>
+                Eingabe
+                <textarea asp-for="Input" class="typing-input" data-arena-input autocapitalize="off" autocomplete="off" spellcheck="false"></textarea>
+            </label>
+            <button type="button" class="secondary" data-arena-dnf>Runde aufgeben</button>
+        </div>
+        <section class="live-typing-board @displayMode" data-arena-live-board aria-label="Live-Texte der Teilnehmenden">
+            <div class="live-typing-board-header">
+                <div>
+                    <h2>Live-Text</h2>
+                    <p class="muted">Korrekte Zeichen, Fehler und Positionen im gemeinsamen Zieltext.</p>
+                </div>
+                <span class="muted" data-arena-hidden-count>@HiddenParticipantsText(hiddenParticipants)</span>
+            </div>
+            @foreach (var participant in visibleParticipants)
+            {
+                var progress = ProgressPercent(participant, Model.Snapshot.TargetCharacterCount);
+                var isCurrent = participant.ProfileId == Model.CurrentProfileId;
+                var isParticipantHost = participant.ProfileId == Model.Snapshot.CreatorProfileId;
+                <article class="live-typing-row @(isCurrent ? "current" : "")" data-live-participant-id="@participant.ProfileId">
+                    <div class="live-typing-meta">
+                        <span class="race-token">@Initials(participant.DisplayName)</span>
+                        <div>
+                            <strong>@participant.DisplayName</strong>
+                            <span>@DisplayNames.For(participant.Status) · @progress.ToString("0", System.Globalization.CultureInfo.InvariantCulture) %</span>
+                        </div>
+                        @if (isParticipantHost)
+                        {
+                            <span class="badge">Host</span>
+                        }
+                    </div>
+                    <div class="live-typing-preview" data-live-preview aria-label="@participant.DisplayName: Live-Textfortschritt"></div>
+                </article>
+            }
+        </section>
         <div class="arena-hud" data-arena-hud>
             <div class="metric"><span>Rang</span><strong data-hud-rank>@CurrentRank(currentParticipant, rankedParticipants)</strong></div>
             @if (Model.ShowLiveWpm)
@@ -58,12 +113,6 @@
             }
             <div class="metric"><span>Genauigkeit</span><strong data-hud-accuracy>@FormatNumber(currentParticipant?.Accuracy) %</strong></div>
             <div class="metric"><span>Fortschritt</span><strong data-hud-progress>@ProgressPercent(currentParticipant, Model.Snapshot.TargetCharacterCount).ToString("0", System.Globalization.CultureInfo.InvariantCulture) %</strong></div>
-        </div>
-        <div class="arena-scale-note">
-            <strong data-arena-mode-label>@DisplayModeLabel(displayMode)</strong>
-            <span data-arena-roster-summary>@RosterSummary(rankedParticipants.Count, visibleParticipants.Count, Model.Snapshot.MaxParticipants)</span>
-            <span data-arena-spectator-summary>Zuschauerrolle vorbereitet</span>
-            <span data-arena-connection-quality>Verbindung: wird aufgebaut</span>
         </div>
         @if (Model.ReactionsEnabled)
         {
@@ -76,89 +125,77 @@
             </div>
             <div class="reaction-stream" data-arena-reaction-stream aria-live="polite" aria-atomic="false"></div>
         }
-        <div class="race-track @displayMode" data-arena-track aria-label="Rennstrecke mit bestätigtem Fortschritt">
-            <div class="race-milestones" aria-hidden="true">
-                <span class="race-milestone-25">25</span>
-                <span class="race-milestone-50">50</span>
-                <span class="race-milestone-75">75</span>
-                <span class="race-milestone-100">Ziel</span>
-            </div>
-            @foreach (var participant in visibleParticipants)
-            {
-                var progress = ProgressPercent(participant, Model.Snapshot.TargetCharacterCount);
-                var isCurrent = participant.ProfileId == Model.CurrentProfileId;
-                var isParticipantHost = participant.ProfileId == Model.Snapshot.CreatorProfileId;
-                <div class="race-lane @(isCurrent ? "current" : "")" data-track-participant-id="@participant.ProfileId">
-                    <div class="race-lane-meta">
-                        <span class="race-token">@Initials(participant.DisplayName)</span>
-                        <span>@participant.DisplayName</span>
-                        @if (isParticipantHost)
-                        {
-                            <span class="badge">Host</span>
-                        }
-                        @if (participant.Ready)
-                        {
-                            <span class="badge">Bereit</span>
-                        }
-                    </div>
-                    <div class="race-lane-bar" aria-label="@participant.DisplayName: @progress.ToString("0", System.Globalization.CultureInfo.InvariantCulture) Prozent">
-                        <span class="race-position @ProgressClass(progress)">
-                            <span>@Initials(participant.DisplayName)</span>
-                        </span>
-                    </div>
-                </div>
-            }
-            <p class="muted roster-window-note @(hiddenParticipants > 0 ? "" : "is-hidden")" data-arena-window-note>@HiddenParticipantsText(hiddenParticipants)</p>
-        </div>
-        <div class="typing-target" data-arena-target>
-            @if (string.IsNullOrEmpty(Model.Snapshot.TargetText))
-            {
-                <span class="muted">Der Text wird zum Start freigegeben.</span>
-            }
-            else
-            {
-                @Model.Snapshot.TargetText
-            }
-        </div>
-        <div class="typing-timer" data-arena-timer>
-            <strong>00:00.0</strong>
-            <span>@DisplayNames.For(Model.Snapshot.Phase)</span>
-        </div>
-        <div class="form-grid form-grid-spaced">
-            <label>
-                Eingabe
-                <textarea asp-for="Input" class="typing-input" data-arena-input autocapitalize="off" autocomplete="off" spellcheck="false"></textarea>
-            </label>
-            <button type="button" class="secondary" data-arena-dnf>Runde aufgeben</button>
-        </div>
         <div class="visually-hidden" aria-live="polite" data-arena-live-region></div>
     </div>
-    <aside class="card">
-        <h2>Teilnehmende</h2>
-        <table class="table participant-list @displayMode">
-            <thead><tr><th>Name</th><th>Status</th><th>Fortschritt</th><th>Platz</th></tr></thead>
-            <tbody data-arena-participants>
-            @foreach (var participant in visibleParticipants)
-            {
-                <tr data-participant-id="@participant.ProfileId">
-                    <td>@participant.DisplayName</td>
-                    <td><span class="pill">@DisplayNames.For(participant.Status)</span></td>
-                    <td>@participant.CorrectCharacters / @Model.Snapshot.TargetCharacterCount</td>
-                    <td>@(participant.Placement?.ToString() ?? "-")</td>
-                </tr>
-            }
-            </tbody>
-        </table>
-        <p class="muted @(hiddenParticipants > 0 ? "" : "is-hidden")" data-arena-hidden-count>@HiddenParticipantsText(hiddenParticipants)</p>
-        <div class="podium @(Model.Snapshot.Finished ? "" : "is-hidden")" data-arena-podium>
-            <h2>Podium</h2>
-            @foreach (var participant in rankedParticipants.Where(item => item.Status is ParticipantStatus.Finished or ParticipantStatus.Dnf).Take(3))
-            {
-                <div class="podium-row" data-podium-participant-id="@participant.ProfileId">
-                    <strong>@(participant.Placement?.ToString() ?? "-"). @participant.DisplayName</strong>
-                    <span>@FormatNumber(participant.Wpm) WPM · @FormatNumber(participant.Accuracy) %</span>
+    <aside class="arena-secondary">
+        <div class="card">
+            <div class="arena-scale-note">
+                <strong data-arena-mode-label>@DisplayModeLabel(displayMode)</strong>
+                <span data-arena-roster-summary>@RosterSummary(rankedParticipants.Count, visibleParticipants.Count, Model.Snapshot.MaxParticipants)</span>
+                <span data-arena-spectator-summary>Zuschauerrolle vorbereitet</span>
+                <span data-arena-connection-quality>Verbindung: wird aufgebaut</span>
+            </div>
+            <div class="race-track @displayMode" data-arena-track aria-label="Rennstrecke mit bestätigtem Fortschritt">
+                <div class="race-milestones" aria-hidden="true">
+                    <span class="race-milestone-25">25</span>
+                    <span class="race-milestone-50">50</span>
+                    <span class="race-milestone-75">75</span>
+                    <span class="race-milestone-100">Ziel</span>
                 </div>
-            }
+                @foreach (var participant in visibleParticipants)
+                {
+                    var progress = ProgressPercent(participant, Model.Snapshot.TargetCharacterCount);
+                    var isCurrent = participant.ProfileId == Model.CurrentProfileId;
+                    var isParticipantHost = participant.ProfileId == Model.Snapshot.CreatorProfileId;
+                    <div class="race-lane @(isCurrent ? "current" : "")" data-track-participant-id="@participant.ProfileId">
+                        <div class="race-lane-meta">
+                            <span class="race-token">@Initials(participant.DisplayName)</span>
+                            <span>@participant.DisplayName</span>
+                            @if (isParticipantHost)
+                            {
+                                <span class="badge">Host</span>
+                            }
+                            @if (participant.Ready)
+                            {
+                                <span class="badge">Bereit</span>
+                            }
+                        </div>
+                        <div class="race-lane-bar" aria-label="@participant.DisplayName: @progress.ToString("0", System.Globalization.CultureInfo.InvariantCulture) Prozent">
+                            <span class="race-position @ProgressClass(progress)">
+                                <span>@Initials(participant.DisplayName)</span>
+                            </span>
+                        </div>
+                    </div>
+                }
+                <p class="muted roster-window-note @(hiddenParticipants > 0 ? "" : "is-hidden")" data-arena-window-note>@HiddenParticipantsText(hiddenParticipants)</p>
+            </div>
+        </div>
+        <div class="card">
+            <h2>Teilnehmende</h2>
+            <table class="table participant-list @displayMode">
+                <thead><tr><th>Name</th><th>Status</th><th>Fortschritt</th><th>Platz</th></tr></thead>
+                <tbody data-arena-participants>
+                @foreach (var participant in visibleParticipants)
+                {
+                    <tr data-participant-id="@participant.ProfileId">
+                        <td>@participant.DisplayName</td>
+                        <td><span class="pill">@DisplayNames.For(participant.Status)</span></td>
+                        <td>@participant.CorrectCharacters / @Model.Snapshot.TargetCharacterCount</td>
+                        <td>@(participant.Placement?.ToString() ?? "-")</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+            <div class="podium @(Model.Snapshot.Finished ? "" : "is-hidden")" data-arena-podium>
+                <h2>Podium</h2>
+                @foreach (var participant in rankedParticipants.Where(item => item.Status is ParticipantStatus.Finished or ParticipantStatus.Dnf).Take(3))
+                {
+                    <div class="podium-row" data-podium-participant-id="@participant.ProfileId">
+                        <strong>@(participant.Placement?.ToString() ?? "-"). @participant.DisplayName</strong>
+                        <span>@FormatNumber(participant.Wpm) WPM · @FormatNumber(participant.Accuracy) %</span>
+                    </div>
+                }
+            </div>
         </div>
     </aside>
 </section>
@@ -200,6 +237,31 @@
         value is null ? "-" : value.Value.ToString("0.0", System.Globalization.CultureInfo.GetCultureInfo("de-DE"));
 
     private static string Bool(bool value) => value.ToString().ToLowerInvariant();
+
+    private static string InitialTimerValue(KeyWars.Services.LiveRoomSnapshot snapshot) => snapshot.Phase switch
+    {
+        LiveRoomPhase.Lobby => "Bereit",
+        LiveRoomPhase.Countdown => "Start",
+        LiveRoomPhase.Running when snapshot.StartedAt is { } startedAt => FormatDuration(snapshot.ServerNow - startedAt),
+        LiveRoomPhase.RoundResults or LiveRoomPhase.SeriesResults or LiveRoomPhase.Closed when snapshot.StartedAt is { } startedAt && snapshot.FinishedAt is { } finishedAt => FormatDuration(finishedAt - startedAt),
+        _ => "-"
+    };
+
+    private static string InitialTimerLabel(KeyWars.Services.LiveRoomSnapshot snapshot) => snapshot.Phase switch
+    {
+        LiveRoomPhase.Lobby => "Lobby",
+        LiveRoomPhase.Countdown => "Countdown",
+        LiveRoomPhase.Running => "vergangen",
+        LiveRoomPhase.RoundResults or LiveRoomPhase.SeriesResults or LiveRoomPhase.Closed => "Dauer",
+        _ => DisplayNames.For(snapshot.Phase)
+    };
+
+    private static string FormatDuration(TimeSpan duration)
+    {
+        var value = duration < TimeSpan.Zero ? TimeSpan.Zero : duration;
+        var minutes = (int)value.TotalMinutes;
+        return $"{minutes:00}:{value.Seconds:00}.{value.Milliseconds / 100}";
+    }
 
     private static string ProgressClass(double value)
     {
