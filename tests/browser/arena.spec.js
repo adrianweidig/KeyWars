@@ -92,6 +92,44 @@ test("Textbibliothek bleibt auf Desktop und Mobile sauber ausgerichtet", async (
   await expectNoHorizontalOverflow(page);
 });
 
+test("Spielseite zeigt Sofortrunde und Modi sauber auf Desktop und Mobile", async ({ page }) => {
+  await login(page, "browser.play.ui");
+  await page.goto("/spielen");
+  await expect(page.locator(".play-quickstart")).toBeVisible();
+  await expect(page.locator(".play-mode-link")).toHaveCount(3);
+  await expect(page.locator(".play-text-card").first()).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+
+  const desktopPosition = await page.locator(".play-quickstart").evaluate((quickstart) => {
+    const bounds = quickstart.getBoundingClientRect();
+    return { top: Math.round(bounds.top), viewportHeight: window.innerHeight };
+  });
+  expect(desktopPosition.top).toBeLessThan(desktopPosition.viewportHeight);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/spielen");
+  await expect(page.locator(".play-quickstart")).toBeVisible();
+  await expect(page.locator(".play-mode-link")).toHaveCount(3);
+  await expectNoHorizontalOverflow(page);
+
+  const mobileLayout = await page.evaluate(() => {
+    const quickstart = document.querySelector(".play-quickstart");
+    const target = document.querySelector(".play-target");
+    const hasButtonOverflow = [...document.querySelectorAll("button, .button, .play-mode-link")]
+      .some((element) => element.scrollWidth > element.clientWidth + 1);
+
+    return {
+      quickstartTop: Math.round(quickstart?.getBoundingClientRect().top ?? 9999),
+      targetTop: Math.round(target?.getBoundingClientRect().top ?? 9999),
+      viewportHeight: window.innerHeight,
+      hasButtonOverflow
+    };
+  });
+  expect(mobileLayout.quickstartTop).toBeLessThan(mobileLayout.viewportHeight);
+  expect(mobileLayout.targetTop).toBeLessThan(mobileLayout.viewportHeight);
+  expect(mobileLayout.hasButtonOverflow).toBe(false);
+});
+
 test("Tippabschluss zeigt Motivation ohne bewegte Pflichtanimation", async ({ page }, testInfo) => {
   await login(page, `browser.motivation.${testInfo.workerIndex}`);
   await page.goto("/spielen");

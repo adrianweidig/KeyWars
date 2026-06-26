@@ -2,47 +2,104 @@
 @model KeyWars.Pages.Spielen.IndexModel
 @{
     ViewData["Title"] = "Spielen";
+    ViewData["BodyClass"] = "play-page";
 }
 
-<section class="page-header">
-    <div>
+<section class="play-hero">
+    <div class="play-hero-copy">
         <h1>Spielen</h1>
-        <p class="lead">Wähle einen Modus oder starte direkt. Die Auswertung kommt vom Server und wird lokal gespeichert.</p>
+        <p class="lead">Starte eine Runde, wähle einen Fokus oder trainiere mit einem gespeicherten Text.</p>
+        <div class="play-hero-stats" aria-label="Trainingsübersicht">
+            <span><strong>60s</strong>Sofortrunde</span>
+            <span><strong>@Model.Texts.Count</strong>Texte</span>
+            <span><strong>XP</strong>Belohnung</span>
+        </div>
     </div>
-    <div class="page-actions">
-        <a class="button secondary" asp-page="/Spielen/Sprint">Sprint</a>
-        <a class="button secondary" asp-page="/Spielen/Woerter">Wörter</a>
-        <a class="button secondary" asp-page="/Spielen/Fehlerfokus">Fehlerfokus</a>
-    </div>
+    <nav class="play-mode-rail" aria-label="Trainingsmodi">
+        <a class="play-mode-link is-primary" asp-page="/Spielen/Sprint">
+            <span>Sprint</span>
+            <strong>Tempo halten</strong>
+        </a>
+        <a class="play-mode-link" asp-page="/Spielen/Woerter">
+            <span>Wörter</span>
+            <strong>Rhythmus finden</strong>
+        </a>
+        <a class="play-mode-link" asp-page="/Spielen/Fehlerfokus">
+            <span>Fokus</span>
+            <strong>Muster korrigieren</strong>
+        </a>
+    </nav>
 </section>
 
-<section class="card" data-typing-app data-mode="Sprint60" data-words="80">
-    <h2>Sofortrunde</h2>
-    <div class="typing-target" data-target></div>
-    <label>
-        Eingabe
-        <textarea class="typing-input" data-input disabled autocapitalize="off" autocomplete="off" spellcheck="false"></textarea>
-    </label>
-    <div class="form-actions">
-        <button type="button" data-start>Starten</button>
-    </div>
-    <div data-result></div>
-</section>
-
-<section class="grid stack-spaced">
-    @foreach (var text in Model.Texts)
-    {
-        <article class="card text-card">
+<section class="play-workbench" aria-label="Sofortrunde">
+    <article class="play-quickstart" data-typing-app data-mode="Sprint60" data-words="80">
+        <div class="play-section-heading">
             <div>
-                <h3>@text.Title</h3>
-                <div class="metadata-row">
-                    <span class="meta-badge">@text.CharacterCount Zeichen</span>
-                    <span class="meta-badge">@(text.IsStandard ? "Standardtext" : DisplayNames.For(text.Visibility))</span>
+                <h2>Sofortrunde</h2>
+                <p>Ein sauberer 60-Sekunden-Lauf mit deutscher Wortliste.</p>
+            </div>
+            <span class="play-chip">Sprint 60</span>
+        </div>
+        <div class="typing-target play-target" data-target></div>
+        <label class="play-input-label">
+            <span>Eingabe</span>
+            <textarea class="typing-input play-input" data-input disabled autocapitalize="off" autocomplete="off" spellcheck="false"></textarea>
+        </label>
+        <div class="form-actions">
+            <button type="button" data-start>Starten</button>
+        </div>
+        <div data-result></div>
+    </article>
+
+    <aside class="play-side-panel" aria-label="Fokusauswahl">
+        <div class="play-section-heading">
+            <div>
+                <h2>Fokus wählen</h2>
+                <p>Direkt in den passenden Trainingsmodus springen.</p>
+            </div>
+        </div>
+        <div class="play-focus-list">
+            <a asp-page="/Spielen/Sprint">
+                <strong>Sprint</strong>
+                <span>15 bis 120 Sekunden</span>
+            </a>
+            <a asp-page="/Spielen/Woerter">
+                <strong>Wörtertests</strong>
+                <span>10 bis 100 Wörter</span>
+            </a>
+            <a asp-page="/Spielen/Fehlerfokus">
+                <strong>Fehlerfokus</strong>
+                <span>Aus deinen Abweichungen</span>
+            </a>
+        </div>
+    </aside>
+</section>
+
+<section class="play-library" aria-labelledby="play-library-title">
+    <div class="play-section-heading">
+        <div>
+            <h2 id="play-library-title">Texttraining</h2>
+            <p>Größere Texte für ruhige, realistische Tipp-Runden.</p>
+        </div>
+        <a class="button secondary compact-button" asp-page="/Texte/Index">Alle Texte</a>
+    </div>
+
+    <div class="play-text-grid">
+        @foreach (var text in Model.Texts)
+        {
+            <article class="text-card play-text-card">
+                <div>
+                    <h3>@text.Title</h3>
+                    <p>@Model.Preview(text)</p>
+                    <div class="metadata-row">
+                        <span class="meta-badge">@text.CharacterCount Zeichen</span>
+                        <span class="meta-badge">@(text.IsStandard ? "Standardtext" : DisplayNames.For(text.Visibility))</span>
+                    </div>
                 </div>
-            </div>
-            <div class="card-actions">
-                <a class="button" asp-page="/Spielen/Text" asp-route-id="@text.Id">Text trainieren</a>
-            </div>
-        </article>
-    }
+                <div class="card-actions">
+                    <a class="button" asp-page="/Spielen/Text" asp-route-id="@text.Id">Text trainieren</a>
+                </div>
+            </article>
+        }
+    </div>
 </section>

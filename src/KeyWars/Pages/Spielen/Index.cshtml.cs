@@ -14,4 +14,12 @@ public sealed class IndexModel(CurrentUser currentUser, TextLibraryService texts
         var profile = await currentUser.RequireProfileAsync(User, cancellationToken);
         Texts = await texts.ListVisibleAsync(profile.Id, cancellationToken);
     }
+
+    public string Preview(TrainingText text)
+    {
+        var normalized = string.Join(
+            " ",
+            text.Body.Split(['\r', '\n', '\t', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        return normalized.Length <= 138 ? normalized : $"{normalized[..138]}...";
+    }
 }
