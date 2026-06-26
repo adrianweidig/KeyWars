@@ -87,11 +87,11 @@
                 @foreach (var trend in Model.Insights.Trends)
                 {
                     <tr>
-                        <td>@trend.Days Tage</td>
-                        <td>@trend.SampleCount.ToString("N0", culture)</td>
-                        <td>@trend.AverageWpm.ToString("0.0", culture) <span class="muted">@FormatSigned(trend.WpmDelta)</span></td>
-                        <td>@trend.AverageAccuracy.ToString("0.0", culture) % <span class="muted">@FormatSigned(trend.AccuracyDelta, " %")</span></td>
-                        <td>@trend.AverageConsistency.ToString("0.0", culture) % <span class="muted">@FormatSigned(trend.ConsistencyDelta, " %")</span></td>
+                        <td data-label="Zeitraum">@trend.Days Tage</td>
+                        <td data-label="Versuche">@trend.SampleCount.ToString("N0", culture)</td>
+                        <td data-label="WPM">@trend.AverageWpm.ToString("0.0", culture) <span class="muted">@FormatSigned(trend.WpmDelta)</span></td>
+                        <td data-label="Genauigkeit">@trend.AverageAccuracy.ToString("0.0", culture) % <span class="muted">@FormatSigned(trend.AccuracyDelta, " %")</span></td>
+                        <td data-label="Konsistenz">@trend.AverageConsistency.ToString("0.0", culture) % <span class="muted">@FormatSigned(trend.ConsistencyDelta, " %")</span></td>
                     </tr>
                 }
                 </tbody>
@@ -125,10 +125,10 @@
                 @foreach (var day in activityDays.TakeLast(7))
                 {
                     <tr>
-                        <td>@day.Date.ToString("d", culture)</td>
-                        <td>@day.TrainingAttempts.ToString("N0", culture)</td>
-                        <td>@day.ArenaRuns.ToString("N0", culture)</td>
-                        <td>@day.CompletedGoals.ToString("N0", culture)</td>
+                        <td data-label="Tag">@day.Date.ToString("d", culture)</td>
+                        <td data-label="Training">@day.TrainingAttempts.ToString("N0", culture)</td>
+                        <td data-label="Arena">@day.ArenaRuns.ToString("N0", culture)</td>
+                        <td data-label="Ziele">@day.CompletedGoals.ToString("N0", culture)</td>
                     </tr>
                 }
                 </tbody>
@@ -152,11 +152,11 @@
                 @foreach (var best in Model.Insights.BestModes)
                 {
                     <tr>
-                        <td>@DisplayNames.For(best.Mode)</td>
-                        <td>@best.SampleCount.ToString("N0", culture)</td>
-                        <td>@best.BestWpm.ToString("0.0", culture)</td>
-                        <td>@best.BestAccuracy.ToString("0.0", culture) %</td>
-                        <td>@best.AverageWpm.ToString("0.0", culture)</td>
+                        <td data-label="Modus">@DisplayNames.For(best.Mode)</td>
+                        <td data-label="Stichprobe">@best.SampleCount.ToString("N0", culture)</td>
+                        <td data-label="Bestes WPM">@best.BestWpm.ToString("0.0", culture)</td>
+                        <td data-label="Beste Genauigkeit">@best.BestAccuracy.ToString("0.0", culture) %</td>
+                        <td data-label="Ø WPM">@best.AverageWpm.ToString("0.0", culture)</td>
                     </tr>
                 }
                 </tbody>
@@ -203,12 +203,12 @@
             @foreach (var attempt in Model.Insights.History)
             {
                 <tr>
-                    <td>@attempt.CreatedAt.LocalDateTime.ToString("g", culture)</td>
-                    <td>@DisplayNames.For(attempt.Mode)</td>
-                    <td>@attempt.Wpm.ToString("0.0", culture)</td>
-                    <td>@attempt.Accuracy.ToString("0.0", culture) %</td>
-                    <td>@attempt.Consistency.ToString("0.0", culture) %</td>
-                    <td>@attempt.CorrectCharacters.ToString("N0", culture)</td>
+                    <td data-label="Zeit">@attempt.CreatedAt.LocalDateTime.ToString("g", culture)</td>
+                    <td data-label="Modus">@DisplayNames.For(attempt.Mode)</td>
+                    <td data-label="WPM">@attempt.Wpm.ToString("0.0", culture)</td>
+                    <td data-label="Genauigkeit">@attempt.Accuracy.ToString("0.0", culture) %</td>
+                    <td data-label="Konsistenz">@attempt.Consistency.ToString("0.0", culture) %</td>
+                    <td data-label="Zeichen">@attempt.CorrectCharacters.ToString("N0", culture)</td>
                 </tr>
             }
             </tbody>

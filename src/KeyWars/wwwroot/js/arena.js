@@ -68,16 +68,13 @@ export function attachArenaPages() {
         return;
       }
 
-      target.replaceChildren(...expected.map((char, index) => {
-        const span = document.createElement("span");
-        span.textContent = char;
+      renderTypingCharacters(target, expected, (char, index) => {
         if (index < typed.length) {
-          span.className = typed[index] === char ? "correct" : "wrong";
-        } else if (index === typed.length) {
-          span.className = "current";
+          return typed[index] === char ? "correct" : "wrong";
         }
-        return span;
-      }));
+
+        return index === typed.length ? "current" : "";
+      });
     };
 
     const rankedParticipants = () => [...(snapshot?.participants || [])].sort((left, right) => {
@@ -278,6 +275,9 @@ export function attachArenaPages() {
     };
 
     const updateParticipantRow = (row, participant) => {
+      ["Name", "Status", "Fortschritt", "Platz"].forEach((label, index) => {
+        row.cells[index].dataset.label = label;
+      });
       row.cells[0].textContent = participant.displayName;
       row.cells[1].replaceChildren(statusPill(participant.status));
       row.cells[2].textContent = `${participant.correctCharacters} / ${snapshot.targetCharacterCount}`;
@@ -383,22 +383,18 @@ export function attachArenaPages() {
       }
 
       const typedLength = Math.min(states.length, expected.length);
-      container.replaceChildren(...expected.map((char, index) => {
-        const span = document.createElement("span");
-        span.textContent = char;
+      renderTypingCharacters(container, expected, (char, index) => {
         const state = states[index];
         if (state === "c") {
-          span.className = "correct";
+          return "correct";
         } else if (state === "w") {
-          span.className = "wrong";
+          return "wrong";
         } else if (index === typedLength && participant?.status === "Running") {
-          span.className = "current";
-        } else {
-          span.className = "pending";
+          return "current";
         }
 
-        return span;
-      }));
+        return "pending";
+      });
     };
 
     const announceRankChange = (rank) => {
@@ -1070,7 +1066,7 @@ function formatDuration(milliseconds) {
 }
 
 function splitGraphemes(value) {
-  const normalized = String(value || "").normalize("NFC");
+  const normalized = normalizeTypingText(value);
   if (window.Intl && typeof window.Intl.Segmenter === "function") {
     const segmenter = new window.Intl.Segmenter("de", { granularity: "grapheme" });
     return Array.from(segmenter.segment(normalized), (segment) => segment.segment);
@@ -1091,6 +1087,37 @@ function textSpan(text, className) {
   span.textContent = text;
   span.className = className;
   return span;
+}
+
+function normalizeTypingText(value) {
+  return String(value || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .normalize("NFC");
+}
+
+function renderTypingCharacters(container, expected, classForIndex) {
+  const nodes = [];
+  expected.forEach((char, index) => {
+    const span = document.createElement("span");
+    const stateClass = classForIndex(char, index);
+    if (stateClass) {
+      span.className = stateClass;
+    }
+
+    if (char === "\n") {
+      span.textContent = "\u21b5";
+      span.classList.add("typing-newline");
+      span.title = "Absatz: Enter drücken";
+      span.setAttribute("aria-label", "Absatz: Enter drücken");
+      nodes.push(span, document.createElement("br"));
+      return;
+    }
+
+    span.textContent = char;
+    nodes.push(span);
+  });
+  container.replaceChildren(...nodes);
 }
 
 function camelize(value) {

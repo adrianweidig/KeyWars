@@ -178,10 +178,10 @@
                 @foreach (var participant in visibleParticipants)
                 {
                     <tr data-participant-id="@participant.ProfileId">
-                        <td>@participant.DisplayName</td>
-                        <td><span class="pill">@DisplayNames.For(participant.Status)</span></td>
-                        <td>@participant.CorrectCharacters / @Model.Snapshot.TargetCharacterCount</td>
-                        <td>@(participant.Placement?.ToString() ?? "-")</td>
+                        <td data-label="Name">@participant.DisplayName</td>
+                        <td data-label="Status"><span class="pill">@DisplayNames.For(participant.Status)</span></td>
+                        <td data-label="Fortschritt">@participant.CorrectCharacters / @Model.Snapshot.TargetCharacterCount</td>
+                        <td data-label="Platz">@(participant.Placement?.ToString() ?? "-")</td>
                     </tr>
                 }
                 </tbody>

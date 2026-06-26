@@ -19,10 +19,10 @@
         @foreach (var challenge in Model.Challenges)
         {
             <tr>
-                <td><a asp-page="/Herausforderungen/Details" asp-route-id="@challenge.Id">@challenge.Title</a></td>
-                <td>@challenge.Mode</td>
-                <td><span class="pill">@challenge.Status</span></td>
-                <td>@challenge.ExpiresAt.LocalDateTime.ToString("g")</td>
+                <td data-label="Titel"><a asp-page="/Herausforderungen/Details" asp-route-id="@challenge.Id">@challenge.Title</a></td>
+                <td data-label="Modus">@challenge.Mode</td>
+                <td data-label="Status"><span class="pill">@challenge.Status</span></td>
+                <td data-label="Ende">@challenge.ExpiresAt.LocalDateTime.ToString("g")</td>
             </tr>
         }
         </tbody>

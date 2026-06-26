@@ -50,16 +50,13 @@ export function attachTypingApps() {
 
       const typed = splitGraphemes(input.value);
       const expected = splitGraphemes(session.text);
-      target.replaceChildren(...expected.map((char, index) => {
-        const span = document.createElement("span");
-        span.textContent = char;
+      renderTypingCharacters(target, expected, (char, index) => {
         if (index < typed.length) {
-          span.className = typed[index] === char ? "correct" : "wrong";
-        } else if (index === typed.length) {
-          span.className = "current";
+          return typed[index] === char ? "correct" : "wrong";
         }
-        return span;
-      }));
+
+        return index === typed.length ? "current" : "";
+      });
     };
 
     const formatDuration = (milliseconds) => {
@@ -160,7 +157,7 @@ export function attachTypingApps() {
     };
 
     const splitGraphemes = (value) => {
-      const normalized = String(value || "").normalize("NFC");
+      const normalized = normalizeTypingText(value);
       if (window.Intl && Intl.Segmenter) {
         return Array.from(new Intl.Segmenter("de", { granularity: "grapheme" }).segment(normalized), segment => segment.segment);
       }
@@ -169,7 +166,7 @@ export function attachTypingApps() {
     };
 
     const countCompletedWords = (value) => {
-      const normalized = String(value || "").normalize("NFC");
+      const normalized = normalizeTypingText(value);
       const words = normalized.trim().split(/\s+/u).filter(Boolean);
       if (words.length === 0) {
         return 0;
@@ -430,4 +427,35 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll("\"", "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function normalizeTypingText(value) {
+  return String(value || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .normalize("NFC");
+}
+
+function renderTypingCharacters(container, expected, classForIndex) {
+  const nodes = [];
+  expected.forEach((char, index) => {
+    const span = document.createElement("span");
+    const stateClass = classForIndex(char, index);
+    if (stateClass) {
+      span.className = stateClass;
+    }
+
+    if (char === "\n") {
+      span.textContent = "\u21b5";
+      span.classList.add("typing-newline");
+      span.title = "Absatz: Enter drücken";
+      span.setAttribute("aria-label", "Absatz: Enter drücken");
+      nodes.push(span, document.createElement("br"));
+      return;
+    }
+
+    span.textContent = char;
+    nodes.push(span);
+  });
+  container.replaceChildren(...nodes);
 }

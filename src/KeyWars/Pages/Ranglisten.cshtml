@@ -18,11 +18,11 @@
         @for (var i = 0; i < Model.Rows.Count; i++)
         {
             <tr>
-                <td>@(i + 1)</td>
-                <td>@Model.Rows[i].DisplayName</td>
-                <td>@Model.Rows[i].ArenaRating</td>
-                <td>@Model.Rows[i].SeasonPoints</td>
-                <td>@Model.Rows[i].Level</td>
+                <td data-label="Platz">@(i + 1)</td>
+                <td data-label="Person">@Model.Rows[i].DisplayName</td>
+                <td data-label="Arena">@Model.Rows[i].ArenaRating</td>
+                <td data-label="Saisonpunkte">@Model.Rows[i].SeasonPoints</td>
+                <td data-label="Level">@Model.Rows[i].Level</td>
             </tr>
         }
         </tbody>

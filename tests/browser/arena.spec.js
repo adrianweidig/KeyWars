@@ -99,6 +99,49 @@ test("Raumformular blockiert doppelte Submit-Aktion im echten Browser", async ({
   });
 });
 
+test("Texttraining zeigt Absatzwechsel als Enter-Stelle", async ({ page }, testInfo) => {
+  await login(page, `browser.paragraph.${testInfo.workerIndex}`);
+
+  const title = `Absatz Browser ${testInfo.workerIndex}-${Date.now()}`;
+  const firstLine = "Der erste Absatz endet bewusst vor einem neuen Gedanken.";
+  const secondLine = "Der zweite Absatz beginnt sichtbar in einer neuen Zeile, damit niemand versehentlich ein Leerzeichen tippt.";
+  await page.goto("/texte/neu");
+  await page.getByLabel("Titel").fill(title);
+  await page.getByLabel("Text").fill(`${firstLine}\n${secondLine}`);
+  await page.getByRole("button", { name: "Text speichern" }).click();
+  await expect(page.getByRole("heading", { name: title })).toBeVisible();
+
+  await page.getByRole("link", { name: "Trainieren" }).click();
+  await expect(page.getByRole("heading", { name: title })).toBeVisible();
+  await expect(page.locator("[data-input]")).toBeEnabled();
+  const newlineMarker = page.locator("[data-target] .typing-newline");
+  await expect(newlineMarker).toHaveText("↵");
+
+  const markerLayout = await page.locator("[data-target]").evaluate((target) => {
+    const marker = target.querySelector(".typing-newline");
+    const nextSpan = marker?.nextSibling?.nextSibling;
+    if (!(marker instanceof HTMLElement) || !(nextSpan instanceof HTMLElement)) {
+      throw new Error("Absatzmarker oder Folgezeichen fehlen.");
+    }
+
+    return {
+      brAfterMarker: marker.nextSibling?.nodeName === "BR",
+      nextLineBelow: nextSpan.getBoundingClientRect().top > marker.getBoundingClientRect().top,
+      title: marker.getAttribute("title")
+    };
+  });
+  expect(markerLayout).toEqual({
+    brAfterMarker: true,
+    nextLineBelow: true,
+    title: "Absatz: Enter drücken"
+  });
+
+  await page.locator("[data-input]").fill(`${firstLine} `);
+  await expect(newlineMarker).toHaveClass(/wrong/);
+  await page.locator("[data-input]").fill(`${firstLine}\n`);
+  await expect(newlineMarker).toHaveClass(/correct/);
+});
+
 test("Arena läuft mit zwei getrennten Browserkontexten über SignalR", async ({ browser, baseURL }, testInfo) => {
   const hostContext = await browser.newContext({ baseURL, colorScheme: "dark", reducedMotion: "reduce" });
   const guestContext = await browser.newContext({ baseURL, colorScheme: "dark", reducedMotion: "reduce" });

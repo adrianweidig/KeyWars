@@ -27,10 +27,10 @@
         @foreach (var row in Model.Rows)
         {
                 <tr>
-                    <td>@row.DisplayName</td>
-                <td><span class="pill">@DisplayNames.For(row.Status)</span></td>
-                    <td>@(row.Placement?.ToString() ?? "-")</td>
-                    <td>@row.RatingDelta.ToString("+0;-0;0")</td>
+                    <td data-label="Person">@row.DisplayName</td>
+                <td data-label="Status"><span class="pill">@DisplayNames.For(row.Status)</span></td>
+                    <td data-label="Platz">@(row.Placement?.ToString() ?? "-")</td>
+                    <td data-label="Rating">@row.RatingDelta.ToString("+0;-0;0")</td>
                 </tr>
         }
         </tbody>
