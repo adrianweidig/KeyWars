@@ -26,6 +26,7 @@ public sealed class ProfilePrivacyServiceTests
         Assert.Empty(await context.Db.RewardLedgerEntries.Where(item => item.UserProfileId == profile.Id).ToListAsync());
         Assert.Empty(await context.Db.Missions.Where(item => item.UserProfileId == profile.Id).ToListAsync());
         Assert.Empty(await context.Db.Achievements.Where(item => item.UserProfileId == profile.Id).ToListAsync());
+        Assert.Empty(await context.Db.GamificationEvents.Where(item => item.UserProfileId == profile.Id).ToListAsync());
         Assert.Empty(await context.Db.WeaknessObservations.Where(item => item.UserProfileId == profile.Id).ToListAsync());
         Assert.Equal(0, profile.ExperiencePoints);
         Assert.Equal(1, profile.Level);
@@ -105,6 +106,20 @@ public sealed class ProfilePrivacyServiceTests
             Xp = 25,
             AwardedAt = context.Time.GetUtcNow()
         });
+        context.Db.GamificationEvents.Add(new GamificationEvent
+        {
+            UserProfileId = other.Id,
+            Type = GamificationEventType.XpAwarded,
+            EventKey = "xp-awarded",
+            Title = "+25 XP",
+            Description = "Andere Person",
+            XpDelta = 25,
+            LevelBefore = 1,
+            LevelAfter = 1,
+            Source = "attempt",
+            SourceId = otherAttempt.Id.ToString("N"),
+            CreatedAt = context.Time.GetUtcNow()
+        });
         await context.Db.SaveChangesAsync();
         var service = context.CreatePrivacyService();
 
@@ -115,12 +130,14 @@ public sealed class ProfilePrivacyServiceTests
         Assert.All(export.Attempts, item => Assert.Equal(context.Profile.Id, item.UserProfileId));
         Assert.All(export.Missions, item => Assert.Equal(context.Profile.Id, item.UserProfileId));
         Assert.All(export.Achievements, item => Assert.Equal(context.Profile.Id, item.UserProfileId));
+        Assert.All(export.GamificationEvents, item => Assert.Equal(context.Profile.Id, item.UserProfileId));
         Assert.All(export.WeaknessObservations, item => Assert.Equal(context.Profile.Id, item.UserProfileId));
         Assert.All(export.AttemptErrors, item => Assert.Equal(context.Profile.Id, item.UserProfileId));
         Assert.All(export.RewardLedger, item => Assert.Equal(context.Profile.Id, item.UserProfileId));
         Assert.DoesNotContain(export.Attempts, item => item.UserProfileId == other.Id);
         Assert.DoesNotContain(export.AttemptErrors, item => item.UserProfileId == other.Id);
         Assert.DoesNotContain(export.RewardLedger, item => item.UserProfileId == other.Id);
+        Assert.DoesNotContain(export.GamificationEvents, item => item.UserProfileId == other.Id);
     }
 
     private sealed class PrivacyTestContext : IAsyncDisposable
@@ -212,6 +229,20 @@ public sealed class ProfilePrivacyServiceTests
             });
             Db.Missions.Add(new Mission { UserProfileId = Profile.Id, MissionDate = DateOnly.FromDateTime(Time.GetUtcNow().Date), Key = "test-mission", Title = "Test", Description = "Test", TargetValue = 1, CurrentValue = 1, Completed = true });
             Db.Achievements.Add(new Achievement { UserProfileId = Profile.Id, Key = "test", Title = "Test", Description = "Test" });
+            Db.GamificationEvents.Add(new GamificationEvent
+            {
+                UserProfileId = Profile.Id,
+                Type = GamificationEventType.XpAwarded,
+                EventKey = "xp-awarded",
+                Title = "+70 XP",
+                Description = "Test",
+                XpDelta = 70,
+                LevelBefore = 3,
+                LevelAfter = 4,
+                Source = "attempt",
+                SourceId = attempt.Id.ToString("N"),
+                CreatedAt = Time.GetUtcNow()
+            });
             Db.WeaknessObservations.Add(new WeaknessObservation { UserProfileId = Profile.Id, Pattern = "te", Attempts = 6, Errors = 2 });
             await Db.SaveChangesAsync();
         }

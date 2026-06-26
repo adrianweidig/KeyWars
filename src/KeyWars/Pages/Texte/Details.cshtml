@@ -9,7 +9,7 @@
         <h1>@Model.Text.Title</h1>
         <p class="lead">@Model.Text.CharacterCount Zeichen · @(Model.Text.IsStandard ? "Standardtext" : DisplayNames.For(Model.Text.Visibility))</p>
     </div>
-    <div class="action-row">
+    <div class="page-actions">
         <a class="button" asp-page="/Spielen/Text" asp-route-id="@Model.Text.Id">Trainieren</a>
         <a class="button secondary" asp-page="/Herausforderungen/Neu" asp-route-textId="@Model.Text.Id">Herausfordern</a>
         <form method="post" asp-page-handler="Copy" asp-route-id="@Model.Text.Id">

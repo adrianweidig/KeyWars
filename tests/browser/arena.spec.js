@@ -35,15 +35,78 @@ function wrongCharacterFor(value) {
   return value === "x" ? "y" : "x";
 }
 
+async function expectNoHorizontalOverflow(page) {
+  const overflow = await page.evaluate(() => {
+    const documentWidth = document.documentElement.scrollWidth;
+    const viewportWidth = document.documentElement.clientWidth;
+    const offenders = [...document.body.querySelectorAll("*")]
+      .filter((element) => element instanceof HTMLElement && element.getBoundingClientRect().right > viewportWidth + 1)
+      .slice(0, 5)
+      .map((element) => element.className || element.tagName);
+
+    return { documentWidth, viewportWidth, offenders };
+  });
+
+  expect(overflow.documentWidth, `Overflow durch: ${overflow.offenders.join(", ")}`).toBeLessThanOrEqual(overflow.viewportWidth + 1);
+}
+
 test("Dashboard und Einstellungen rendern im echten Browser", async ({ page }) => {
   await login(page, "browser.smoke");
 
   await expect(page.getByText("Tagesfokus")).toBeVisible();
+  await expect(page.locator(".level-cockpit")).toBeVisible();
+  await expect(page.locator(".quest-card").first()).toBeVisible();
+  await expect(page.locator(".event-feed")).toBeVisible();
+  await expectNoHorizontalOverflow(page);
   await expect(page.getByText("30-Tage-Übersicht")).toBeVisible();
   await page.goto("/profil/einstellungen");
   await expect(page.getByRole("heading", { name: "Einstellungen" })).toBeVisible();
   await expect(page.getByText("Identität aus AD/LDAP")).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("lang", "de");
+});
+
+test("Textbibliothek bleibt auf Desktop und Mobile sauber ausgerichtet", async ({ page }) => {
+  await login(page, "browser.texts.ui");
+  await page.goto("/texte");
+  await expect(page.locator(".filter-panel")).toBeVisible();
+  await expect(page.locator(".text-card").first()).toBeVisible();
+  await expect(page.locator(".text-card").first().locator(".card-actions")).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+
+  const desktopSpacing = await page.locator(".text-card").first().locator(".card-actions").evaluate((actions) => {
+    const buttons = [...actions.querySelectorAll("a,button")].map((item) => item.getBoundingClientRect());
+    return {
+      count: buttons.length,
+      gap: buttons.length >= 2 ? Math.round(buttons[1].left - buttons[0].right) : 99,
+      sameRow: buttons.length < 2 || Math.abs(buttons[0].top - buttons[1].top) < 2
+    };
+  });
+  expect(desktopSpacing.count).toBeGreaterThanOrEqual(2);
+  expect(desktopSpacing.gap).toBeGreaterThanOrEqual(8);
+  expect(desktopSpacing.sameRow).toBe(true);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/texte");
+  await expect(page.locator(".filter-panel")).toBeVisible();
+  await expect(page.locator(".text-card").first()).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+});
+
+test("Tippabschluss zeigt Motivation ohne bewegte Pflichtanimation", async ({ page }, testInfo) => {
+  await login(page, `browser.motivation.${testInfo.workerIndex}`);
+  await page.goto("/spielen");
+  const input = page.locator("[data-input]");
+  await expect(input).toBeEnabled({ timeout: 15_000 });
+  const target = (await page.locator("[data-target]").textContent()).trim();
+  expect(target.length).toBeGreaterThan(80);
+
+  await input.fill(firstGraphemes(target, 1));
+  await page.waitForTimeout(5_200);
+  await input.fill(target);
+  await expect(page.locator(".motivation-panel")).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator(".motivation-event").first()).toBeVisible();
+  await expect(page.locator(".xp-chip").first()).toBeVisible();
+  await expectNoHorizontalOverflow(page);
 });
 
 test("Raumformular blockiert doppelte Submit-Aktion im echten Browser", async ({ page }) => {

@@ -63,5 +63,6 @@ public sealed class IndexModel(
         0,
         1,
         [],
+        [],
         []);
 }

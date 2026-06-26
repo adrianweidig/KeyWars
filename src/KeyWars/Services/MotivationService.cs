@@ -14,12 +14,26 @@ public enum MissionCadence
 public sealed record MissionDefinition(string Key, MissionCadence Cadence, string Title, string Description, int TargetValue, int XpReward);
 public sealed record AchievementDefinition(string Key, string Category, string Title, string Description);
 public sealed record LevelProgress(int Level, int ExperiencePoints, int LevelStartXp, int NextLevelXp, int ProgressXp, int RemainingXp, double ProgressPercent);
+public sealed record MotivationOutcome(
+    int XpDelta,
+    int LevelBefore,
+    int LevelAfter,
+    double ProgressPercent,
+    IReadOnlyList<GamificationEvent> Events)
+{
+    public static MotivationOutcome Empty(UserProfile profile)
+    {
+        var progress = MotivationService.GetLevelProgress(profile.ExperiencePoints);
+        return new MotivationOutcome(0, progress.Level, progress.Level, progress.ProgressPercent, []);
+    }
+}
 
 public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProvider)
 {
     private const string SourceAttempt = "attempt";
     private const string SourceArena = "arena";
     private const string SourceMission = "mission";
+    private const string SourceAchievement = "achievement";
 
     private const string MissionThreeRounds = "daily-three-rounds";
     private const string MissionAccuracy = "daily-accuracy";
@@ -76,16 +90,16 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
         new("mission-weekly", "Missionen", "Wochenziel erreicht", "Du hast eine Wochenmission abgeschlossen.")
     ];
 
-    public async Task ApplyAttemptAsync(Guid profileId, TypingAttempt attempt, string targetText, CancellationToken cancellationToken = default)
+    public async Task<MotivationOutcome> ApplyAttemptAsync(Guid profileId, TypingAttempt attempt, string targetText, CancellationToken cancellationToken = default)
     {
-        await ApplyAttemptAsync(profileId, attempt, [], cancellationToken);
+        return await ApplyAttemptAsync(profileId, attempt, [], cancellationToken);
     }
 
-    public async Task ApplyAttemptAsync(Guid profileId, TypingAttempt attempt, IReadOnlyList<TypingError> errors, CancellationToken cancellationToken = default)
+    public async Task<MotivationOutcome> ApplyAttemptAsync(Guid profileId, TypingAttempt attempt, IReadOnlyList<TypingError> errors, CancellationToken cancellationToken = default)
     {
         if (!attempt.Completed || !attempt.Official)
         {
-            return;
+            return await BuildCurrentOutcomeAsync(profileId, cancellationToken);
         }
 
         var previousBestWpm = await db.TypingAttempts
@@ -94,17 +108,13 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
             .MaxAsync(cancellationToken) ?? 0d;
         var performance = MotivationPerformance.FromAttempt(profileId, attempt, errors);
         var xp = CalculateXp(performance, previousBestWpm, attempt.TrainingTextId is not null);
-        var processed = await ApplyPerformanceAsync(performance, xp, previousBestWpm, cancellationToken);
+        var outcome = await ApplyPerformanceAsync(performance, xp, previousBestWpm, cancellationToken);
         attempt.ExperienceAwarded = true;
 
-        if (!processed)
-        {
-            var profile = await db.UserProfiles.SingleAsync(item => item.Id == profileId, cancellationToken);
-            profile.Level = CalculateLevel(profile.ExperiencePoints);
-        }
+        return outcome;
     }
 
-    public async Task ApplyArenaResultAsync(
+    public async Task<MotivationOutcome> ApplyArenaResultAsync(
         Guid profileId,
         string sourceId,
         double wpm,
@@ -135,7 +145,7 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
             null,
             false,
             []);
-        await ApplyPerformanceAsync(performance, CalculateXp(performance, 0d, false), 0d, cancellationToken);
+        return await ApplyPerformanceAsync(performance, CalculateXp(performance, 0d, false), 0d, cancellationToken);
     }
 
     public async Task EnsureDailyMissionsAsync(Guid profileId, DateOnly date, CancellationToken cancellationToken = default)
@@ -201,24 +211,26 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
         return level;
     }
 
-    private async Task<bool> ApplyPerformanceAsync(MotivationPerformance performance, int xp, double previousBestWpm, CancellationToken cancellationToken)
+    private async Task<MotivationOutcome> ApplyPerformanceAsync(MotivationPerformance performance, int xp, double previousBestWpm, CancellationToken cancellationToken)
     {
         var profile = await db.UserProfiles.SingleAsync(item => item.Id == performance.ProfileId, cancellationToken);
         var now = timeProvider.GetUtcNow();
         var today = DateOnly.FromDateTime(timeProvider.GetLocalNow().DateTime);
+        var levelBefore = CalculateLevel(profile.ExperiencePoints);
+        profile.Level = levelBefore;
 
         if (xp <= 0)
         {
             profile.Level = CalculateLevel(profile.ExperiencePoints);
             UpdateWeaknesses(performance, now);
-            return false;
+            return BuildOutcome(profile, levelBefore, 0, []);
         }
 
-        var booked = await AwardXpAsync(profile, performance.Source, performance.SourceId, xp, now, cancellationToken);
-        if (!booked)
+        var awardedXp = await AwardXpAsync(profile, performance.Source, performance.SourceId, xp, now, cancellationToken);
+        if (awardedXp <= 0)
         {
             profile.Level = CalculateLevel(profile.ExperiencePoints);
-            return false;
+            return BuildOutcome(profile, levelBefore, 0, []);
         }
 
         profile.CurrentStreakDays = CalculateStreak(profile.LastActivityDate, today, profile.CurrentStreakDays);
@@ -233,6 +245,7 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
         var missions = await db.Missions
             .Where(item => item.UserProfileId == profile.Id && activeMissionDates.Contains(item.MissionDate))
             .ToListAsync(cancellationToken);
+        var completedMissions = new List<(Mission Mission, int XpDelta)>();
         foreach (var mission in missions)
         {
             var delta = MissionProgressDelta(mission, performance);
@@ -246,14 +259,193 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
             mission.Completed = mission.CurrentValue >= mission.TargetValue;
             if (!wasCompleted && mission.Completed)
             {
-                await AwardXpAsync(profile, SourceMission, mission.Id.ToString("N"), mission.XpReward, now, cancellationToken);
+                var missionXp = await AwardXpAsync(profile, SourceMission, mission.Id.ToString("N"), mission.XpReward, now, cancellationToken);
+                if (missionXp > 0)
+                {
+                    completedMissions.Add((mission, missionXp));
+                }
             }
         }
 
         profile.Level = CalculateLevel(profile.ExperiencePoints);
-        await UnlockAchievementsAsync(profile, performance, previousBestWpm, now, cancellationToken);
+        var unlockedAchievements = await UnlockAchievementsAsync(profile, performance, previousBestWpm, now, cancellationToken);
         UpdateWeaknesses(performance, now);
-        return true;
+        var levelAfter = profile.Level;
+        var events = new List<GamificationEvent>();
+        await AddCreatedEventAsync(events, profile, GamificationEventType.XpAwarded, "xp-awarded",
+            $"+{awardedXp} XP",
+            "Gültige Runde abgeschlossen.",
+            awardedXp,
+            levelBefore,
+            levelAfter,
+            GamificationRarity.Common,
+            performance.Source,
+            performance.SourceId,
+            now,
+            cancellationToken);
+
+        if (performance.Source == SourceArena)
+        {
+            await AddCreatedEventAsync(events, profile, GamificationEventType.ArenaResult, "arena-result",
+                "Arena-Rennen gewertet",
+                $"{performance.Wpm:0.0} WPM bei {performance.Accuracy:0.0} % Genauigkeit.",
+                0,
+                levelBefore,
+                levelAfter,
+                performance.Accuracy >= 99.9 ? GamificationRarity.Rare : GamificationRarity.Common,
+                performance.Source,
+                performance.SourceId,
+                now,
+                cancellationToken);
+        }
+
+        if (previousBestWpm > 0 && performance.Wpm >= previousBestWpm + 2)
+        {
+            await AddCreatedEventAsync(events, profile, GamificationEventType.PersonalBest, "personal-best",
+                "Neue Bestleistung",
+                $"{performance.Wpm:0.0} WPM verbessern deine bisherige Marke von {previousBestWpm:0.0} WPM.",
+                0,
+                levelBefore,
+                levelAfter,
+                GamificationRarity.Rare,
+                performance.Source,
+                performance.SourceId,
+                now,
+                cancellationToken);
+        }
+
+        foreach (var (mission, missionXp) in completedMissions)
+        {
+            await AddCreatedEventAsync(events, profile, GamificationEventType.MissionCompleted, "mission-completed",
+                mission.Title,
+                mission.Description,
+                missionXp,
+                levelBefore,
+                levelAfter,
+                RarityForMission(mission),
+                SourceMission,
+                mission.Id.ToString("N"),
+                now,
+                cancellationToken);
+        }
+
+        foreach (var achievement in unlockedAchievements)
+        {
+            await AddCreatedEventAsync(events, profile, GamificationEventType.AchievementUnlocked, "achievement-unlocked",
+                achievement.Title,
+                achievement.Description,
+                0,
+                levelBefore,
+                levelAfter,
+                RarityForAchievement(achievement),
+                SourceAchievement,
+                achievement.Key,
+                now,
+                cancellationToken);
+        }
+
+        if (levelAfter > levelBefore)
+        {
+            await AddCreatedEventAsync(events, profile, GamificationEventType.LevelUp, $"level-up-{levelAfter}",
+                $"Level {levelAfter} erreicht",
+                $"Du bist von Level {levelBefore} auf Level {levelAfter} gestiegen.",
+                0,
+                levelBefore,
+                levelAfter,
+                RarityForLevel(levelAfter),
+                performance.Source,
+                performance.SourceId,
+                now,
+                cancellationToken);
+        }
+
+        return BuildOutcome(profile, levelBefore, awardedXp + completedMissions.Sum(item => item.XpDelta), events);
+    }
+
+    private async Task<MotivationOutcome> BuildCurrentOutcomeAsync(Guid profileId, CancellationToken cancellationToken)
+    {
+        var profile = await db.UserProfiles.SingleAsync(item => item.Id == profileId, cancellationToken);
+        return MotivationOutcome.Empty(profile);
+    }
+
+    private static MotivationOutcome BuildOutcome(UserProfile profile, int levelBefore, int xpDelta, IReadOnlyList<GamificationEvent> events)
+    {
+        var progress = GetLevelProgress(profile.ExperiencePoints);
+        return new MotivationOutcome(xpDelta, levelBefore, progress.Level, progress.ProgressPercent, events);
+    }
+
+    private async Task AddCreatedEventAsync(
+        ICollection<GamificationEvent> events,
+        UserProfile profile,
+        GamificationEventType type,
+        string eventKey,
+        string title,
+        string description,
+        int xpDelta,
+        int levelBefore,
+        int levelAfter,
+        GamificationRarity rarity,
+        string source,
+        string sourceId,
+        DateTimeOffset createdAt,
+        CancellationToken cancellationToken)
+    {
+        var normalizedSource = Truncate(source, 64);
+        var normalizedSourceId = Truncate(sourceId, 80);
+        var normalizedEventKey = Truncate(eventKey, 80);
+        var localExists = db.GamificationEvents.Local.Any(item =>
+            item.UserProfileId == profile.Id &&
+            item.Source == normalizedSource &&
+            item.SourceId == normalizedSourceId &&
+            item.EventKey == normalizedEventKey);
+        var exists = localExists || await db.GamificationEvents.AnyAsync(item =>
+            item.UserProfileId == profile.Id &&
+            item.Source == normalizedSource &&
+            item.SourceId == normalizedSourceId &&
+            item.EventKey == normalizedEventKey,
+            cancellationToken);
+        if (exists)
+        {
+            return;
+        }
+
+        var gamificationEvent = new GamificationEvent
+        {
+            UserProfileId = profile.Id,
+            Type = type,
+            EventKey = normalizedEventKey,
+            Title = Truncate(title, 160),
+            Description = Truncate(description, 360),
+            XpDelta = xpDelta,
+            LevelBefore = levelBefore,
+            LevelAfter = levelAfter,
+            Rarity = rarity,
+            Source = normalizedSource,
+            SourceId = normalizedSourceId,
+            CreatedAt = createdAt
+        };
+        db.GamificationEvents.Add(gamificationEvent);
+        events.Add(gamificationEvent);
+    }
+
+    private static GamificationRarity RarityForMission(Mission mission) =>
+        mission.Key.StartsWith("weekly-", StringComparison.Ordinal) ? GamificationRarity.Rare : GamificationRarity.Common;
+
+    private static GamificationRarity RarityForLevel(int level) =>
+        level % 10 == 0 ? GamificationRarity.Epic : GamificationRarity.Rare;
+
+    private static GamificationRarity RarityForAchievement(AchievementDefinition achievement) => achievement.Key switch
+    {
+        "speed-100" or "streak-30" or "training-100-attempts" => GamificationRarity.Epic,
+        "speed-80" or "streak-14" or "arena-10" or "precision-100" or "training-50-attempts" => GamificationRarity.Rare,
+        _ when achievement.Category is "Arena" or "Missionen" => GamificationRarity.Rare,
+        _ => GamificationRarity.Common
+    };
+
+    private static string Truncate(string value, int maxLength)
+    {
+        var normalized = string.IsNullOrWhiteSpace(value) ? "" : value.Trim();
+        return normalized.Length <= maxLength ? normalized : normalized[..maxLength];
     }
 
     private async Task EnsureMissionsAsync(Guid profileId, DateOnly periodStart, MissionCadence cadence, CancellationToken cancellationToken)
@@ -312,11 +504,11 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
         return (200 * completedLevels) + (25 * completedLevels * (completedLevels - 1));
     }
 
-    private async Task<bool> AwardXpAsync(UserProfile profile, string source, string sourceId, int xp, DateTimeOffset awardedAt, CancellationToken cancellationToken)
+    private async Task<int> AwardXpAsync(UserProfile profile, string source, string sourceId, int xp, DateTimeOffset awardedAt, CancellationToken cancellationToken)
     {
         if (xp <= 0)
         {
-            return false;
+            return 0;
         }
 
         var localExists = db.RewardLedgerEntries.Local.Any(item =>
@@ -329,7 +521,7 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
             item.SourceId == sourceId, cancellationToken);
         if (exists)
         {
-            return false;
+            return 0;
         }
 
         db.RewardLedgerEntries.Add(new RewardLedgerEntry
@@ -341,10 +533,10 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
             AwardedAt = awardedAt
         });
         profile.ExperiencePoints += xp;
-        return true;
+        return xp;
     }
 
-    private async Task UnlockAchievementsAsync(UserProfile profile, MotivationPerformance performance, double previousBestWpm, DateTimeOffset now, CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<AchievementDefinition>> UnlockAchievementsAsync(UserProfile profile, MotivationPerformance performance, double previousBestWpm, DateTimeOffset now, CancellationToken cancellationToken)
     {
         var completedAttemptsQuery = db.TypingAttempts.Where(item =>
             item.UserProfileId == profile.Id &&
@@ -524,13 +716,18 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
             unlock.Add("mission-weekly");
         }
 
-        var definitions = AchievementDefinitions.ToDictionary(item => item.Key, StringComparer.Ordinal);
         var existing = new HashSet<string>(
             await db.Achievements.Where(item => item.UserProfileId == profile.Id).Select(item => item.Key).ToListAsync(cancellationToken),
             StringComparer.Ordinal);
-        foreach (var key in unlock)
+        foreach (var local in db.Achievements.Local.Where(item => item.UserProfileId == profile.Id))
         {
-            if (!existing.Contains(key) && definitions.TryGetValue(key, out var definition))
+            existing.Add(local.Key);
+        }
+
+        var unlockedDefinitions = new List<AchievementDefinition>();
+        foreach (var definition in AchievementDefinitions.Where(item => unlock.Contains(item.Key)))
+        {
+            if (!existing.Contains(definition.Key))
             {
                 db.Achievements.Add(new Achievement
                 {
@@ -540,9 +737,12 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
                     Description = definition.Description,
                     UnlockedAt = now
                 });
-                existing.Add(key);
+                existing.Add(definition.Key);
+                unlockedDefinitions.Add(definition);
             }
         }
+
+        return unlockedDefinitions;
     }
 
     private void UpdateWeaknesses(MotivationPerformance performance, DateTimeOffset now)

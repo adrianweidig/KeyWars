@@ -14,6 +14,7 @@ export function attachTypingApps() {
     timerLabel.textContent = "Bereit";
     timer.append(timerValue, timerLabel);
     analysis.className = "typing-analysis";
+    result.classList.add("typing-result");
     target.insertAdjacentElement("afterend", timer);
 
     let session = null;
@@ -268,6 +269,46 @@ export function attachTypingApps() {
         ${finalRows ? `<ul>${finalRows}</ul>` : "<p>Keine verbleibenden Fehler im Zieltext.</p>"}`;
     };
 
+    const renderMotivation = (motivation) => {
+      if (!motivation) {
+        return "";
+      }
+
+      const events = Array.isArray(motivation.events) ? motivation.events : [];
+      if ((motivation.xpDelta || 0) <= 0 && events.length === 0 && motivation.levelAfter <= motivation.levelBefore) {
+        return "";
+      }
+
+      const levelUp = Number(motivation.levelAfter || 0) > Number(motivation.levelBefore || 0);
+      const eventRows = events.map((item) => {
+        const rarity = String(item.rarity || "Common").toLowerCase();
+        const xp = Number(item.xpDelta || 0) > 0 ? `<span class="xp-chip">+${numberFormat.format(item.xpDelta)} XP</span>` : "";
+        return `<div class="motivation-event rarity-${escapeHtml(rarity)}">
+          <strong>${escapeHtml(item.title || "Reward")}</strong>
+          <span>${escapeHtml(item.description || "")}</span>
+          ${xp}
+        </div>`;
+      }).join("");
+
+      const headline = levelUp
+        ? `Level ${escapeHtml(motivation.levelAfter)} erreicht`
+        : `${numberFormat.format(motivation.xpDelta || 0)} XP erhalten`;
+      const subline = levelUp
+        ? `Von Level ${escapeHtml(motivation.levelBefore)} auf Level ${escapeHtml(motivation.levelAfter)}.`
+        : "Fortschritt wurde gespeichert.";
+
+      return `<section class="motivation-panel ${levelUp ? "level-up" : ""}">
+        <div class="motivation-header">
+          <div>
+            <h3>${headline}</h3>
+            <p class="muted">${subline}</p>
+          </div>
+          ${motivation.xpDelta > 0 ? `<span class="xp-chip">+${numberFormat.format(motivation.xpDelta)} XP</span>` : ""}
+        </div>
+        ${eventRows ? `<div class="motivation-events">${eventRows}</div>` : ""}
+      </section>`;
+    };
+
     const finish = async () => {
       if (!session || finishing || finished) {
         return;
@@ -316,10 +357,9 @@ export function attachTypingApps() {
         <div class="metric"><span>Level</span><strong>${data.level}</strong></div>
         <div class="metric"><span>XP</span><strong>${data.experiencePoints}</strong></div>
       </div>
-      <div class="progress" aria-label="Fortschritt bis zum nächsten Level">
-        <span style="width:${progressPercent}%"></span>
-      </div>
+      <progress class="progress xp-progress" value="${progressPercent}" max="100" aria-label="Fortschritt bis zum nächsten Level">${progressPercent} %</progress>
       <p class="muted">Noch ${data.remainingXp} XP bis Level ${data.level + 1}.</p>
+      ${renderMotivation(data.motivation)}
       <p class="metric-note">WPM basiert auf korrekten Zeichen, Roh-WPM auf allen Eingaben. Konsistenz misst die Schwankung der abgeschlossenen Wortzeiten.</p>`;
       result.append(analysis);
       renderAnalysis(data);

@@ -1,7 +1,9 @@
 @page "/profil/erfolge"
+@using System.Globalization
 @model KeyWars.Pages.Profil.ErfolgeModel
 @{
     ViewData["Title"] = "Erfolge";
+    var culture = CultureInfo.GetCultureInfo("de-DE");
 }
 
 <section class="page-header">
@@ -11,13 +13,56 @@
     </div>
 </section>
 
-<section class="grid">
+<section class="achievement-shelf">
+@if (Model.Achievements.Count == 0)
+{
+    <div class="empty-state">
+        <h3>Noch keine Erfolge freigeschaltet</h3>
+        <p>Schließe eine gültige Runde ab, halte deine Genauigkeit hoch oder starte ein Arena-Rennen.</p>
+        <div class="card-actions">
+            <a class="button" asp-page="/Spielen/Index">Runde starten</a>
+            <a class="button secondary" asp-page="/Arena/Index">Arena öffnen</a>
+        </div>
+    </div>
+}
 @foreach (var achievement in Model.Achievements)
 {
-    <article class="card">
-        <h2>@achievement.Title</h2>
+    var rarity = RarityFor(achievement.Key);
+    <article class="card achievement-card rarity-@rarity">
+        <div class="achievement-medal">@MedalFor(achievement.Key)</div>
+        <div>
+            <span class="meta-badge">@RarityLabel(rarity)</span>
+            <h2>@achievement.Title</h2>
+        </div>
         <p>@achievement.Description</p>
-        <p class="muted">@achievement.UnlockedAt.LocalDateTime.ToString("g")</p>
+        <p class="muted">Freigeschaltet am @achievement.UnlockedAt.LocalDateTime.ToString("g", culture)</p>
     </article>
 }
 </section>
+
+@functions {
+    private static string RarityFor(string key) => key switch
+    {
+        "speed-100" or "streak-30" or "training-100-attempts" => "epic",
+        "speed-80" or "streak-14" or "arena-10" or "precision-100" or "training-50-attempts" => "rare",
+        _ when key.StartsWith("arena-", StringComparison.Ordinal) || key.StartsWith("mission-", StringComparison.Ordinal) => "rare",
+        _ => "common"
+    };
+
+    private static string RarityLabel(string rarity) => rarity switch
+    {
+        "epic" => "Episch",
+        "rare" => "Selten",
+        _ => "Standard"
+    };
+
+    private static string MedalFor(string key) => key switch
+    {
+        _ when key.StartsWith("speed-", StringComparison.Ordinal) => "WPM",
+        _ when key.StartsWith("precision-", StringComparison.Ordinal) || key == "praezise" => "ACC",
+        _ when key.StartsWith("arena-", StringComparison.Ordinal) => "ARE",
+        _ when key.StartsWith("mission-", StringComparison.Ordinal) => "Q",
+        _ when key.StartsWith("streak-", StringComparison.Ordinal) => "STK",
+        _ => "KW"
+    };
+}

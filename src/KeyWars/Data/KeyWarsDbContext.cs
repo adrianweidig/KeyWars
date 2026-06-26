@@ -21,6 +21,7 @@ public sealed class KeyWarsDbContext(DbContextOptions<KeyWarsDbContext> options)
     public DbSet<Mission> Missions => Set<Mission>();
     public DbSet<RewardLedgerEntry> RewardLedgerEntries => Set<RewardLedgerEntry>();
     public DbSet<Achievement> Achievements => Set<Achievement>();
+    public DbSet<GamificationEvent> GamificationEvents => Set<GamificationEvent>();
     public DbSet<WeaknessObservation> WeaknessObservations => Set<WeaknessObservation>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -232,6 +233,18 @@ public sealed class KeyWarsDbContext(DbContextOptions<KeyWarsDbContext> options)
             entity.HasOne<UserProfile>()
                 .WithMany()
                 .HasForeignKey(achievement => achievement.UserProfileId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<GamificationEvent>(entity =>
+        {
+            entity.HasIndex(item => new { item.UserProfileId, item.CreatedAt });
+            entity.HasIndex(item => new { item.UserProfileId, item.Source, item.SourceId, item.EventKey }).IsUnique();
+            entity.Property(item => item.Type).HasConversion<string>();
+            entity.Property(item => item.Rarity).HasConversion<string>();
+            entity.HasOne<UserProfile>()
+                .WithMany()
+                .HasForeignKey(item => item.UserProfileId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

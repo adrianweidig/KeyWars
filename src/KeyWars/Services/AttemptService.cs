@@ -16,6 +16,31 @@ public sealed record FinishAttemptRequest(Guid AttemptId, string Input, int Back
     public IReadOnlyList<int>? WordDurationsMilliseconds { get; init; } = [];
 }
 
+public sealed record AttemptCompletion(TypingAttempt Attempt, MotivationOutcome Motivation)
+{
+    public Guid Id => Attempt.Id;
+    public AttemptPhase Phase => Attempt.Phase;
+    public DateTimeOffset PreparedAt => Attempt.PreparedAt;
+    public DateTimeOffset StartedAt => Attempt.StartedAt;
+    public DateTimeOffset? FinishedAt => Attempt.FinishedAt;
+    public int DurationMilliseconds => Attempt.DurationMilliseconds;
+    public int ClientDurationMilliseconds => Attempt.ClientDurationMilliseconds;
+    public int CorrectCharacters => Attempt.CorrectCharacters;
+    public int IncorrectCharacters => Attempt.IncorrectCharacters;
+    public int TotalCharacters => Attempt.TotalCharacters;
+    public double Wpm => Attempt.Wpm;
+    public double RawWpm => Attempt.RawWpm;
+    public double Accuracy => Attempt.Accuracy;
+    public double Consistency => Attempt.Consistency;
+    public int ConsistencySampleCount => Attempt.ConsistencySampleCount;
+    public double WordTimingVariation => Attempt.WordTimingVariation;
+    public bool Completed => Attempt.Completed;
+    public bool ExperienceAwarded => Attempt.ExperienceAwarded;
+    public string TextHash => Attempt.TextHash;
+
+    public static implicit operator TypingAttempt(AttemptCompletion completion) => completion.Attempt;
+}
+
 public sealed record AttemptSession(
     Guid Id,
     Guid UserProfileId,
@@ -137,7 +162,7 @@ public sealed class AttemptService(
         }
     }
 
-    public async Task<TypingAttempt> FinishAsync(Guid profileId, FinishAttemptRequest request, CancellationToken cancellationToken = default)
+    public async Task<AttemptCompletion> FinishAsync(Guid profileId, FinishAttemptRequest request, CancellationToken cancellationToken = default)
     {
         var now = timeProvider.GetUtcNow();
         await ExpireSessionsAsync(now, cancellationToken);
@@ -148,7 +173,8 @@ public sealed class AttemptService(
         {
             if (attempt.FinishedAt is not null)
             {
-                return attempt;
+                var profile = await db.UserProfiles.SingleAsync(item => item.Id == profileId, cancellationToken);
+                return new AttemptCompletion(attempt, MotivationOutcome.Empty(profile));
             }
 
             throw new InvalidOperationException("Dieser Versuch ist nicht mehr aktiv.");
@@ -200,10 +226,10 @@ public sealed class AttemptService(
         attempt.Completed = metrics.Completed;
 
         PersistErrors(profileId, attempt.Id, metrics.Errors);
-        await motivationService.ApplyAttemptAsync(profileId, attempt, metrics.Errors, cancellationToken);
+        var motivation = await motivationService.ApplyAttemptAsync(profileId, attempt, metrics.Errors, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         sessionStore.TryRemove(request.AttemptId, out _);
-        return attempt;
+        return new AttemptCompletion(attempt, motivation);
     }
 
     private async Task<string> ResolveTextAsync(Guid profileId, StartAttemptRequest request, CancellationToken cancellationToken)

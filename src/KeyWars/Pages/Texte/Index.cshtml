@@ -9,14 +9,14 @@
         <h1>Texte</h1>
         <p class="lead">Eigene Texte bleiben privat oder werden organisationsweit für Training und Herausforderungen freigegeben.</p>
     </div>
-    <div class="action-row">
+    <div class="page-actions">
         <a class="button" asp-page="/Texte/Neu">Neuer Text</a>
         <a class="button secondary" asp-page="/Texte/Sammlungen/Neu">Sammlung anlegen</a>
     </div>
 </section>
 
-<section class="card">
-    <form method="get" class="form-grid-spaced">
+<section class="card filter-panel">
+    <form method="get" class="filter-form">
         <label>
             Suche
             <input asp-for="Suche" />
@@ -29,19 +29,26 @@
                 <option value="Organization">Organisationsweit</option>
             </select>
         </label>
-        <button type="submit">Filtern</button>
+        <div class="form-actions">
+            <button type="submit">Filtern</button>
+        </div>
     </form>
 </section>
 
-<section class="grid">
+<section class="grid text-library-grid">
     @foreach (var text in Model.Texts)
     {
-        <article class="card">
-            <h2>@text.Title</h2>
-            <p class="muted">@text.CharacterCount Zeichen · @(text.IsStandard ? "Standard" : DisplayNames.For(text.Visibility))</p>
-            <div class="action-row">
+        <article class="card text-card">
+            <div>
+                <h2>@text.Title</h2>
+                <div class="metadata-row">
+                    <span class="meta-badge">@text.CharacterCount Zeichen</span>
+                    <span class="meta-badge">@(text.IsStandard ? "Standard" : DisplayNames.For(text.Visibility))</span>
+                </div>
+            </div>
+            <div class="card-actions">
                 <a class="button secondary" asp-page="/Texte/Details" asp-route-id="@text.Id">Ansehen</a>
-                <a class="button secondary" asp-page="/Spielen/Text" asp-route-id="@text.Id">Trainieren</a>
+                <a class="button" asp-page="/Spielen/Text" asp-route-id="@text.Id">Trainieren</a>
             </div>
         </article>
     }

@@ -23,7 +23,7 @@
             <p class="muted">Beigetreten am @Model.Profile.CreatedAt.LocalDateTime.ToString("d", culture) · @Model.Insights.Division · @(Model.Profile.Motto ?? "Noch kein Motto")</p>
         </div>
     </div>
-    <div class="action-row">
+    <div class="page-actions">
         <a class="button secondary" asp-page="/Profil/Einstellungen">Einstellungen</a>
         <a class="button secondary" asp-page="/Profil/Ziele">Ziele</a>
         <a class="button secondary" asp-page="/Profil/Erfolge">Erfolge</a>
@@ -170,19 +170,26 @@
         {
             <p class="muted">Aktuelle Ziele und freigeschaltete Erfolge erscheinen hier nach den ersten Trainings.</p>
         }
+        <div class="quest-grid compact">
         @foreach (var mission in Model.Insights.CurrentGoals.Take(4))
         {
             var percent = mission.TargetValue <= 0 ? 0 : Math.Min(100, mission.CurrentValue * 100d / mission.TargetValue);
-            <div class="goal-row">
-                <strong>@mission.Title</strong>
-                <span>@mission.CurrentValue.ToString("N0", culture) / @mission.TargetValue.ToString("N0", culture) · @mission.XpReward.ToString("N0", culture) XP</span>
-                <progress class="progress" value="@percent.ToString("0.#", CultureInfo.InvariantCulture)" max="100" aria-label="Fortschritt für @mission.Title">@percent.ToString("0.#", culture) %</progress>
+            <div class="quest-card @(mission.Completed ? "completed" : "")">
+                <div class="quest-card-head">
+                    <strong>@mission.Title</strong>
+                    <span class="xp-chip">+@mission.XpReward.ToString("N0", culture) XP</span>
+                </div>
+                <progress class="progress xp-progress small" value="@percent.ToString("0.#", CultureInfo.InvariantCulture)" max="100" aria-label="Fortschritt für @mission.Title">@percent.ToString("0.#", culture) %</progress>
+                <span>@mission.CurrentValue.ToString("N0", culture) / @mission.TargetValue.ToString("N0", culture)</span>
             </div>
         }
+        </div>
+        <div class="badge-shelf compact">
         @foreach (var achievement in Model.Insights.FeaturedAchievements)
         {
-            <p class="pill">@achievement.Title</p>
+            <span class="achievement-chip">@achievement.Title</span>
         }
+        </div>
     </article>
 </section>
 

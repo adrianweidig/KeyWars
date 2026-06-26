@@ -41,5 +41,6 @@ public sealed class IndexModel(CurrentUser currentUser, ProfileInsightsService i
         0,
         1,
         [],
+        [],
         []);
 }

@@ -7,7 +7,7 @@
 <section class="card">
     <h1>@Model.Original.Title kopieren</h1>
     <p>Die Kopie wird privat in deiner Bibliothek gespeichert.</p>
-    <form method="post" class="action-row">
+    <form method="post" class="form-actions">
         <button type="submit">Kopie erstellen</button>
         <a class="button secondary" asp-page="/Texte/Details" asp-route-id="@Model.Original.Id">Abbrechen</a>
     </form>

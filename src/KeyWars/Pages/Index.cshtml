@@ -16,7 +16,7 @@
         <h1>Hallo, @Model.Profile.DisplayName</h1>
         <p class="lead">@Model.Recommendation.Text</p>
     </div>
-    <div class="action-row">
+    <div class="page-actions">
         <a class="button" asp-page="/Spielen/Index">Sofort tippen</a>
         <a class="button secondary" asp-page="/Arena/Neu">Live-Raum starten</a>
         <a class="button secondary" asp-page="/Herausforderungen/Neu">Gruppe herausfordern</a>
@@ -25,19 +25,27 @@
 </section>
 
 <section class="dashboard-grid">
-    <div class="card">
-        <h2>Tagesfokus</h2>
+    <div class="card level-cockpit">
+        <div class="level-cockpit-top">
+            <div>
+                <span class="eyebrow">Tagesfokus</span>
+                <h2>Level @Model.Profile.Level.ToString("N0", culture)</h2>
+            </div>
+            <span class="level-emblem">L@(Model.Profile.Level.ToString("N0", culture))</span>
+        </div>
         <div class="metric-row">
             <div class="metric"><span>Letzte WPM</span><strong>@Model.LastWpm</strong></div>
             <div class="metric"><span>Genauigkeit</span><strong>@Model.LastAccuracy %</strong></div>
             <div class="metric"><span>Serie</span><strong>@Model.Profile.CurrentStreakDays.ToString("N0", culture) Tage</strong></div>
             <div class="metric"><span>Arena</span><strong>@Model.Insights.Division · @Model.Profile.ArenaRating.ToString("N0", culture)</strong></div>
-            <div class="metric"><span>Level</span><strong>@Model.Profile.Level.ToString("N0", culture)</strong></div>
             <div class="metric"><span>XP</span><strong>@Model.Profile.ExperiencePoints.ToString("N0", culture)</strong></div>
+            <div class="metric"><span>Nächste Belohnung</span><strong>@Model.LevelProgress.RemainingXp.ToString("N0", culture) XP</strong></div>
         </div>
-        <progress class="progress" value="@Model.LevelProgress.ProgressPercent.ToString("0.#", CultureInfo.InvariantCulture)" max="100" aria-label="Fortschritt bis zum nächsten Level">@Model.LevelProgress.ProgressPercent.ToString("0.#", culture) %</progress>
-        <p class="muted">Noch @Model.LevelProgress.RemainingXp.ToString("N0", culture) XP bis Level @(Model.Profile.Level + 1).</p>
-        <a class="button secondary" asp-page="/Spielen/Index" asp-route-mode="@Model.Recommendation.Mode">Empfehlung starten</a>
+        <progress class="progress xp-progress" value="@Model.LevelProgress.ProgressPercent.ToString("0.#", CultureInfo.InvariantCulture)" max="100" aria-label="Fortschritt bis zum nächsten Level">@Model.LevelProgress.ProgressPercent.ToString("0.#", culture) %</progress>
+        <div class="section-title-row">
+            <p class="muted">@Model.LevelProgress.ProgressXp.ToString("N0", culture) / @((Model.LevelProgress.NextLevelXp - Model.LevelProgress.LevelStartXp).ToString("N0", culture)) XP in diesem Level</p>
+            <a class="button secondary" asp-page="/Spielen/Index" asp-route-mode="@Model.Recommendation.Mode">Empfehlung starten</a>
+        </div>
     </div>
 
     <aside class="card">
@@ -66,20 +74,55 @@
 </section>
 
 <section class="grid stack-spaced">
-    <article class="card">
-        <h2>Missionen</h2>
+    <article class="card quest-panel">
+        <div class="section-title-row">
+            <h2>Heute relevant</h2>
+            <a class="button secondary compact-button" asp-page="/Profil/Ziele">Alle Ziele</a>
+        </div>
+        <div class="quest-grid">
         @foreach (var mission in Model.Missions)
         {
             var percent = mission.TargetValue <= 0 ? 0 : Math.Min(100, mission.CurrentValue * 100d / mission.TargetValue);
-            <div class="goal-row">
-                <strong>@mission.Title</strong>
-                <span>@mission.CurrentValue.ToString("N0", culture) / @mission.TargetValue.ToString("N0", culture) · @mission.XpReward.ToString("N0", culture) XP</span>
-                <progress class="progress" value="@percent.ToString("0.#", CultureInfo.InvariantCulture)" max="100" aria-label="Fortschritt für @mission.Title">@percent.ToString("0.#", culture) %</progress>
+            <div class="quest-card @(mission.Completed ? "completed" : "")">
+                <div class="quest-card-head">
+                    <strong>@mission.Title</strong>
+                    <span class="xp-chip">+@mission.XpReward.ToString("N0", culture) XP</span>
+                </div>
+                <progress class="progress xp-progress small" value="@percent.ToString("0.#", CultureInfo.InvariantCulture)" max="100" aria-label="Fortschritt für @mission.Title">@percent.ToString("0.#", culture) %</progress>
+                <span>@mission.CurrentValue.ToString("N0", culture) / @mission.TargetValue.ToString("N0", culture)</span>
                 <p class="muted">@mission.Description</p>
             </div>
         }
+        </div>
     </article>
 
+    <aside class="card event-feed">
+        <h2>Letzte Rewards</h2>
+        @if (Model.Insights.RecentEvents.Count == 0)
+        {
+            <p class="muted">XP, Level-Ups und Badges erscheinen hier nach den ersten gültigen Runden.</p>
+        }
+        else
+        {
+            @foreach (var item in Model.Insights.RecentEvents.Take(6))
+            {
+                <div class="event-feed-row rarity-@item.Rarity.ToString().ToLowerInvariant()">
+                    <span class="event-glyph">@EventGlyph(item.Type)</span>
+                    <div>
+                        <strong>@item.Title</strong>
+                        <span>@item.Description</span>
+                    </div>
+                    @if (item.XpDelta > 0)
+                    {
+                        <span class="xp-chip">+@item.XpDelta.ToString("N0", culture) XP</span>
+                    }
+                </div>
+            }
+        }
+    </aside>
+</section>
+
+<section class="grid stack-spaced">
     <aside class="card">
         <h2>Offene Wettbewerbe</h2>
         @if (Model.Challenges.Count == 0)
@@ -102,6 +145,16 @@
 </section>
 
 @functions {
+    private static string EventGlyph(KeyWars.Domain.GamificationEventType type) => type switch
+    {
+        KeyWars.Domain.GamificationEventType.LevelUp => "LV",
+        KeyWars.Domain.GamificationEventType.MissionCompleted => "Q",
+        KeyWars.Domain.GamificationEventType.AchievementUnlocked => "B",
+        KeyWars.Domain.GamificationEventType.PersonalBest => "PB",
+        KeyWars.Domain.GamificationEventType.ArenaResult => "AR",
+        _ => "XP"
+    };
+
     private static string ActivityClass(int intensity) => intensity switch
     {
         >= 6 => "activity-cell-4",

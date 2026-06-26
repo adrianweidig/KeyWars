@@ -20,7 +20,8 @@ public sealed record ProfileInsights(
     int HistoryTotalItems,
     int HistoryTotalPages,
     IReadOnlyList<Achievement> FeaturedAchievements,
-    IReadOnlyList<Mission> CurrentGoals);
+    IReadOnlyList<Mission> CurrentGoals,
+    IReadOnlyList<GamificationEvent> RecentEvents);
 
 public sealed record ProfileTotals(
     int CompletedAttempts,
@@ -94,6 +95,17 @@ public sealed class ProfileInsightsService(KeyWarsDbContext db, TimeProvider tim
             .ThenBy(mission => mission.Title)
             .ToListAsync(cancellationToken);
         var achievements = await ReadFeaturedAchievementsAsync(profile.Id, cancellationToken);
+        var profileKey = FormatSqliteGuid(profile.Id);
+        var recentEvents = await db.GamificationEvents
+            .FromSqlInterpolated($"""
+                SELECT *
+                FROM GamificationEvents
+                WHERE UserProfileId = {profileKey}
+                ORDER BY substr(CreatedAt, 1, 19) DESC, Id DESC
+                LIMIT 8
+                """)
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
 
         return new ProfileInsights(
             BuildInitials(profile),
@@ -108,7 +120,8 @@ public sealed class ProfileInsightsService(KeyWarsDbContext db, TimeProvider tim
             totalItems,
             totalPages,
             achievements,
-            goals);
+            goals,
+            recentEvents);
     }
 
     private IQueryable<TypingAttempt> CompletedAttempts(Guid profileId) =>

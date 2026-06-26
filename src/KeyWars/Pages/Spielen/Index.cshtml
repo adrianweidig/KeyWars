@@ -9,7 +9,7 @@
         <h1>Spielen</h1>
         <p class="lead">Wähle einen Modus oder starte direkt. Die Auswertung kommt vom Server und wird lokal gespeichert.</p>
     </div>
-    <div class="action-row">
+    <div class="page-actions">
         <a class="button secondary" asp-page="/Spielen/Sprint">Sprint</a>
         <a class="button secondary" asp-page="/Spielen/Woerter">Wörter</a>
         <a class="button secondary" asp-page="/Spielen/Fehlerfokus">Fehlerfokus</a>
@@ -23,7 +23,7 @@
         Eingabe
         <textarea class="typing-input" data-input disabled autocapitalize="off" autocomplete="off" spellcheck="false"></textarea>
     </label>
-    <div class="action-row">
+    <div class="form-actions">
         <button type="button" data-start>Starten</button>
     </div>
     <div data-result></div>
@@ -32,10 +32,17 @@
 <section class="grid stack-spaced">
     @foreach (var text in Model.Texts)
     {
-        <article class="card">
-            <h3>@text.Title</h3>
-            <p class="muted">@text.CharacterCount Zeichen · @(text.IsStandard ? "Standardtext" : DisplayNames.For(text.Visibility))</p>
-            <a class="button secondary" asp-page="/Spielen/Text" asp-route-id="@text.Id">Text trainieren</a>
+        <article class="card text-card">
+            <div>
+                <h3>@text.Title</h3>
+                <div class="metadata-row">
+                    <span class="meta-badge">@text.CharacterCount Zeichen</span>
+                    <span class="meta-badge">@(text.IsStandard ? "Standardtext" : DisplayNames.For(text.Visibility))</span>
+                </div>
+            </div>
+            <div class="card-actions">
+                <a class="button" asp-page="/Spielen/Text" asp-route-id="@text.Id">Text trainieren</a>
+            </div>
         </article>
     }
 </section>

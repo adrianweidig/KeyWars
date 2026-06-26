@@ -9,7 +9,7 @@
         <h1>@Model.CurrentChallenge.Title</h1>
         <p class="lead">@Model.Text.Title · @DisplayNames.For(Model.CurrentChallenge.Mode) · Ablauf @Model.CurrentChallenge.ExpiresAt.LocalDateTime.ToString("g")</p>
     </div>
-    <div class="action-row">
+    <div class="page-actions">
         <form method="post" asp-page-handler="Join">
             <button type="submit" class="secondary">Annehmen</button>
         </form>

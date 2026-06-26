@@ -1,7 +1,9 @@
 @page "/profil/ziele"
+@using System.Globalization
 @model KeyWars.Pages.Profil.ZieleModel
 @{
     ViewData["Title"] = "Ziele";
+    var culture = CultureInfo.GetCultureInfo("de-DE");
 }
 
 <section class="page-header">
@@ -11,13 +13,18 @@
     </div>
 </section>
 
-<section class="grid">
+<section class="quest-grid">
 @foreach (var mission in Model.Missions)
 {
-    <article class="card">
-        <h2>@mission.Title</h2>
+    var percent = mission.TargetValue <= 0 ? 0 : Math.Min(100, mission.CurrentValue * 100d / mission.TargetValue);
+    <article class="card quest-card @(mission.Completed ? "completed" : "")">
+        <div class="quest-card-head">
+            <h2>@mission.Title</h2>
+            <span class="xp-chip">+@mission.XpReward.ToString("N0", culture) XP</span>
+        </div>
         <p>@mission.Description</p>
-        <p class="muted">@mission.CurrentValue / @mission.TargetValue · @mission.XpReward XP</p>
+        <progress class="progress xp-progress" value="@percent.ToString("0.#", CultureInfo.InvariantCulture)" max="100" aria-label="Fortschritt für @mission.Title">@percent.ToString("0.#", culture) %</progress>
+        <p class="muted">@mission.CurrentValue.ToString("N0", culture) / @mission.TargetValue.ToString("N0", culture) · @(mission.Completed ? "abgeschlossen" : "offen")</p>
     </article>
 }
 </section>

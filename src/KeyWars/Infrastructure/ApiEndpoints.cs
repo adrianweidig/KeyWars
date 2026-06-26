@@ -65,8 +65,8 @@ public static class ApiEndpoints
         api.MapPost("/spielen/abschliessen", async (FinishAttemptRequest request, CurrentUser currentUser, HttpContext httpContext, AttemptService attempts, CancellationToken cancellationToken) =>
         {
             var profile = await currentUser.RequireProfileAsync(httpContext.User, cancellationToken);
-            var attempt = await attempts.FinishAsync(profile.Id, request, cancellationToken);
-            return Results.Ok(BuildAttemptResult(attempt, profile));
+            var completion = await attempts.FinishAsync(profile.Id, request, cancellationToken);
+            return Results.Ok(BuildAttemptResult(completion.Attempt, profile, completion.Motivation));
         });
 
         api.MapPost("/herausforderungen/{id:guid}/start", async (Guid id, CurrentUser currentUser, HttpContext httpContext, AttemptService attempts, ChallengeService challenges, CancellationToken cancellationToken) =>
@@ -79,9 +79,26 @@ public static class ApiEndpoints
         api.MapPost("/herausforderungen/{id:guid}/abschliessen", async (Guid id, FinishAttemptRequest request, CurrentUser currentUser, HttpContext httpContext, AttemptService attempts, ChallengeService challenges, CancellationToken cancellationToken) =>
         {
             var profile = await currentUser.RequireProfileAsync(httpContext.User, cancellationToken);
-            var attempt = await attempts.FinishAsync(profile.Id, request, cancellationToken);
-            await challenges.FinishRoundAsync(id, profile.Id, attempt, cancellationToken);
-            return Results.Ok(BuildAttemptResult(attempt, profile));
+            var completion = await attempts.FinishAsync(profile.Id, request, cancellationToken);
+            await challenges.FinishRoundAsync(id, profile.Id, completion.Attempt, cancellationToken);
+            return Results.Ok(BuildAttemptResult(completion.Attempt, profile, completion.Motivation));
+        });
+
+        api.MapGet("/motivation/recent", async (int? take, CurrentUser currentUser, HttpContext httpContext, KeyWarsDbContext db, CancellationToken cancellationToken) =>
+        {
+            var profile = await currentUser.RequireProfileAsync(httpContext.User, cancellationToken);
+            var count = Math.Clamp(take.GetValueOrDefault(10), 1, 25);
+            var events = await db.GamificationEvents
+                .FromSqlInterpolated($"""
+                    SELECT *
+                    FROM GamificationEvents
+                    WHERE UserProfileId = {profile.Id.ToString().ToUpperInvariant()}
+                    ORDER BY substr(CreatedAt, 1, 19) DESC, Id DESC
+                    LIMIT {count}
+                    """)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+            return Results.Ok(events.Select(BuildMotivationEvent));
         });
 
         api.MapGet("/profil/kurz", async (CurrentUser currentUser, HttpContext httpContext, KeyWarsDbContext db, CancellationToken cancellationToken) =>
@@ -98,7 +115,7 @@ public static class ApiEndpoints
         });
     }
 
-    private static object BuildAttemptResult(TypingAttempt attempt, UserProfile profile)
+    private static object BuildAttemptResult(TypingAttempt attempt, UserProfile profile, MotivationOutcome motivation)
     {
         var progress = MotivationService.GetLevelProgress(profile.ExperiencePoints);
         return new
@@ -116,9 +133,30 @@ public static class ApiEndpoints
             profile.ExperiencePoints,
             progress.NextLevelXp,
             progress.RemainingXp,
-            progress.ProgressPercent
+            progress.ProgressPercent,
+            Motivation = new
+            {
+                motivation.XpDelta,
+                motivation.LevelBefore,
+                motivation.LevelAfter,
+                motivation.ProgressPercent,
+                Events = motivation.Events.Select(BuildMotivationEvent)
+            }
         };
     }
+
+    private static object BuildMotivationEvent(GamificationEvent item) => new
+    {
+        item.Id,
+        Type = item.Type.ToString(),
+        item.Title,
+        item.Description,
+        Rarity = item.Rarity.ToString(),
+        item.XpDelta,
+        item.LevelBefore,
+        item.LevelAfter,
+        item.CreatedAt
+    };
 
     private static bool IsJsonRequest(HttpRequest request)
     {

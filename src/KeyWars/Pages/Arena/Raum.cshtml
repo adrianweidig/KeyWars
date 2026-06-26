@@ -28,7 +28,7 @@
             <span class="copy-status" data-copy-status aria-live="polite"></span>
         </div>
     </div>
-    <div class="action-row">
+    <div class="page-actions">
         @if (inLobby)
         {
             <form method="post" asp-page-handler="Ready" data-arena-ready-form data-ready="@((currentParticipant?.Ready == true).ToString().ToLowerInvariant())">

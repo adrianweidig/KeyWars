@@ -292,6 +292,29 @@ public sealed class Achievement
     public DateTimeOffset UnlockedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
+public sealed class GamificationEvent
+{
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public Guid UserProfileId { get; set; }
+    public GamificationEventType Type { get; set; }
+    [MaxLength(80)]
+    public string EventKey { get; set; } = "";
+    [MaxLength(160)]
+    public string Title { get; set; } = "";
+    [MaxLength(360)]
+    public string Description { get; set; } = "";
+    public int XpDelta { get; set; }
+    public int LevelBefore { get; set; }
+    public int LevelAfter { get; set; }
+    public GamificationRarity Rarity { get; set; } = GamificationRarity.Common;
+    [MaxLength(64)]
+    public string Source { get; set; } = "";
+    [MaxLength(80)]
+    public string SourceId { get; set; } = "";
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? SeenAt { get; set; }
+}
+
 public sealed class WeaknessObservation
 {
     public Guid Id { get; set; } = Guid.CreateVersion7();

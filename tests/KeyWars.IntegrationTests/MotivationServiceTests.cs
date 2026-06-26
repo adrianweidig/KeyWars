@@ -39,6 +39,13 @@ public sealed class MotivationServiceTests
         Assert.Contains(ledger, item => item.Source == "attempt" && item.SourceId == attempt.Id.ToString("N") && item.Xp == 70);
         Assert.Contains(ledger, item => item.Source == "mission" && item.SourceId == accuracyMission.Id.ToString("N") && item.Xp == 35);
         Assert.Equal(2, ledger.Count);
+
+        var events = await context.Db.GamificationEvents.ToListAsync();
+        Assert.Contains(events, item => item.Type == GamificationEventType.XpAwarded && item.Source == "attempt" && item.SourceId == attempt.Id.ToString("N") && item.XpDelta == 70);
+        Assert.Contains(events, item => item.Type == GamificationEventType.MissionCompleted && item.Source == "mission" && item.SourceId == accuracyMission.Id.ToString("N") && item.XpDelta == 35);
+        Assert.Equal(
+            events.Count,
+            events.Select(item => (item.UserProfileId, item.Source, item.SourceId, item.EventKey)).Distinct().Count());
     }
 
     [Fact]
@@ -73,6 +80,7 @@ public sealed class MotivationServiceTests
         Assert.True(attempt.ExperienceAwarded);
         Assert.Empty(await context.Db.RewardLedgerEntries.ToListAsync());
         Assert.Empty(await context.Db.Missions.ToListAsync());
+        Assert.Empty(await context.Db.GamificationEvents.ToListAsync());
     }
 
     [Fact]
@@ -94,6 +102,36 @@ public sealed class MotivationServiceTests
         Assert.Single(ledger, item => item.Source == "arena" && item.SourceId == "arena-room-1:anna");
         Assert.True(arenaMission.Completed);
         Assert.Contains("arena-first", achievements);
+
+        var events = await context.Db.GamificationEvents.ToListAsync();
+        Assert.Single(events, item => item.Type == GamificationEventType.XpAwarded && item.Source == "arena" && item.SourceId == "arena-room-1:anna");
+        Assert.Single(events, item => item.Type == GamificationEventType.ArenaResult && item.Source == "arena" && item.SourceId == "arena-room-1:anna");
+        Assert.Equal(
+            events.Count,
+            events.Select(item => (item.UserProfileId, item.Source, item.SourceId, item.EventKey)).Distinct().Count());
+    }
+
+    [Fact]
+    public async Task LevelUpWritesBeforeAfterEventAndOutcome()
+    {
+        await using var context = await MotivationTestContext.CreateAsync();
+        context.Profile.ExperiencePoints = 190;
+        context.Profile.Level = 1;
+        await context.Db.SaveChangesAsync();
+        var attempt = context.CreateAttempt(accuracy: 98, wpm: 50, totalCharacters: 300);
+        context.Db.TypingAttempts.Add(attempt);
+        await context.Db.SaveChangesAsync();
+
+        var outcome = await context.Service.ApplyAttemptAsync(context.Profile.Id, attempt, "Sicher tippen", CancellationToken.None);
+        await context.Db.SaveChangesAsync();
+
+        var levelEvent = await context.Db.GamificationEvents.SingleAsync(item => item.Type == GamificationEventType.LevelUp);
+        Assert.Equal(1, levelEvent.LevelBefore);
+        Assert.Equal(2, levelEvent.LevelAfter);
+        Assert.Equal(GamificationRarity.Rare, levelEvent.Rarity);
+        Assert.Equal(1, outcome.LevelBefore);
+        Assert.Equal(2, outcome.LevelAfter);
+        Assert.True(outcome.XpDelta > 0);
     }
 
     [Fact]

@@ -50,6 +50,7 @@ public sealed class LiveRoomCompletionQueueTests
         Assert.Equal(secondProfile.ArenaRating, secondSummary.RatingAfter);
         Assert.Equal(secondProfile.ArenaRating - secondSummary.RatingBefore, secondSummary.RatingDelta);
         Assert.Equal(2, await db.RewardLedgerEntries.CountAsync(item => item.Source == "arena"));
+        Assert.Equal(2, await db.GamificationEvents.CountAsync(item => item.Type == GamificationEventType.ArenaResult));
         Assert.Contains(await db.Missions.ToListAsync(), item => item.UserProfileId == first && item.Key == "daily-arena-or-team" && item.Completed);
     }
 
@@ -89,6 +90,7 @@ public sealed class LiveRoomCompletionQueueTests
         Assert.All(participants, participant => Assert.Equal(participant.RatingBefore, participant.RatingAfter));
         Assert.All(profiles, profile => Assert.Equal(1000, profile.ArenaRating));
         Assert.All(profiles, profile => Assert.Equal(0, profile.RatedMatchCount));
+        Assert.Empty(await db.GamificationEvents.ToListAsync());
     }
 
     [Fact]

@@ -100,3 +100,20 @@ public enum LiveRoomMode
     Precision,
     BestOf
 }
+
+public enum GamificationEventType
+{
+    XpAwarded,
+    LevelUp,
+    MissionCompleted,
+    AchievementUnlocked,
+    PersonalBest,
+    ArenaResult
+}
+
+public enum GamificationRarity
+{
+    Common,
+    Rare,
+    Epic
+}

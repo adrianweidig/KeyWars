@@ -397,6 +397,18 @@ export function attachArenaPages() {
       });
     };
 
+    const triggerRankBoost = () => {
+      const lane = track?.querySelector(`[data-track-participant-id="${currentProfileId}"]`);
+      if (!lane) {
+        return;
+      }
+
+      lane.classList.remove("rank-boost");
+      void lane.offsetWidth;
+      lane.classList.add("rank-boost");
+      window.setTimeout(() => lane.classList.remove("rank-boost"), 450);
+    };
+
     const announceRankChange = (rank) => {
       if (!showLiveRankChanges || !liveRegion || rank === "-" || rank === previousCurrentRank) {
         previousCurrentRank = rank;
@@ -413,6 +425,7 @@ export function attachArenaPages() {
           : `Rang jetzt ${rank}.`;
         if (improved) {
           playFeedbackTone("rank");
+          triggerRankBoost();
         }
 
         lastRankAnnouncementAt = now;

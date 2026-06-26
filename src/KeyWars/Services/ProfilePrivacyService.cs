@@ -13,6 +13,7 @@ public sealed record ProfileExportPayload(
     IReadOnlyList<RewardLedgerEntry> RewardLedger,
     IReadOnlyList<Mission> Missions,
     IReadOnlyList<Achievement> Achievements,
+    IReadOnlyList<GamificationEvent> GamificationEvents,
     IReadOnlyList<WeaknessObservation> WeaknessObservations,
     IReadOnlyList<TrainingText> OwnedTexts,
     IReadOnlyList<TextCollection> OwnedCollections,
@@ -34,6 +35,7 @@ public sealed class ProfilePrivacyService(KeyWarsDbContext db, LiveRoomManager l
             await db.RewardLedgerEntries.Where(item => item.UserProfileId == profileId).ToListAsync(cancellationToken),
             await db.Missions.Where(item => item.UserProfileId == profileId).ToListAsync(cancellationToken),
             await db.Achievements.Where(item => item.UserProfileId == profileId).ToListAsync(cancellationToken),
+            await db.GamificationEvents.Where(item => item.UserProfileId == profileId).ToListAsync(cancellationToken),
             await db.WeaknessObservations.Where(item => item.UserProfileId == profileId).ToListAsync(cancellationToken),
             await db.TrainingTexts.Where(item => item.OwnerProfileId == profileId).ToListAsync(cancellationToken),
             await db.TextCollections.Where(item => item.OwnerProfileId == profileId).ToListAsync(cancellationToken),
@@ -107,6 +109,7 @@ public sealed class ProfilePrivacyService(KeyWarsDbContext db, LiveRoomManager l
         await db.RewardLedgerEntries.Where(item => item.UserProfileId == profileId).ExecuteDeleteAsync(cancellationToken);
         await db.Missions.Where(item => item.UserProfileId == profileId).ExecuteDeleteAsync(cancellationToken);
         await db.Achievements.Where(item => item.UserProfileId == profileId).ExecuteDeleteAsync(cancellationToken);
+        await db.GamificationEvents.Where(item => item.UserProfileId == profileId).ExecuteDeleteAsync(cancellationToken);
         await db.WeaknessObservations.Where(item => item.UserProfileId == profileId).ExecuteDeleteAsync(cancellationToken);
     }
 

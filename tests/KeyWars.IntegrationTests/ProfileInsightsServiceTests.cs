@@ -92,6 +92,20 @@ public sealed class ProfileInsightsServiceTests
             Description = "Erster schneller Versuch.",
             UnlockedAt = now.AddHours(-1)
         });
+        db.GamificationEvents.Add(new GamificationEvent
+        {
+            UserProfileId = profile.Id,
+            Type = GamificationEventType.AchievementUnlocked,
+            EventKey = "achievement-unlocked",
+            Title = "Tempo gefunden",
+            Description = "Erster schneller Versuch.",
+            LevelBefore = 1,
+            LevelAfter = 1,
+            Rarity = GamificationRarity.Common,
+            Source = "achievement",
+            SourceId = "first-pace",
+            CreatedAt = now.AddHours(-1)
+        });
         await db.SaveChangesAsync();
         var service = new ProfileInsightsService(db, new ManualTimeProvider(now));
 
@@ -115,6 +129,7 @@ public sealed class ProfileInsightsServiceTests
         Assert.Equal(13, insights.HistoryTotalPages);
         Assert.Single(insights.FeaturedAchievements);
         Assert.Single(insights.CurrentGoals);
+        Assert.Single(insights.RecentEvents);
     }
 
     [Fact]
@@ -147,6 +162,7 @@ public sealed class ProfileInsightsServiceTests
         Assert.Empty(insights.History);
         Assert.Equal(1, insights.HistoryPage);
         Assert.Equal(1, insights.HistoryTotalPages);
+        Assert.Empty(insights.RecentEvents);
     }
 
     private sealed class ManualTimeProvider(DateTimeOffset utcNow) : TimeProvider
