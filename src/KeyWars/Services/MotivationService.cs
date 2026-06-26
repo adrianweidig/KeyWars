@@ -28,67 +28,22 @@ public sealed record MotivationOutcome(
     }
 }
 
-public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProvider)
+public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProvider, GamificationEventWriter gamificationEvents)
 {
     private const string SourceAttempt = "attempt";
     private const string SourceArena = "arena";
     private const string SourceMission = "mission";
     private const string SourceAchievement = "achievement";
 
-    private const string MissionThreeRounds = "daily-three-rounds";
-    private const string MissionAccuracy = "daily-accuracy";
-    private const string MissionTempo = "daily-tempo";
-    private const string MissionArenaOrTeam = "daily-arena-or-team";
-    private const string MissionWeeklyRounds = "weekly-ten-rounds";
-    private const string MissionWeeklyPrecision = "weekly-three-precise";
-    private const string MissionWeeklyArena = "weekly-two-arena";
-    private const string MissionWeeklyTexts = "weekly-text-training";
-
     private const int MinimumXpCharacters = 20;
     private const int MinimumXpDurationMilliseconds = 5_000;
 
-    public static IReadOnlyList<AchievementDefinition> AchievementDefinitions { get; } =
-    [
-        new("erster-versuch", "Training", "Erster gültiger Versuch", "Du hast deinen ersten gültigen KeyWars-Versuch abgeschlossen."),
-        new("training-5-attempts", "Training", "Fünf Runden", "Du hast fünf gültige Trainingsrunden abgeschlossen."),
-        new("training-10-attempts", "Training", "Zehn Runden", "Du hast zehn gültige Trainingsrunden abgeschlossen."),
-        new("training-25-attempts", "Training", "Trainingsroutine", "Du hast 25 gültige Trainingsrunden abgeschlossen."),
-        new("training-50-attempts", "Training", "Feste Gewohnheit", "Du hast 50 gültige Trainingsrunden abgeschlossen."),
-        new("training-100-attempts", "Training", "Hundert Runden", "Du hast 100 gültige Trainingsrunden abgeschlossen."),
-        new("training-text-round", "Training", "Text gemeistert", "Du hast eine Textrunde abgeschlossen."),
-        new("training-words-round", "Training", "Worttest erledigt", "Du hast einen Worttest abgeschlossen."),
-        new("training-sprint-round", "Training", "Sprint abgeschlossen", "Du hast einen Zeitsprint abgeschlossen."),
-        new("training-weakness-focus", "Training", "Fehlerfokus genutzt", "Du hast eine Fehlerfokus-Runde abgeschlossen."),
-        new("precision-95", "Präzision", "Saubere Runde", "Du hast eine Runde mit mindestens 95 % Genauigkeit abgeschlossen."),
-        new("praezise", "Präzision", "Präzise Hände", "Ein gültiger Versuch mit mindestens 98 % Genauigkeit."),
-        new("precision-100", "Präzision", "Fehlerfrei", "Du hast eine Runde ohne verbleibende Fehler abgeschlossen."),
-        new("precision-3x-98", "Präzision", "Dreimal sehr präzise", "Du hast drei Runden mit mindestens 98 % Genauigkeit abgeschlossen."),
-        new("precision-10x-95", "Präzision", "Verlässliche Genauigkeit", "Du hast zehn Runden mit mindestens 95 % Genauigkeit abgeschlossen."),
-        new("speed-40", "Tempo", "40 WPM", "Du hast 40 WPM erreicht."),
-        new("speed-60", "Tempo", "60 WPM", "Du hast 60 WPM erreicht."),
-        new("speed-80", "Tempo", "80 WPM", "Du hast 80 WPM erreicht."),
-        new("speed-100", "Tempo", "100 WPM", "Du hast 100 WPM erreicht."),
-        new("speed-personal-best", "Tempo", "Neue Bestleistung", "Du hast deine bisherige WPM-Bestleistung verbessert."),
-        new("streak-3", "Serie", "Drei Tage aktiv", "Du hast an drei Trainingstagen in Folge geübt."),
-        new("streak-7", "Serie", "Sieben Tage aktiv", "Du hast an sieben Trainingstagen in Folge geübt."),
-        new("streak-14", "Serie", "Zwei Wochen aktiv", "Du hast an vierzehn Trainingstagen in Folge geübt."),
-        new("streak-30", "Serie", "Monatsserie", "Du hast an dreißig Trainingstagen in Folge geübt."),
-        new("arena-first", "Arena", "Erstes Rennen", "Du hast deine erste Arena-Runde abgeschlossen."),
-        new("arena-5", "Arena", "Fünf Rennen", "Du hast fünf Arena-Runden abgeschlossen."),
-        new("arena-10", "Arena", "Zehn Rennen", "Du hast zehn Arena-Runden abgeschlossen."),
-        new("arena-rating-1050", "Arena", "Rating 1050", "Du hast ein Arena-Rating von 1050 erreicht."),
-        new("arena-rating-1100", "Arena", "Rating 1100", "Du hast ein Arena-Rating von 1100 erreicht."),
-        new("arena-perfect-accuracy", "Arena", "Arena ohne Fehler", "Du hast eine Arena-Runde mit 100 % Genauigkeit abgeschlossen."),
-        new("text-author-first", "Texte", "Erster eigener Text", "Du hast einen eigenen Trainingstext angelegt."),
-        new("text-author-3", "Texte", "Textsammlung wächst", "Du hast drei eigene Trainingstexte angelegt."),
-        new("text-collection-first", "Texte", "Eigene Sammlung", "Du hast eine eigene Textsammlung angelegt."),
-        new("team-first-challenge", "Team", "Erste Herausforderung", "Du hast deine erste Gruppenherausforderung abgeschlossen."),
-        new("team-3-challenges", "Team", "Drei Herausforderungen", "Du hast drei Gruppenherausforderungen abgeschlossen."),
-        new("team-precise", "Team", "Teampräzision", "Du hast eine Teamrunde mit mindestens 98 % Genauigkeit abgeschlossen."),
-        new("mission-first", "Missionen", "Erste Mission", "Du hast deine erste Mission abgeschlossen."),
-        new("mission-5", "Missionen", "Fünf Missionen", "Du hast fünf Missionen abgeschlossen."),
-        new("mission-weekly", "Missionen", "Wochenziel erreicht", "Du hast eine Wochenmission abgeschlossen.")
-    ];
+    public MotivationService(KeyWarsDbContext db, TimeProvider timeProvider)
+        : this(db, timeProvider, new GamificationEventWriter(db))
+    {
+    }
+
+    public static IReadOnlyList<AchievementDefinition> AchievementDefinitions => MotivationCatalog.AchievementDefinitions;
 
     public async Task<MotivationOutcome> ApplyAttemptAsync(Guid profileId, TypingAttempt attempt, string targetText, CancellationToken cancellationToken = default)
     {
@@ -272,7 +227,9 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
         UpdateWeaknesses(performance, now);
         var levelAfter = profile.Level;
         var events = new List<GamificationEvent>();
-        await AddCreatedEventAsync(events, profile, GamificationEventType.XpAwarded, "xp-awarded",
+        await gamificationEvents.AddAsync(events, profile, new GamificationEventDraft(
+            GamificationEventType.XpAwarded,
+            "xp-awarded",
             $"+{awardedXp} XP",
             "Gültige Runde abgeschlossen.",
             awardedXp,
@@ -280,13 +237,13 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
             levelAfter,
             GamificationRarity.Common,
             performance.Source,
-            performance.SourceId,
-            now,
-            cancellationToken);
+            performance.SourceId), now, cancellationToken);
 
         if (performance.Source == SourceArena)
         {
-            await AddCreatedEventAsync(events, profile, GamificationEventType.ArenaResult, "arena-result",
+            await gamificationEvents.AddAsync(events, profile, new GamificationEventDraft(
+                GamificationEventType.ArenaResult,
+                "arena-result",
                 "Arena-Rennen gewertet",
                 $"{performance.Wpm:0.0} WPM bei {performance.Accuracy:0.0} % Genauigkeit.",
                 0,
@@ -294,14 +251,14 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
                 levelAfter,
                 performance.Accuracy >= 99.9 ? GamificationRarity.Rare : GamificationRarity.Common,
                 performance.Source,
-                performance.SourceId,
-                now,
-                cancellationToken);
+                performance.SourceId), now, cancellationToken);
         }
 
         if (previousBestWpm > 0 && performance.Wpm >= previousBestWpm + 2)
         {
-            await AddCreatedEventAsync(events, profile, GamificationEventType.PersonalBest, "personal-best",
+            await gamificationEvents.AddAsync(events, profile, new GamificationEventDraft(
+                GamificationEventType.PersonalBest,
+                "personal-best",
                 "Neue Bestleistung",
                 $"{performance.Wpm:0.0} WPM verbessern deine bisherige Marke von {previousBestWpm:0.0} WPM.",
                 0,
@@ -309,14 +266,14 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
                 levelAfter,
                 GamificationRarity.Rare,
                 performance.Source,
-                performance.SourceId,
-                now,
-                cancellationToken);
+                performance.SourceId), now, cancellationToken);
         }
 
         foreach (var (mission, missionXp) in completedMissions)
         {
-            await AddCreatedEventAsync(events, profile, GamificationEventType.MissionCompleted, "mission-completed",
+            await gamificationEvents.AddAsync(events, profile, new GamificationEventDraft(
+                GamificationEventType.MissionCompleted,
+                "mission-completed",
                 mission.Title,
                 mission.Description,
                 missionXp,
@@ -324,14 +281,14 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
                 levelAfter,
                 RarityForMission(mission),
                 SourceMission,
-                mission.Id.ToString("N"),
-                now,
-                cancellationToken);
+                mission.Id.ToString("N")), now, cancellationToken);
         }
 
         foreach (var achievement in unlockedAchievements)
         {
-            await AddCreatedEventAsync(events, profile, GamificationEventType.AchievementUnlocked, "achievement-unlocked",
+            await gamificationEvents.AddAsync(events, profile, new GamificationEventDraft(
+                GamificationEventType.AchievementUnlocked,
+                "achievement-unlocked",
                 achievement.Title,
                 achievement.Description,
                 0,
@@ -339,14 +296,14 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
                 levelAfter,
                 RarityForAchievement(achievement),
                 SourceAchievement,
-                achievement.Key,
-                now,
-                cancellationToken);
+                achievement.Key), now, cancellationToken);
         }
 
         if (levelAfter > levelBefore)
         {
-            await AddCreatedEventAsync(events, profile, GamificationEventType.LevelUp, $"level-up-{levelAfter}",
+            await gamificationEvents.AddAsync(events, profile, new GamificationEventDraft(
+                GamificationEventType.LevelUp,
+                $"level-up-{levelAfter}",
                 $"Level {levelAfter} erreicht",
                 $"Du bist von Level {levelBefore} auf Level {levelAfter} gestiegen.",
                 0,
@@ -354,9 +311,7 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
                 levelAfter,
                 RarityForLevel(levelAfter),
                 performance.Source,
-                performance.SourceId,
-                now,
-                cancellationToken);
+                performance.SourceId), now, cancellationToken);
         }
 
         return BuildOutcome(profile, levelBefore, awardedXp + completedMissions.Sum(item => item.XpDelta), events);
@@ -374,60 +329,6 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
         return new MotivationOutcome(xpDelta, levelBefore, progress.Level, progress.ProgressPercent, events);
     }
 
-    private async Task AddCreatedEventAsync(
-        ICollection<GamificationEvent> events,
-        UserProfile profile,
-        GamificationEventType type,
-        string eventKey,
-        string title,
-        string description,
-        int xpDelta,
-        int levelBefore,
-        int levelAfter,
-        GamificationRarity rarity,
-        string source,
-        string sourceId,
-        DateTimeOffset createdAt,
-        CancellationToken cancellationToken)
-    {
-        var normalizedSource = Truncate(source, 64);
-        var normalizedSourceId = Truncate(sourceId, 80);
-        var normalizedEventKey = Truncate(eventKey, 80);
-        var localExists = db.GamificationEvents.Local.Any(item =>
-            item.UserProfileId == profile.Id &&
-            item.Source == normalizedSource &&
-            item.SourceId == normalizedSourceId &&
-            item.EventKey == normalizedEventKey);
-        var exists = localExists || await db.GamificationEvents.AnyAsync(item =>
-            item.UserProfileId == profile.Id &&
-            item.Source == normalizedSource &&
-            item.SourceId == normalizedSourceId &&
-            item.EventKey == normalizedEventKey,
-            cancellationToken);
-        if (exists)
-        {
-            return;
-        }
-
-        var gamificationEvent = new GamificationEvent
-        {
-            UserProfileId = profile.Id,
-            Type = type,
-            EventKey = normalizedEventKey,
-            Title = Truncate(title, 160),
-            Description = Truncate(description, 360),
-            XpDelta = xpDelta,
-            LevelBefore = levelBefore,
-            LevelAfter = levelAfter,
-            Rarity = rarity,
-            Source = normalizedSource,
-            SourceId = normalizedSourceId,
-            CreatedAt = createdAt
-        };
-        db.GamificationEvents.Add(gamificationEvent);
-        events.Add(gamificationEvent);
-    }
-
     private static GamificationRarity RarityForMission(Mission mission) =>
         mission.Key.StartsWith("weekly-", StringComparison.Ordinal) ? GamificationRarity.Rare : GamificationRarity.Common;
 
@@ -442,15 +343,9 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
         _ => GamificationRarity.Common
     };
 
-    private static string Truncate(string value, int maxLength)
-    {
-        var normalized = string.IsNullOrWhiteSpace(value) ? "" : value.Trim();
-        return normalized.Length <= maxLength ? normalized : normalized[..maxLength];
-    }
-
     private async Task EnsureMissionsAsync(Guid profileId, DateOnly periodStart, MissionCadence cadence, CancellationToken cancellationToken)
     {
-        var definitions = MissionDefinitions.Where(definition => definition.Cadence == cadence).ToArray();
+        var definitions = MotivationCatalog.MissionDefinitions.Where(definition => definition.Cadence == cadence).ToArray();
         var existingKeys = await db.Missions
             .Where(item => item.UserProfileId == profileId && item.MissionDate == periodStart)
             .Select(item => item.Key)
@@ -775,28 +670,16 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
 
     private static int MissionProgressDelta(Mission mission, MotivationPerformance performance) => mission.Key switch
     {
-        MissionThreeRounds => 1,
-        MissionAccuracy => performance.Accuracy >= 95 ? 1 : 0,
-        MissionTempo => IsTempoMode(performance.Mode) ? 1 : 0,
-        MissionArenaOrTeam => performance.Source == SourceArena ? 1 : 0,
-        MissionWeeklyRounds => 1,
-        MissionWeeklyPrecision => performance.Accuracy >= 98 ? 1 : 0,
-        MissionWeeklyArena => performance.Source == SourceArena ? 1 : 0,
-        MissionWeeklyTexts => performance.TrainingTextId is not null ? 1 : 0,
+        MissionKeys.DailyThreeRounds => 1,
+        MissionKeys.DailyAccuracy => performance.Accuracy >= 95 ? 1 : 0,
+        MissionKeys.DailyTempo => IsTempoMode(performance.Mode) ? 1 : 0,
+        MissionKeys.DailyArenaOrTeam => performance.Source == SourceArena ? 1 : 0,
+        MissionKeys.WeeklyRounds => 1,
+        MissionKeys.WeeklyPrecision => performance.Accuracy >= 98 ? 1 : 0,
+        MissionKeys.WeeklyArena => performance.Source == SourceArena ? 1 : 0,
+        MissionKeys.WeeklyTexts => performance.TrainingTextId is not null ? 1 : 0,
         _ => 0
     };
-
-    private static IReadOnlyList<MissionDefinition> MissionDefinitions =>
-    [
-        new(MissionThreeRounds, MissionCadence.Daily, "Drei kurze Runden", "Schließe heute drei gültige Versuche ab.", 3, 30),
-        new(MissionAccuracy, MissionCadence.Daily, "Genauigkeit halten", "Erreiche einmal mindestens 95 % Genauigkeit.", 1, 35),
-        new(MissionTempo, MissionCadence.Daily, "Tempo festigen", "Beende zwei Sprint- oder Textrunden.", 2, 25),
-        new(MissionArenaOrTeam, MissionCadence.Daily, "Gemeinsam antreten", "Schließe heute eine Arena-Runde ab.", 1, 25),
-        new(MissionWeeklyRounds, MissionCadence.Weekly, "Zehn Runden in der Woche", "Schließe in dieser Woche zehn gültige Runden ab.", 10, 80),
-        new(MissionWeeklyPrecision, MissionCadence.Weekly, "Drei Präzisionsrunden", "Erreiche in dieser Woche dreimal mindestens 98 % Genauigkeit.", 3, 90),
-        new(MissionWeeklyArena, MissionCadence.Weekly, "Zwei Arena-Runden", "Schließe in dieser Woche zwei Arena-Runden ab.", 2, 70),
-        new(MissionWeeklyTexts, MissionCadence.Weekly, "Texte trainieren", "Schließe in dieser Woche drei Runden mit gespeicherten Texten ab.", 3, 60)
-    ];
 
     private static bool IsTempoMode(TrainingMode mode) =>
         mode is TrainingMode.Sprint15 or TrainingMode.Sprint30 or TrainingMode.Sprint60 or TrainingMode.Sprint120 or TrainingMode.Text;

@@ -66,6 +66,26 @@ public sealed class MotivationServiceTests
     }
 
     [Fact]
+    public void MotivationCatalogDefinesUniqueMissionContracts()
+    {
+        var definitions = MotivationCatalog.MissionDefinitions;
+
+        Assert.Equal(8, definitions.Count);
+        Assert.Equal(definitions.Count, definitions.Select(item => item.Key).Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(4, definitions.Count(item => item.Cadence == MissionCadence.Daily));
+        Assert.Equal(4, definitions.Count(item => item.Cadence == MissionCadence.Weekly));
+        Assert.Contains(definitions, item => item.Key == MissionKeys.DailyThreeRounds);
+        Assert.Contains(definitions, item => item.Key == MissionKeys.WeeklyTexts);
+        Assert.All(definitions, definition =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(definition.Title));
+            Assert.False(string.IsNullOrWhiteSpace(definition.Description));
+            Assert.True(definition.TargetValue > 0);
+            Assert.True(definition.XpReward > 0);
+        });
+    }
+
+    [Fact]
     public async Task UltraShortAttemptsDoNotAwardXpOrProgressMissions()
     {
         await using var context = await MotivationTestContext.CreateAsync();
@@ -132,6 +152,39 @@ public sealed class MotivationServiceTests
         Assert.Equal(1, outcome.LevelBefore);
         Assert.Equal(2, outcome.LevelAfter);
         Assert.True(outcome.XpDelta > 0);
+    }
+
+    [Fact]
+    public async Task GamificationEventWriterNormalizesFieldsAndDeduplicatesBeforeSave()
+    {
+        await using var context = await MotivationTestContext.CreateAsync();
+        var writer = new GamificationEventWriter(context.Db);
+        var createdEvents = new List<GamificationEvent>();
+        var draft = new GamificationEventDraft(
+            GamificationEventType.PersonalBest,
+            $"  {new string('k', 120)}  ",
+            $"  {new string('t', 200)}  ",
+            $"  {new string('d', 400)}  ",
+            0,
+            2,
+            3,
+            GamificationRarity.Rare,
+            $"  {new string('s', 100)}  ",
+            $"  {new string('i', 120)}  ");
+
+        await writer.AddAsync(createdEvents, context.Profile, draft, context.Time.GetUtcNow(), CancellationToken.None);
+        await writer.AddAsync(createdEvents, context.Profile, draft, context.Time.GetUtcNow(), CancellationToken.None);
+        await context.Db.SaveChangesAsync();
+
+        var stored = await context.Db.GamificationEvents.SingleAsync();
+        Assert.Single(createdEvents);
+        Assert.Equal(new string('s', 64), stored.Source);
+        Assert.Equal(new string('i', 80), stored.SourceId);
+        Assert.Equal(new string('k', 80), stored.EventKey);
+        Assert.Equal(new string('t', 160), stored.Title);
+        Assert.Equal(new string('d', 360), stored.Description);
+        Assert.Equal(2, stored.LevelBefore);
+        Assert.Equal(3, stored.LevelAfter);
     }
 
     [Fact]

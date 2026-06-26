@@ -71,6 +71,7 @@ builder.Services.AddScoped<ProfileProvisioner>();
 builder.Services.AddScoped<TextLibraryService>();
 builder.Services.AddScoped<AttemptService>();
 builder.Services.AddScoped<ChallengeService>();
+builder.Services.AddScoped<GamificationEventWriter>();
 builder.Services.AddScoped<MotivationService>();
 builder.Services.AddScoped<ProfileInsightsService>();
 builder.Services.AddScoped<ProfilePrivacyService>();

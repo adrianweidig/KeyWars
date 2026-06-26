@@ -141,6 +141,8 @@ In `Production` zählt nur die explizite LDAP-Konfiguration.
   Umgebungen.
 - [Datenschutz](docs/privacy.md): Export, Statistik-Reset und
   Profil-Löschung.
+- [Teststrategie](docs/test-strategy.md): Testschichten, Coverage-Regeln und
+  lokale Verifikationsbefehle.
 
 ## Was KeyWars bewusst nicht ist
 

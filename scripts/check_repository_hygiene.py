@@ -22,6 +22,7 @@ ALLOW = {
     ".env.example",
 }
 REQUIRED = [
+    "AGENTS.md",
     "LICENSE",
     "SECURITY.md",
     "CONTRIBUTING.md",
@@ -29,6 +30,7 @@ REQUIRED = [
     ".github/CODEOWNERS",
     ".github/dependabot.yml",
     ".editorconfig",
+    "docs/test-strategy.md",
 ]
 TEXT_FILE_SUFFIXES = {
     ".cs", ".cshtml", ".css", ".editorconfig", ".env", ".example", ".js",

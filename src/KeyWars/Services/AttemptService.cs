@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using KeyWars.Data;
@@ -6,78 +5,6 @@ using KeyWars.Domain;
 using Microsoft.EntityFrameworkCore;
 
 namespace KeyWars.Services;
-
-public sealed record StartAttemptRequest(TrainingMode Mode, Guid? TrainingTextId, int? SprintSeconds, int? WordCount);
-public sealed record BeginAttemptRequest(Guid AttemptId, string Nonce);
-public sealed record AttemptBeginResponse(Guid AttemptId, DateTimeOffset StartedAt);
-public sealed record FinishAttemptRequest(Guid AttemptId, string Input, int Backspaces, int FocusLosses, int ClientDurationMilliseconds)
-{
-    public string Nonce { get; init; } = "";
-    public IReadOnlyList<int>? WordDurationsMilliseconds { get; init; } = [];
-}
-
-public sealed record AttemptCompletion(TypingAttempt Attempt, MotivationOutcome Motivation)
-{
-    public Guid Id => Attempt.Id;
-    public AttemptPhase Phase => Attempt.Phase;
-    public DateTimeOffset PreparedAt => Attempt.PreparedAt;
-    public DateTimeOffset StartedAt => Attempt.StartedAt;
-    public DateTimeOffset? FinishedAt => Attempt.FinishedAt;
-    public int DurationMilliseconds => Attempt.DurationMilliseconds;
-    public int ClientDurationMilliseconds => Attempt.ClientDurationMilliseconds;
-    public int CorrectCharacters => Attempt.CorrectCharacters;
-    public int IncorrectCharacters => Attempt.IncorrectCharacters;
-    public int TotalCharacters => Attempt.TotalCharacters;
-    public double Wpm => Attempt.Wpm;
-    public double RawWpm => Attempt.RawWpm;
-    public double Accuracy => Attempt.Accuracy;
-    public double Consistency => Attempt.Consistency;
-    public int ConsistencySampleCount => Attempt.ConsistencySampleCount;
-    public double WordTimingVariation => Attempt.WordTimingVariation;
-    public bool Completed => Attempt.Completed;
-    public bool ExperienceAwarded => Attempt.ExperienceAwarded;
-    public string TextHash => Attempt.TextHash;
-
-    public static implicit operator TypingAttempt(AttemptCompletion completion) => completion.Attempt;
-}
-
-public sealed record AttemptSession(
-    Guid Id,
-    Guid UserProfileId,
-    string Text,
-    TrainingMode Mode,
-    DateTimeOffset PreparedAt,
-    DateTimeOffset? StartedAt,
-    string Nonce,
-    AttemptPhase Phase);
-
-public sealed class AttemptSessionStore
-{
-    private readonly ConcurrentDictionary<Guid, AttemptSession> sessions = new();
-
-    public void Add(AttemptSession session) => sessions[session.Id] = session;
-
-    public bool TryGet(Guid id, out AttemptSession? session) => sessions.TryGetValue(id, out session);
-
-    public bool TryUpdate(AttemptSession current, AttemptSession updated) => sessions.TryUpdate(current.Id, updated, current);
-
-    public bool TryRemove(Guid id, out AttemptSession? session) => sessions.TryRemove(id, out session);
-
-    public IReadOnlyList<AttemptSession> RemoveExpired(DateTimeOffset now, TimeSpan lifetime)
-    {
-        var expired = new List<AttemptSession>();
-        foreach (var item in sessions)
-        {
-            var reference = item.Value.StartedAt ?? item.Value.PreparedAt;
-            if (now - reference > lifetime && sessions.TryRemove(item.Key, out var session))
-            {
-                expired.Add(session);
-            }
-        }
-
-        return expired;
-    }
-}
 
 public sealed class AttemptService(
     KeyWarsDbContext db,
