@@ -2977,7 +2977,7 @@ select:focus-visible {
 
   .play-page .shell {
     width: min(100% - 24px, 1500px);
-    margin-top: 16px;
+    margin-top: 10px;
   }
 
   .play-hero,
@@ -2986,13 +2986,13 @@ select:focus-visible {
   }
 
   .play-hero {
-    gap: 12px;
-    margin-bottom: 14px;
+    gap: 8px;
+    margin-bottom: 10px;
   }
 
   .play-hero-copy {
     min-height: 0;
-    padding: 22px;
+    padding: 16px;
   }
 
   .play-hero-copy::after {
@@ -3002,24 +3002,35 @@ select:focus-visible {
   .play-hero-stats {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 8px;
-    margin-top: 16px;
+    gap: 6px;
+    margin-top: 10px;
   }
 
   .play-hero-stats span {
     min-width: 0;
-    padding: 9px 10px;
+    padding: 7px 8px;
+  }
+
+  .play-hero-copy h1 {
+    font-size: clamp(2.35rem, 2.05rem + 1.2vw, 3rem);
+  }
+
+  .play-hero-copy .lead {
+    margin-top: 8px;
+    font-size: 1rem;
+    line-height: 1.4;
   }
 
   .play-mode-rail {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
+    gap: 8px;
   }
 
   .play-mode-link {
     min-width: 0;
-    min-height: 62px;
+    min-height: 52px;
+    padding: 9px 10px;
   }
 
   .play-mode-link:last-child {
@@ -3035,6 +3046,11 @@ select:focus-visible {
     min-height: 138px;
     max-height: 226px;
     overflow: auto;
+  }
+
+  .play-quickstart,
+  .play-side-panel {
+    padding: 14px;
   }
 
   .play-input {
