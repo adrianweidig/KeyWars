@@ -130,6 +130,27 @@ test("Spielseite zeigt Sofortrunde und Modi sauber auf Desktop und Mobile", asyn
   expect(mobileLayout.hasButtonOverflow).toBe(false);
 });
 
+test("Wettbewerbsseite bleibt responsiv und respektiert Ranglisten-Sichtbarkeit", async ({ page }) => {
+  await login(page, "browser.competition.ui");
+  await page.goto("/ranglisten?board=sprint&period=day&mode=sprint60");
+  await expect(page.getByRole("heading", { name: "Ranglisten" })).toBeVisible();
+  await expect(page.locator(".competition-tabs a")).toHaveCount(5);
+  await expect(page.getByRole("link", { name: "Selbst antreten" })).toHaveAttribute("href", /\/spielen\/sprint$/);
+  await expectNoHorizontalOverflow(page);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/ranglisten?board=sprint&period=day&mode=sprint60");
+  await expect(page.locator(".competition-tabs a")).toHaveCount(5);
+  await expect(page.locator(".competition-layout")).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+
+  await page.goto("/profil/einstellungen");
+  await page.getByLabel("In Ranglisten sichtbar").uncheck();
+  await page.getByRole("button", { name: "Speichern" }).click();
+  await page.goto("/ranglisten");
+  await expect(page.getByText("Du bist aktuell nicht öffentlich in Ranglisten sichtbar.")).toBeVisible();
+});
+
 test("Tippabschluss zeigt Motivation ohne bewegte Pflichtanimation", async ({ page }, testInfo) => {
   await login(page, `browser.motivation.${testInfo.workerIndex}`);
   await page.goto("/spielen");

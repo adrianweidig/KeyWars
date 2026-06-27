@@ -3,6 +3,7 @@ using System;
 using KeyWars.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace KeyWars.Data.Migrations
 {
     [DbContext(typeof(KeyWarsDbContext))]
-    partial class KeyWarsDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260627205122_AddCompetitionLeaderboards")]
+    partial class AddCompetitionLeaderboards
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.9");

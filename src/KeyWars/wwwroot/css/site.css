@@ -625,6 +625,308 @@ a:hover {
   -webkit-line-clamp: 3;
 }
 
+.competition-page .shell {
+  width: min(1500px, calc(100% - 48px));
+}
+
+.competition-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.42fr);
+  gap: 18px;
+  align-items: stretch;
+  margin-bottom: 18px;
+}
+
+.competition-hero > div:first-child,
+.competition-hero-stats,
+.competition-controls,
+.competition-main,
+.competition-card,
+.competition-privacy {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0)),
+    var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.competition-hero > div:first-child {
+  position: relative;
+  overflow: hidden;
+  padding: clamp(26px, 3vw, 40px);
+  background:
+    linear-gradient(135deg, rgba(37, 200, 216, 0.18), transparent 34%),
+    linear-gradient(145deg, rgba(53, 211, 154, 0.12), transparent 46%),
+    var(--surface);
+}
+
+.competition-hero > div:first-child::after {
+  content: "";
+  position: absolute;
+  right: clamp(20px, 4vw, 56px);
+  bottom: 22px;
+  width: min(320px, 34%);
+  height: 72px;
+  pointer-events: none;
+  border: 1px solid rgba(66, 227, 220, 0.26);
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, rgba(53, 211, 154, 0.55) 0 28%, rgba(37, 200, 216, 0.5) 28% 58%, rgba(143, 120, 255, 0.46) 58% 100%),
+    repeating-linear-gradient(90deg, transparent 0 31px, rgba(255, 255, 255, 0.14) 31px 32px),
+    rgba(7, 10, 13, 0.55);
+  opacity: 0.58;
+}
+
+.competition-hero h1 {
+  position: relative;
+  z-index: 1;
+  margin: 5px 0 0;
+  font-size: clamp(2.9rem, 2.1rem + 2.5vw, 4.8rem);
+  line-height: 0.98;
+}
+
+.competition-hero .lead {
+  position: relative;
+  z-index: 1;
+  max-width: 760px;
+  margin-top: 14px;
+  color: #d7e6f5;
+}
+
+.competition-hero-stats {
+  display: grid;
+  gap: 10px;
+  padding: 18px;
+}
+
+.competition-hero-stats div {
+  display: grid;
+  gap: 3px;
+  min-height: 68px;
+  padding: 12px;
+  border: 1px solid rgba(169, 185, 204, 0.2);
+  border-radius: 8px;
+  background: rgba(7, 10, 13, 0.42);
+}
+
+.competition-hero-stats span {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.competition-hero-stats strong {
+  font-size: 1.18rem;
+}
+
+.competition-privacy {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+}
+
+.competition-privacy span {
+  color: var(--muted);
+}
+
+.competition-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.competition-tabs a {
+  min-height: 42px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  background: rgba(10, 16, 23, 0.68);
+  font-weight: 800;
+}
+
+.competition-tabs a:hover,
+.competition-tabs a.active {
+  border-color: rgba(66, 227, 220, 0.48);
+  background:
+    linear-gradient(135deg, rgba(37, 200, 216, 0.18), rgba(53, 211, 154, 0.08)),
+    var(--surface-2);
+  text-decoration: none;
+}
+
+.competition-controls {
+  margin-bottom: 18px;
+  padding: 16px;
+}
+
+.competition-filter-grid {
+  display: grid;
+  grid-template-columns: minmax(190px, 0.22fr) minmax(240px, 0.32fr) minmax(280px, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.competition-filter-grid label {
+  margin: 0;
+}
+
+.competition-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 0.32fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.competition-main,
+.competition-card {
+  padding: 18px;
+}
+
+.competition-board-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.competition-board-head h2,
+.competition-board-head p {
+  margin: 0;
+}
+
+.competition-board-head h2 {
+  font-size: clamp(1.7rem, 1.3rem + 1vw, 2.4rem);
+}
+
+.competition-board-head p {
+  margin-top: 6px;
+  color: var(--muted);
+}
+
+.podium-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.podium-card {
+  display: grid;
+  gap: 8px;
+  min-height: 190px;
+  padding: 16px;
+  border: 1px solid rgba(61, 93, 118, 0.86);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(37, 200, 216, 0.07), rgba(255, 255, 255, 0)),
+    rgba(10, 16, 23, 0.86);
+}
+
+.podium-card.rank-1 {
+  border-color: rgba(53, 211, 154, 0.48);
+  background:
+    linear-gradient(180deg, rgba(53, 211, 154, 0.14), rgba(255, 255, 255, 0)),
+    rgba(10, 16, 23, 0.9);
+}
+
+.podium-card.rank-2,
+.podium-card.rank-3 {
+  margin-top: 18px;
+}
+
+.podium-rank {
+  color: var(--ok);
+  font-weight: 900;
+}
+
+.podium-card h3,
+.podium-card p {
+  margin: 0;
+}
+
+.podium-card strong {
+  font-size: 1.7rem;
+}
+
+.podium-card p {
+  color: var(--muted);
+}
+
+.competition-table-wrap {
+  overflow-x: auto;
+}
+
+.competition-table .table-person {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.competition-table .user-avatar,
+.podium-card .user-avatar {
+  width: 34px;
+  height: 34px;
+  font-size: 0.78rem;
+}
+
+.competition-table tr.is-current,
+.podium-card.is-current {
+  outline: 2px solid rgba(66, 227, 220, 0.42);
+  outline-offset: -2px;
+}
+
+.competition-side {
+  display: grid;
+  gap: 14px;
+}
+
+.competition-card h2 {
+  margin-top: 0;
+  font-size: 1.35rem;
+}
+
+.own-rank,
+.target-rank {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border: 1px solid rgba(66, 227, 220, 0.26);
+  border-radius: 8px;
+  background: rgba(7, 10, 13, 0.46);
+}
+
+.own-rank.private {
+  border-color: rgba(143, 120, 255, 0.42);
+}
+
+.own-rank span,
+.target-rank span {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.own-rank strong,
+.target-rank strong {
+  font-size: 1.45rem;
+}
+
+.own-rank p,
+.target-rank p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.competition-rules {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--muted);
+}
+
 .card {
   position: relative;
   background:
@@ -2602,10 +2904,14 @@ select:focus-visible {
 
 @media (max-width: 760px) {
   .topbar {
-    align-items: flex-start;
+    align-items: stretch;
     flex-direction: column;
-    gap: 10px;
-    padding: 14px 16px;
+    gap: 8px;
+    padding: 10px 16px;
+  }
+
+  .brand {
+    align-self: flex-start;
   }
 
   .arena-room-page .topbar {
@@ -2638,7 +2944,34 @@ select:focus-visible {
   }
 
   .nav-links {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     width: 100%;
+    gap: 8px;
+    overflow: visible;
+  }
+
+  .nav-links a {
+    min-height: 36px;
+    padding: 7px 8px;
+    text-align: center;
+    white-space: nowrap;
+  }
+
+  .user-chip {
+    min-height: 40px;
+  }
+
+  .user-chip,
+  .logout,
+  .logout button {
+    width: 100%;
+    max-width: none;
+  }
+
+  .arena-room-page .nav-links {
+    display: flex;
+    flex-wrap: nowrap;
     overflow-x: auto;
   }
 
@@ -2714,6 +3047,96 @@ select:focus-visible {
 
   .play-text-card {
     min-height: auto;
+  }
+
+  .competition-page .shell {
+    width: min(100% - 24px, 1500px);
+    margin-top: 16px;
+  }
+
+  .competition-hero,
+  .competition-layout,
+  .competition-filter-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .competition-hero > div:first-child::after {
+    display: none;
+  }
+
+  .competition-hero > div:first-child,
+  .competition-main,
+  .competition-card,
+  .competition-controls {
+    padding: 16px;
+  }
+
+  .competition-hero-stats {
+    grid-template-columns: 1fr;
+    padding: 14px;
+  }
+
+  .competition-privacy,
+  .competition-board-head {
+    display: grid;
+  }
+
+  .competition-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .competition-tabs a {
+    text-align: center;
+  }
+
+  .podium-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .podium-card,
+  .podium-card.rank-2,
+  .podium-card.rank-3 {
+    min-height: 0;
+    margin-top: 0;
+  }
+
+  .competition-table-wrap {
+    overflow-x: visible;
+  }
+
+  .competition-table thead {
+    display: none;
+  }
+
+  .competition-table,
+  .competition-table tbody,
+  .competition-table tr,
+  .competition-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .competition-table tr {
+    margin-bottom: 10px;
+    padding: 12px;
+    border: 1px solid rgba(61, 93, 118, 0.82);
+    border-radius: 8px;
+    background: rgba(10, 16, 23, 0.72);
+  }
+
+  .competition-table td {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 6px 0;
+    border: 0;
+  }
+
+  .competition-table td::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-weight: 800;
   }
 
   .dashboard-grid,

@@ -74,6 +74,7 @@ builder.Services.AddScoped<ChallengeService>();
 builder.Services.AddScoped<GamificationEventWriter>();
 builder.Services.AddScoped<MotivationService>();
 builder.Services.AddScoped<ProfileInsightsService>();
+builder.Services.AddScoped<CompetitionLeaderboardService>();
 builder.Services.AddScoped<ProfilePrivacyService>();
 builder.Services.AddScoped<BackupService>();
 builder.Services.AddSingleton<TypingEngine>();

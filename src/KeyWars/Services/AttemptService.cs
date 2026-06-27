@@ -24,8 +24,8 @@ public sealed class AttemptService(
         var now = timeProvider.GetUtcNow();
         await ExpireSessionsAsync(now, cancellationToken);
         ValidateStartRequest(request);
-        var text = await ResolveTextAsync(profileId, request, cancellationToken);
-        var start = typingEngine.Start(text);
+        var resolvedText = await ResolveTextAsync(profileId, request, cancellationToken);
+        var start = typingEngine.Start(resolvedText.Body);
         var session = new AttemptSession(start.AttemptId, profileId, start.Text, request.Mode, start.StartedAt, null, start.Nonce, AttemptPhase.Prepared);
         db.TypingAttempts.Add(new TypingAttempt
         {
@@ -39,7 +39,7 @@ public sealed class AttemptService(
             PreparedAt = session.PreparedAt,
             StartedAt = session.PreparedAt,
             Official = request.Mode != TrainingMode.Endless,
-            LeaderboardEligible = request.Mode is not TrainingMode.Endless && request.TrainingTextId is not null
+            LeaderboardEligible = CompetitionEligibility.CanEnterLeaderboardAtStart(request.Mode, resolvedText.Text)
         });
         await db.SaveChangesAsync(cancellationToken);
         sessionStore.Add(session);
@@ -159,13 +159,13 @@ public sealed class AttemptService(
         return new AttemptCompletion(attempt, motivation);
     }
 
-    private async Task<string> ResolveTextAsync(Guid profileId, StartAttemptRequest request, CancellationToken cancellationToken)
+    private async Task<ResolvedAttemptText> ResolveTextAsync(Guid profileId, StartAttemptRequest request, CancellationToken cancellationToken)
     {
         if (request.TrainingTextId is { } textId)
         {
             var text = await db.TrainingTexts.SingleAsync(item =>
                 item.Id == textId && (item.IsStandard || item.Visibility == TrainingTextVisibility.Organization || item.OwnerProfileId == profileId), cancellationToken);
-            return text.Body;
+            return new ResolvedAttemptText(text.Body, text);
         }
 
         if (request.WordCount is { } wordCount)
@@ -175,7 +175,7 @@ public sealed class AttemptService(
                 throw new InvalidOperationException("Die Wortzahl muss zwischen 1 und 200 liegen.");
             }
 
-            return TypingEngine.BuildWordTest(wordCount);
+            return new ResolvedAttemptText(TypingEngine.BuildWordTest(wordCount), null);
         }
 
         if (request.Mode == TrainingMode.WeaknessFocus)
@@ -183,11 +183,13 @@ public sealed class AttemptService(
             var observations = await db.WeaknessObservations
                 .Where(item => item.UserProfileId == profileId)
                 .ToListAsync(cancellationToken);
-            return typingEngine.BuildWeaknessText(observations);
+            return new ResolvedAttemptText(typingEngine.BuildWeaknessText(observations), null);
         }
 
-        return TypingEngine.BuildWordTest(80);
+        return new ResolvedAttemptText(TypingEngine.BuildWordTest(80), null);
     }
+
+    private sealed record ResolvedAttemptText(string Body, TrainingText? Text);
 
     private static TimeSpan NormalizeServerDuration(TimeSpan serverDuration, TrainingMode mode)
     {

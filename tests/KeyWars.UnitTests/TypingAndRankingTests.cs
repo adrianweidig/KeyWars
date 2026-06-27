@@ -1,4 +1,5 @@
 using KeyWars.Domain;
+using KeyWars.Services;
 
 namespace KeyWars.UnitTests;
 
@@ -188,6 +189,47 @@ public sealed class TypingAndRankingTests
         Assert.Equal(970, changes[runnerUp].RatingBefore);
         Assert.Equal(changes[runnerUp].RatingBefore + changes[runnerUp].RatingDelta, changes[runnerUp].RatingAfter);
         Assert.Equal(0, changes.Values.Sum(item => item.RatingDelta));
+    }
+
+    [Fact]
+    public void CompetitionRankingUsesMetricTieBreakers()
+    {
+        var now = DateTimeOffset.Parse("2026-06-27T10:00:00Z");
+        var alpha = Guid.CreateVersion7();
+        var beta = Guid.CreateVersion7();
+        var gamma = Guid.CreateVersion7();
+        var ranked = CompetitionLeaderboardService.RankEntries(
+        [
+            new LeaderboardEntry { UserProfileId = alpha, DisplayName = "Alpha", Score = 80, Wpm = 80, Accuracy = 97, Consistency = 95, FinishedAt = now.AddMinutes(2) },
+            new LeaderboardEntry { UserProfileId = beta, DisplayName = "Beta", Score = 80, Wpm = 80, Accuracy = 98, Consistency = 90, FinishedAt = now.AddMinutes(3) },
+            new LeaderboardEntry { UserProfileId = gamma, DisplayName = "Gamma", Score = 80, Wpm = 80, Accuracy = 98, Consistency = 90, FinishedAt = now.AddMinutes(1) }
+        ]);
+
+        Assert.Equal(gamma, ranked[0].UserProfileId);
+        Assert.Equal(beta, ranked[1].UserProfileId);
+        Assert.Equal(alpha, ranked[2].UserProfileId);
+        Assert.Equal([1, 2, 3], ranked.Select(entry => entry.Rank).ToArray());
+    }
+
+    [Fact]
+    public void CompetitionEligibilityExcludesPracticeAndLowQualityAttempts()
+    {
+        var eligible = Attempt(TrainingMode.Sprint60, 95, official: true);
+
+        Assert.True(CompetitionEligibility.IsAttemptEligible(eligible));
+        Assert.False(CompetitionEligibility.IsAttemptEligible(Attempt(TrainingMode.Ghost, 95, official: true)));
+        Assert.False(CompetitionEligibility.IsAttemptEligible(Attempt(TrainingMode.Sprint60, 89.9, official: true)));
+        Assert.False(CompetitionEligibility.IsAttemptEligible(Attempt(TrainingMode.Sprint60, 95, official: false)));
+
+        static TypingAttempt Attempt(TrainingMode mode, double accuracy, bool official) => new()
+        {
+            Mode = mode,
+            Phase = AttemptPhase.Finished,
+            Completed = true,
+            Official = official,
+            LeaderboardEligible = true,
+            Accuracy = accuracy
+        };
     }
 
     [Fact]

@@ -1,30 +1,228 @@
 @page "/ranglisten"
+@using System.Globalization
+@using KeyWars.Domain
+@using KeyWars.Services
+@using Microsoft.AspNetCore.Html
 @model KeyWars.Pages.RanglistenModel
 @{
-    ViewData["Title"] = "Ranglisten";
+    ViewData["Title"] = "Wettbewerb";
+    ViewData["BodyClass"] = "competition-page";
+    var culture = CultureInfo.GetCultureInfo("de-DE");
+    var query = Model.Overview.Query;
+    var board = Model.Overview.Board;
+    var podium = board.Entries.Take(3).ToList();
+    var rows = board.Entries.Skip(3).ToList();
 }
 
-<section class="page-header">
+<section class="competition-hero">
     <div>
+        <span class="eyebrow">Wettbewerb</span>
         <h1>Ranglisten</h1>
-        <p class="lead">Sichtbar sind nur Profile, die Ranglisten nicht deaktiviert haben.</p>
+        <p class="lead">Bestwerte, Arena-Rating und Challenges aus echten KeyWars-Runden. In 24h-Boards zählt wie bei klassischen Tipp-Wettbewerben nur dein bestes Ergebnis.</p>
+    </div>
+    <div class="competition-hero-stats">
+        <div>
+            <span>Deine Division</span>
+            <strong>@Model.Overview.CurrentDivision</strong>
+        </div>
+        <div>
+            <span>Persönliches Bestes</span>
+            <strong>@Model.Overview.PersonalBest</strong>
+        </div>
+        <div>
+            <span>Aktives Board</span>
+            <strong>@board.Title</strong>
+        </div>
     </div>
 </section>
 
-<section class="card">
-    <table class="table">
-        <thead><tr><th>Platz</th><th>Person</th><th>Arena</th><th>Saisonpunkte</th><th>Level</th></tr></thead>
-        <tbody>
-        @for (var i = 0; i < Model.Rows.Count; i++)
+@if (!Model.Overview.CurrentProfileVisible)
+{
+    <section class="alert competition-privacy" role="status">
+        <strong>Du bist aktuell nicht öffentlich in Ranglisten sichtbar.</strong>
+        <span>Die Seite zeigt dir deine private Vorschau, andere sehen deine Werte nicht.</span>
+        <a class="button secondary compact-button" asp-page="/Profil/Einstellungen">Sichtbarkeit ändern</a>
+    </section>
+}
+
+<nav class="competition-tabs" aria-label="Wettbewerbsbereiche">
+    @foreach (var item in Model.Boards)
+    {
+        <a class="@(query.Board == item.Kind ? "active" : "")"
+           asp-page="/Ranglisten"
+           asp-route-board="@item.Value"
+           asp-route-period="@Model.PeriodValue(query.Period)"
+           asp-route-mode="@Model.ModeValue(query.Mode)"
+           asp-route-textId="@query.TextId">@item.Label</a>
+    }
+</nav>
+
+<section class="competition-controls" aria-label="Ranglistenfilter">
+    <form method="get" class="competition-filter-grid">
+        <input type="hidden" name="board" value="@Model.BoardValue(query.Board)" />
+        <label>
+            Zeitraum
+            <select name="period">
+                @foreach (var item in Model.Periods)
+                {
+                    <option value="@item.Value" selected="@(query.Period == item.Period)">@item.Label</option>
+                }
+            </select>
+        </label>
+        @if (query.Board == CompetitionBoardKind.Sprint)
         {
-            <tr>
-                <td data-label="Platz">@(i + 1)</td>
-                <td data-label="Person">@Model.Rows[i].DisplayName</td>
-                <td data-label="Arena">@Model.Rows[i].ArenaRating</td>
-                <td data-label="Saisonpunkte">@Model.Rows[i].SeasonPoints</td>
-                <td data-label="Level">@Model.Rows[i].Level</td>
-            </tr>
+            <label>
+                Modus
+                <select name="mode">
+                    @foreach (var item in Model.Modes)
+                    {
+                        <option value="@item.Value" selected="@(query.Mode == item.Mode)">@item.Label</option>
+                    }
+                </select>
+            </label>
         }
-        </tbody>
-    </table>
+        else
+        {
+            <input type="hidden" name="mode" value="@Model.ModeValue(query.Mode)" />
+        }
+        @if (query.Board == CompetitionBoardKind.Text)
+        {
+            <label>
+                Text
+                <select name="textId">
+                    @foreach (var text in Model.Overview.TextOptions)
+                    {
+                        <option value="@text.Id" selected="@(query.TextId == text.Id)">@text.Title (@text.CharacterCount.ToString("N0", culture) Zeichen)</option>
+                    }
+                </select>
+            </label>
+        }
+        else if (query.TextId is not null)
+        {
+            <input type="hidden" name="textId" value="@query.TextId" />
+        }
+        <div class="form-actions">
+            <button type="submit">Anzeigen</button>
+        </div>
+    </form>
 </section>
+
+<section class="competition-layout">
+    <article class="competition-main">
+        <div class="competition-board-head">
+            <div>
+                <h2>@board.Title</h2>
+                <p>@board.Description</p>
+            </div>
+            @CompetitionCta(query)
+        </div>
+
+        @if (board.Entries.Count == 0)
+        {
+            <div class="empty-state">@board.EmptyMessage</div>
+        }
+        else
+        {
+            <div class="podium-grid" aria-label="Top 3">
+                @foreach (var entry in podium)
+                {
+                    <article class="podium-card rank-@entry.Rank @(entry.IsCurrentUser ? "is-current" : "")">
+                        <span class="podium-rank">#@entry.Rank.ToString("N0", culture)</span>
+                        <span class="user-avatar" aria-hidden="true">@entry.Initials</span>
+                        <h3>@entry.DisplayName</h3>
+                        <strong>@entry.PrimaryValue</strong>
+                        <p>@entry.Context</p>
+                    </article>
+                }
+            </div>
+
+            <div class="competition-table-wrap">
+                <table class="table competition-table">
+                    <thead>
+                        <tr>
+                            <th>Rang</th>
+                            <th>Person</th>
+                            <th>@board.PrimaryMetricLabel</th>
+                            <th>Details</th>
+                            <th>Kontext</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var entry in rows)
+                    {
+                        <tr class="@(entry.IsCurrentUser ? "is-current" : "")">
+                            <td data-label="Rang">#@entry.Rank.ToString("N0", culture)</td>
+                            <td data-label="Person">
+                                <span class="table-person"><span class="user-avatar" aria-hidden="true">@entry.Initials</span>@entry.DisplayName</span>
+                            </td>
+                            <td data-label="@board.PrimaryMetricLabel"><strong>@entry.PrimaryValue</strong></td>
+                            <td data-label="Details">@entry.Detail</td>
+                            <td data-label="Kontext">@entry.Context</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </article>
+
+    <aside class="competition-side">
+        <section class="competition-card">
+            <h2>Deine Position</h2>
+            @if (board.OwnEntry is null)
+            {
+                <p class="muted">Noch keine gültige Runde für dieses Board.</p>
+            }
+            else
+            {
+                <div class="own-rank @(board.OwnEntry.IsPrivatePreview ? "private" : "")">
+                    <span>@(board.OwnEntry.IsPrivatePreview ? "Privat" : $"#{board.OwnEntry.Rank.ToString("N0", culture)}")</span>
+                    <strong>@board.OwnEntry.PrimaryValue</strong>
+                    <p>@board.OwnEntry.Detail</p>
+                </div>
+            }
+        </section>
+
+        <section class="competition-card">
+            <h2>Nächstes Ziel</h2>
+            @if (board.NextTarget is null)
+            {
+                <p class="muted">Du bist auf diesem Board schon ganz oben oder noch nicht gewertet.</p>
+            }
+            else
+            {
+                <div class="target-rank">
+                    <span>#@board.NextTarget.Rank.ToString("N0", culture)</span>
+                    <strong>@board.NextTarget.DisplayName</strong>
+                    <p>@board.NextTarget.PrimaryValue · @board.NextTarget.Detail</p>
+                </div>
+            }
+        </section>
+
+        <section class="competition-card">
+            <h2>Wertung</h2>
+            <ul class="competition-rules">
+                <li>Nur offizielle Runden ab 90 % Genauigkeit.</li>
+                <li>Im Zeitraum zählt pro Person das beste Ergebnis.</li>
+                <li>Ausgeblendete Profile erscheinen nicht öffentlich.</li>
+            </ul>
+        </section>
+    </aside>
+</section>
+
+@functions {
+    private IHtmlContent CompetitionCta(LeaderboardQuery query)
+    {
+        return query.Board switch
+        {
+            CompetitionBoardKind.Sprint when query.Mode is TrainingMode.Words10 or TrainingMode.Words25 or TrainingMode.Words50 or TrainingMode.Words100 =>
+                Html.Raw("""<a class="button" href="/spielen/woerter">Selbst antreten</a>"""),
+            CompetitionBoardKind.Sprint => Html.Raw("""<a class="button" href="/spielen/sprint">Selbst antreten</a>"""),
+            CompetitionBoardKind.Text when query.TextId is { } textId =>
+                Html.Raw($"""<a class="button" href="/spielen/text/{textId}">Text trainieren</a>"""),
+            CompetitionBoardKind.Challenge => Html.Raw("""<a class="button" href="/herausforderungen">Challenge öffnen</a>"""),
+            CompetitionBoardKind.Xp => Html.Raw("""<a class="button" href="/spielen">XP sammeln</a>"""),
+            _ => Html.Raw("""<a class="button" href="/arena">Arena öffnen</a>""")
+        };
+    }
+}

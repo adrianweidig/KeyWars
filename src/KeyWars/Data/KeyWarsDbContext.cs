@@ -31,6 +31,7 @@ public sealed class KeyWarsDbContext(DbContextOptions<KeyWarsDbContext> options)
             entity.HasIndex(profile => profile.DirectoryObjectGuid).IsUnique();
             entity.HasIndex(profile => profile.SamAccountName);
             entity.HasIndex(profile => profile.DisplayName);
+            entity.HasIndex(profile => new { profile.LeaderboardVisible, profile.Deleted });
             entity.Property(profile => profile.PreferredMode).HasConversion<string>();
         });
 
@@ -72,6 +73,8 @@ public sealed class KeyWarsDbContext(DbContextOptions<KeyWarsDbContext> options)
         modelBuilder.Entity<TypingAttempt>(entity =>
         {
             entity.HasIndex(attempt => new { attempt.UserProfileId, attempt.Mode, attempt.CreatedAt });
+            entity.HasIndex(attempt => new { attempt.LeaderboardEligible, attempt.Phase, attempt.Completed, attempt.Official, attempt.Mode, attempt.FinishedAt });
+            entity.HasIndex(attempt => new { attempt.TrainingTextId, attempt.LeaderboardEligible, attempt.Wpm });
             entity.HasIndex(attempt => attempt.TrainingTextId);
             entity.Property(attempt => attempt.Mode).HasConversion<string>();
             entity.Property(attempt => attempt.Phase).HasConversion<string>();
@@ -104,6 +107,7 @@ public sealed class KeyWarsDbContext(DbContextOptions<KeyWarsDbContext> options)
         {
             entity.HasIndex(challenge => challenge.CreatorProfileId);
             entity.HasIndex(challenge => challenge.Status);
+            entity.HasIndex(challenge => new { challenge.Status, challenge.FinishedAt });
             entity.Property(challenge => challenge.Mode).HasConversion<string>();
             entity.Property(challenge => challenge.Status).HasConversion<string>();
             entity.HasOne<UserProfile>()
@@ -143,6 +147,7 @@ public sealed class KeyWarsDbContext(DbContextOptions<KeyWarsDbContext> options)
         modelBuilder.Entity<ChallengeRoundResult>(entity =>
         {
             entity.HasIndex(result => new { result.ChallengeRoundId, result.UserProfileId }).IsUnique();
+            entity.HasIndex(result => new { result.UserProfileId, result.Status, result.FinishedAt });
             entity.Property(result => result.Status).HasConversion<string>();
             entity.HasOne<ChallengeRound>()
                 .WithMany()
@@ -185,6 +190,7 @@ public sealed class KeyWarsDbContext(DbContextOptions<KeyWarsDbContext> options)
         {
             entity.HasIndex(room => room.RoomCode);
             entity.HasIndex(room => room.IdempotencyKey).IsUnique();
+            entity.HasIndex(room => new { room.FinishedAt, room.AbortedByServer });
             entity.Property(room => room.IdempotencyKey).HasMaxLength(80);
             entity.Property(room => room.Mode).HasConversion<string>();
             entity.Property(room => room.Visibility).HasConversion<string>();
@@ -197,6 +203,8 @@ public sealed class KeyWarsDbContext(DbContextOptions<KeyWarsDbContext> options)
         modelBuilder.Entity<LiveRoomParticipantSummary>(entity =>
         {
             entity.HasIndex(summary => summary.LiveRoomSummaryId);
+            entity.HasIndex(summary => new { summary.LiveRoomSummaryId, summary.Status });
+            entity.HasIndex(summary => new { summary.UserProfileId, summary.Status });
             entity.Property(summary => summary.Status).HasConversion<string>();
             entity.HasOne<LiveRoomSummary>()
                 .WithMany()
