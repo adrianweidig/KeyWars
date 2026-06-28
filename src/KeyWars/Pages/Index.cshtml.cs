@@ -14,6 +14,7 @@ public sealed class IndexModel(
     MotivationService motivation,
     ChallengeService challenges,
     ProfileInsightsService insights,
+    CompetitionLeaderboardService leaderboards,
     TimeProvider timeProvider) : PageModel
 {
     public UserProfile Profile { get; private set; } = new();
@@ -22,6 +23,7 @@ public sealed class IndexModel(
     public ProfileInsights Insights { get; private set; } = EmptyInsights;
     public CoachRecommendation Recommendation { get; private set; } = new("Starte mit einer ruhigen Runde.", TrainingMode.Sprint60, 1);
     public LevelProgress LevelProgress { get; private set; } = new(1, 0, 0, 200, 0, 200, 0);
+    public LeaderboardBoard DailySprintBoard { get; private set; } = EmptyDailySprintBoard;
     public string LastWpm { get; private set; } = "-";
     public string LastAccuracy { get; private set; } = "-";
 
@@ -40,6 +42,10 @@ public sealed class IndexModel(
         Recommendation = await motivation.RecommendAsync(Profile.Id, cancellationToken);
         LevelProgress = MotivationService.GetLevelProgress(Profile.ExperiencePoints);
         Insights = await insights.GetAsync(Profile, 1, 5, cancellationToken);
+        DailySprintBoard = (await leaderboards.GetAsync(
+            Profile,
+            new LeaderboardQuery(CompetitionBoardKind.Sprint, CompetitionPeriod.Day, TrainingMode.Sprint60, null),
+            cancellationToken)).Board;
 
         var culture = CultureInfo.GetCultureInfo("de-DE");
         var lastAttempt = Insights.History.FirstOrDefault();
@@ -65,4 +71,15 @@ public sealed class IndexModel(
         [],
         [],
         []);
+
+    private static readonly LeaderboardBoard EmptyDailySprintBoard = new(
+        CompetitionBoardKind.Sprint,
+        CompetitionPeriod.Day,
+        "Tages-Sprint 60s",
+        "Bestes Ergebnis der letzten 24 Stunden.",
+        "WPM",
+        [],
+        null,
+        null,
+        "Noch kein sichtbarer Sprint-Wert.");
 }

@@ -1,3 +1,8 @@
+@using KeyWars.Auth
+@using KeyWars.Domain
+@using KeyWars.Services
+@using Microsoft.AspNetCore.Html
+@inject CurrentUser CurrentUser
 <!DOCTYPE html>
 <html lang="de">
 <head>
@@ -6,44 +11,136 @@
     <title>@ViewData["Title"] - KeyWars</title>
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
 </head>
-<body class="@(ViewData["BodyClass"] as string ?? "")">
 @{
     var currentPage = ViewContext.RouteData.Values["page"]?.ToString() ?? "";
     var isActive = (string prefix) => currentPage.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
-    var displayName = User.Identity?.Name ?? "KeyWars";
-    var samAccount = User.FindFirst("samAccountName")?.Value ?? "";
+    var isStart = currentPage.Equals("/Index", StringComparison.OrdinalIgnoreCase);
+    var isAuthenticated = User.Identity?.IsAuthenticated == true;
+    UserProfile? layoutProfile = null;
+    LevelProgress? layoutProgress = null;
+    if (isAuthenticated)
+    {
+        layoutProfile = await CurrentUser.RequireProfileAsync(User, Context.RequestAborted);
+        layoutProgress = MotivationService.GetLevelProgress(layoutProfile.ExperiencePoints);
+    }
+
+    var displayName = layoutProfile?.DisplayName ?? User.Identity?.Name ?? "KeyWars";
+    var samAccount = layoutProfile?.SamAccountName ?? User.FindFirst("samAccountName")?.Value ?? "";
+    var bodyClass = string.Join(
+        " ",
+        new[] { ViewData["BodyClass"] as string, isAuthenticated ? "app-authenticated" : "app-public" }
+            .Where(value => !string.IsNullOrWhiteSpace(value)));
 }
-    <header>
-        <nav class="topbar" aria-label="Hauptnavigation">
-            <a class="brand" asp-page="/Index" aria-label="KeyWars Startseite">
-                <span class="brand-mark" aria-hidden="true">KW</span>
-                <span>KeyWars</span>
-            </a>
-            @if (User.Identity?.IsAuthenticated == true)
-            {
-                <div class="nav-links">
-                    <a class="@(isActive("/Spielen") ? "active" : "")" asp-page="/Spielen/Index">Spielen</a>
-                    <a class="@(isActive("/Arena") ? "active" : "")" asp-page="/Arena/Index">Arena</a>
-                    <a class="@(isActive("/Ranglisten") ? "active" : "")" asp-page="/Ranglisten">Wettbewerb</a>
-                    <a class="@(isActive("/Texte") ? "active" : "")" asp-page="/Texte/Index">Texte</a>
-                    <a class="@(isActive("/Profil") ? "active" : "")" asp-page="/Profil/Index">Profil</a>
-                </div>
-                <div class="topbar-account">
-                    <div class="user-chip" title="@displayName">
-                        <span class="user-avatar" aria-hidden="true">@Initials(displayName)</span>
-                        <span class="user-label"><strong>@displayName</strong><small>@samAccount</small></span>
-                    </div>
+<body class="@bodyClass">
+    <div class="app-shell">
+        @if (isAuthenticated)
+        {
+            <header class="desktop-topbar" aria-label="App-Leiste">
+                <a class="brand app-brand" asp-page="/Index" aria-label="KeyWars Startseite">
+                    <span class="brand-mark" aria-hidden="true">KW</span>
+                    <span>KeyWars</span>
+                </a>
+                <div class="app-tools">
+                    <button type="button" class="icon-button" title="Designmodus" aria-label="Designmodus">@SvgIcon("spark")</button>
+                    <a class="profile-menu" asp-page="/Profil/Index">
+                        <span>Mein Profil</span>
+                        @SvgIcon("chevron")
+                    </a>
                     <form class="logout" asp-page="/Abmelden" method="post">
-                        <button type="submit" title="Abmelden" aria-label="Abmelden">Abmelden</button>
+                        <button type="submit" title="Abmelden" aria-label="Abmelden">@SvgIcon("logout")</button>
                     </form>
                 </div>
+            </header>
+
+            <aside class="desktop-sidebar" aria-label="Hauptnavigation">
+                <a class="brand app-brand" asp-page="/Index" aria-label="KeyWars Startseite">
+                    <span class="brand-mark" aria-hidden="true">KW</span>
+                    <span>KeyWars</span>
+                </a>
+                <nav class="sidebar-nav">
+                    <a class="@(isStart ? "active" : "")" asp-page="/Index">@SvgIcon("home")<span>Start</span></a>
+                    <a class="@(isActive("/Spielen") ? "active" : "")" asp-page="/Spielen/Index">@SvgIcon("play")<span>Spielen</span></a>
+                    <a class="@(isActive("/Ranglisten") ? "active" : "")" asp-page="/Ranglisten">@SvgIcon("trophy")<span>Wettbewerb</span></a>
+                    <a class="@(isActive("/Arena") ? "active" : "")" asp-page="/Arena/Index">@SvgIcon("arena")<span>Arena</span></a>
+                    <a class="@(isActive("/Herausforderungen") ? "active" : "")" asp-page="/Herausforderungen/Index">@SvgIcon("challenge")<span>Herausforderungen</span></a>
+                    <a class="@(isActive("/Texte") ? "active" : "")" asp-page="/Texte/Index">@SvgIcon("texts")<span>Texte</span></a>
+                    <a class="@(isActive("/Profil") ? "active" : "")" asp-page="/Profil/Index">@SvgIcon("profile")<span>Profil</span></a>
+                    <a class="@(currentPage.Equals("/Profil/Einstellungen", StringComparison.OrdinalIgnoreCase) ? "active" : "")" asp-page="/Profil/Einstellungen">@SvgIcon("settings")<span>Einstellungen</span></a>
+                </nav>
+                <a class="sidebar-profile" asp-page="/Profil/Index" title="@displayName">
+                    <span class="user-avatar" aria-hidden="true">@Initials(displayName)</span>
+                    <span class="user-label">
+                        <strong>@displayName</strong>
+                        <small>Level @layoutProfile!.Level</small>
+                    </span>
+                    <span class="sidebar-profile-arrow" aria-hidden="true">›</span>
+                    <progress class="sidebar-xp-progress" value="@((layoutProgress?.ProgressPercent ?? 0).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture))" max="100" aria-label="Profil-Fortschritt">@((layoutProgress?.ProgressPercent ?? 0).ToString("0.#")) %</progress>
+                </a>
+            </aside>
+
+            <header class="mobile-topbar">
+                <a class="brand app-brand" asp-page="/Index" aria-label="KeyWars Startseite">
+                    <span>KeyWars</span>
+                </a>
+                <button type="button" class="mobile-menu-button" data-mobile-menu-toggle aria-label="Navigation anzeigen">@SvgIcon("menu")</button>
+            </header>
+
+            <div class="mobile-menu-panel" data-mobile-menu>
+                <div class="mobile-menu-head">
+                    <span>Navigation</span>
+                    <button type="button" class="mobile-menu-button" data-mobile-menu-toggle aria-label="Navigation schließen">@SvgIcon("close")</button>
+                </div>
+                <nav class="sidebar-nav">
+                    <a class="@(isStart ? "active" : "")" asp-page="/Index">@SvgIcon("home")<span>Start</span></a>
+                    <a class="@(isActive("/Spielen") ? "active" : "")" asp-page="/Spielen/Index">@SvgIcon("play")<span>Spielen</span></a>
+                    <a class="@(isActive("/Ranglisten") ? "active" : "")" asp-page="/Ranglisten">@SvgIcon("trophy")<span>Wettbewerb</span></a>
+                    <a class="@(isActive("/Arena") ? "active" : "")" asp-page="/Arena/Index">@SvgIcon("arena")<span>Arena</span></a>
+                    <a class="@(isActive("/Herausforderungen") ? "active" : "")" asp-page="/Herausforderungen/Index">@SvgIcon("challenge")<span>Herausforderungen</span></a>
+                    <a class="@(isActive("/Texte") ? "active" : "")" asp-page="/Texte/Index">@SvgIcon("texts")<span>Texte</span></a>
+                    <a class="@(isActive("/Profil") ? "active" : "")" asp-page="/Profil/Index">@SvgIcon("profile")<span>Profil</span></a>
+                </nav>
+            </div>
+            <button type="button" class="mobile-menu-scrim" data-mobile-menu-toggle aria-label="Navigation schließen"></button>
+        }
+
+        <div class="app-main">
+            @if (isAuthenticated && layoutProfile is not null && layoutProgress is not null)
+            {
+                var xpTotal = Math.Max(1, layoutProgress.NextLevelXp);
+                <header class="status-cockpit" aria-label="Trainingsstatus">
+                    <div class="status-chip streak-chip"><span aria-hidden="true">🔥</span><strong>@layoutProfile.CurrentStreakDays</strong><span>Tage Streak</span></div>
+                    <div class="status-chip level-chip"><span>Level</span><strong>@layoutProfile.Level</strong></div>
+                    <progress class="xp-track" value="@layoutProgress.ProgressPercent.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)" max="100" aria-label="Level-Fortschritt">@layoutProgress.ProgressPercent.ToString("0.#") %</progress>
+                    <div class="xp-value"><strong>@layoutProfile.ExperiencePoints.ToString("N0")</strong> / @xpTotal.ToString("N0") XP</div>
+                    <div class="next-rank"><span>Nächster Rang</span><strong>@(layoutProfile.Level + 1)</strong></div>
+                    <div class="app-tools">
+                        <button type="button" class="icon-button" title="Designmodus" aria-label="Designmodus">@SvgIcon("spark")</button>
+                        <a class="profile-menu" asp-page="/Profil/Index">
+                            <span>Mein Profil</span>
+                            @SvgIcon("chevron")
+                        </a>
+                        <form class="logout" asp-page="/Abmelden" method="post">
+                            <button type="submit" title="Abmelden" aria-label="Abmelden">@SvgIcon("logout")</button>
+                        </form>
+                    </div>
+                </header>
             }
-        </nav>
-    </header>
-    <div class="shell">
-        <main role="main">
-            @RenderBody()
-        </main>
+
+            <main class="shell" role="main">
+                @RenderBody()
+            </main>
+        </div>
+
+        @if (isAuthenticated)
+        {
+            <nav class="mobile-bottom-nav" aria-label="Schnellnavigation">
+                <a class="@(isStart ? "active" : "")" asp-page="/Index">@SvgIcon("home")<span>Start</span></a>
+                <a class="@(isActive("/Spielen") ? "active" : "")" asp-page="/Spielen/Index">@SvgIcon("play")<span>Spielen</span></a>
+                <a class="@(isActive("/Ranglisten") ? "active" : "")" asp-page="/Ranglisten">@SvgIcon("trophy")<span>Wettbewerb</span></a>
+                <a class="@(isActive("/Arena") ? "active" : "")" asp-page="/Arena/Index">@SvgIcon("arena")<span>Arena</span></a>
+                <a class="@(isActive("/Profil") ? "active" : "")" asp-page="/Profil/Index">@SvgIcon("profile")<span>Profil</span></a>
+            </nav>
+        }
     </div>
     <script src="~/vendor/signalr/signalr.min.js" asp-append-version="true"></script>
     <script type="module" src="~/js/site.js" asp-append-version="true"></script>
@@ -61,5 +158,27 @@
         }
 
         return string.Concat(parts.Take(2).Select(part => part[0].ToString().ToUpperInvariant()));
+    }
+
+    private static IHtmlContent SvgIcon(string name)
+    {
+        var path = name switch
+        {
+            "home" => """<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M9 21v-7h6v7"/>""",
+            "play" => """<circle cx="12" cy="12" r="9"/><path d="m10 8 6 4-6 4V8Z"/>""",
+            "trophy" => """<path d="M8 4h8v3a4 4 0 0 1-8 0V4Z"/><path d="M8 6H5a3 3 0 0 0 3 3"/><path d="M16 6h3a3 3 0 0 1-3 3"/><path d="M12 11v5"/><path d="M8 21h8"/><path d="M9 16h6v5H9z"/>""",
+            "arena" => """<path d="M12 3 5 7v8l7 6 7-6V7l-7-4Z"/><path d="m8 10 4-3 4 3"/><path d="M8 14h8"/><path d="m9 17 3 2 3-2"/>""",
+            "challenge" => """<path d="M12 3v18"/><path d="M6 7h12"/><path d="m8 7-3 6h6L8 7Z"/><path d="m16 7-3 6h6l-3-6Z"/>""",
+            "texts" => """<path d="M6 3h9l3 3v15H6V3Z"/><path d="M15 3v4h4"/><path d="M9 10h6"/><path d="M9 14h6"/><path d="M9 18h4"/>""",
+            "profile" => """<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>""",
+            "settings" => """<circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.1l2-1.5-2-3.4-2.4 1a7.8 7.8 0 0 0-1.9-1.1L14.3 3h-4.6l-.3 2.9A7.8 7.8 0 0 0 7.5 7l-2.4-1-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .4 0 .8.1 1.1l-2 1.5 2 3.4 2.4-1c.6.5 1.2.8 1.9 1.1l.3 2.9h4.6l.3-2.9c.7-.3 1.3-.6 1.9-1.1l2.4 1 2-3.4-2-1.5c.1-.3.1-.7.1-1.1Z"/>""",
+            "menu" => """<path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h16"/>""",
+            "close" => """<path d="m6 6 12 12"/><path d="m18 6-12 12"/>""",
+            "spark" => """<path d="M12 2v4"/><path d="M12 18v4"/><path d="M4.9 4.9l2.8 2.8"/><path d="m16.3 16.3 2.8 2.8"/><path d="M2 12h4"/><path d="M18 12h4"/><path d="m4.9 19.1 2.8-2.8"/><path d="m16.3 7.7 2.8-2.8"/>""",
+            "chevron" => """<path d="m9 18 6-6-6-6"/>""",
+            "logout" => """<path d="M10 17l5-5-5-5"/><path d="M15 12H3"/><path d="M13 5h6v14h-6"/>""",
+            _ => """<circle cx="12" cy="12" r="9"/>"""
+        };
+        return new HtmlString($"""<svg class="app-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">{path}</svg>""");
     }
 }

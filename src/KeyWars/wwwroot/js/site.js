@@ -80,6 +80,27 @@ function attachSubmitGuards() {
   });
 }
 
+function attachMobileMenu() {
+  const toggles = document.querySelectorAll("[data-mobile-menu-toggle]");
+  if (toggles.length === 0) {
+    return;
+  }
+
+  const closeMenu = () => document.body.classList.remove("mobile-menu-open");
+  const toggleMenu = () => document.body.classList.toggle("mobile-menu-open");
+  toggles.forEach((toggle) => {
+    toggle.addEventListener("click", toggleMenu);
+  });
+  document.querySelectorAll("[data-mobile-menu] a").forEach((link) => {
+    link.addEventListener("click", closeMenu);
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      closeMenu();
+    }
+  });
+}
+
 function attachArenaCreateForms() {
   document.querySelectorAll("[data-arena-create-form]").forEach((form) => {
     const select = form.querySelector("[data-arena-text-select]");
@@ -154,3 +175,4 @@ attachRoomCodeInputs();
 attachCopyButtons();
 attachShareButtons();
 attachSubmitGuards();
+attachMobileMenu();

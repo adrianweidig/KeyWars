@@ -15,7 +15,11 @@ export function attachTypingApps() {
     timer.append(timerValue, timerLabel);
     analysis.className = "typing-analysis";
     result.classList.add("typing-result");
-    target.insertAdjacentElement("afterend", timer);
+    if (root.dataset.timerPlacement === "before-target") {
+      target.insertAdjacentElement("beforebegin", timer);
+    } else {
+      target.insertAdjacentElement("afterend", timer);
+    }
 
     let session = null;
     let startedAt = null;

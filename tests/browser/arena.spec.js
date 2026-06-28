@@ -5,7 +5,8 @@ async function login(page, username) {
   await page.getByLabel("Benutzername").fill(username);
   await page.getByLabel("Passwort").fill("lokales-test-passwort");
   await page.getByRole("button", { name: "Anmelden" }).click();
-  await expect(page.getByRole("heading", { name: new RegExp(`Hallo, ${displayName(username)}`) })).toBeVisible();
+  await expect(page.locator(".status-cockpit")).toBeVisible();
+  await expect(page.locator(".sidebar-profile")).toContainText(displayName(username));
 }
 
 function displayName(username) {
@@ -51,32 +52,36 @@ async function expectNoHorizontalOverflow(page) {
 }
 
 async function expectCompactMobileHeader(page) {
-  const header = await page.locator(".topbar").evaluate((topbar) => {
+  const header = await page.locator(".mobile-topbar").evaluate((topbar) => {
     const bounds = topbar.getBoundingClientRect();
-    const firstHeading = document.querySelector("h1")?.getBoundingClientRect();
+    const firstPanel = document.querySelector(".status-cockpit")?.getBoundingClientRect();
     return {
       height: Math.round(bounds.height),
-      headingTop: Math.round(firstHeading?.top ?? 9999),
+      firstPanelTop: Math.round(firstPanel?.top ?? 9999),
       viewportHeight: window.innerHeight
     };
   });
 
-  expect(header.height).toBeLessThanOrEqual(96);
-  expect(header.headingTop).toBeLessThan(header.viewportHeight * 0.32);
+  expect(header.height).toBeLessThanOrEqual(64);
+  expect(header.firstPanelTop).toBeLessThan(header.viewportHeight * 0.16);
 }
 
 test("Dashboard und Einstellungen rendern im echten Browser", async ({ page }) => {
   await login(page, "browser.smoke");
 
-  await expect(page.getByText("Tagesfokus")).toBeVisible();
-  await expect(page.locator(".level-cockpit")).toBeVisible();
+  await expect(page.locator(".desktop-sidebar")).toBeVisible();
+  await expect(page.locator(".status-cockpit")).toBeVisible();
+  await expect(page.locator(".dashboard-quick-round")).toBeVisible();
+  await expect(page.locator(".daily-board-panel")).toBeVisible();
   await expect(page.locator(".quest-card").first()).toBeVisible();
-  await expect(page.locator(".event-feed")).toBeVisible();
+  await expect(page.locator(".recent-results-panel")).toBeVisible();
   await expectNoHorizontalOverflow(page);
-  await expect(page.getByText("30-Tage-Übersicht")).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
   await expectCompactMobileHeader(page);
+  await expect(page.locator(".mobile-bottom-nav")).toBeVisible();
+  await expect(page.locator(".dashboard-quick-round")).toBeVisible();
+  await expect(page.locator(".daily-board-panel")).toBeVisible();
   await expectNoHorizontalOverflow(page);
   await page.goto("/profil/einstellungen");
   await expectCompactMobileHeader(page);
@@ -126,7 +131,7 @@ test("Spielseite zeigt Sofortrunde und Modi sauber auf Desktop und Mobile", asyn
   await login(page, "browser.play.ui");
   await page.goto("/spielen");
   await expect(page.locator(".play-quickstart")).toBeVisible();
-  await expect(page.locator(".play-mode-link")).toHaveCount(3);
+  await expect(page.locator(".play-mode-link")).toHaveCount(4);
   await expect(page.locator(".play-text-card").first()).toBeVisible();
   await expectNoHorizontalOverflow(page);
 
@@ -140,7 +145,7 @@ test("Spielseite zeigt Sofortrunde und Modi sauber auf Desktop und Mobile", asyn
   await page.goto("/spielen");
   await expectCompactMobileHeader(page);
   await expect(page.locator(".play-quickstart")).toBeVisible();
-  await expect(page.locator(".play-mode-link")).toHaveCount(3);
+  await expect(page.locator(".play-mode-link")).toHaveCount(4);
   await expectNoHorizontalOverflow(page);
 
   const mobileLayout = await page.evaluate(() => {

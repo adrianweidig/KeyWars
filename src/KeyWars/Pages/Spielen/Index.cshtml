@@ -5,83 +5,59 @@
     ViewData["BodyClass"] = "play-page";
 }
 
-<section class="play-hero">
-    <div class="play-hero-copy">
-        <span class="eyebrow">Trainingsstart</span>
-        <h1>Spielen</h1>
-        <p class="lead">Starte sofort eine Runde, halte den Fokus auf dem Text und sammle sichtbaren Fortschritt statt nur Zahlen.</p>
-        <div class="play-hero-stats" aria-label="Trainingsübersicht">
-            <span><strong>60s</strong>Sofortrunde</span>
-            <span><strong>@Model.Texts.Count</strong>Texte</span>
-            <span><strong>Rank</strong>Wettbewerb</span>
-        </div>
-    </div>
-    <nav class="play-mode-rail" aria-label="Trainingsmodi">
-        <a class="play-mode-link is-primary" asp-page="/Spielen/Sprint">
-            <span>Sprint</span>
-            <strong>Tempo halten</strong>
-        </a>
-        <a class="play-mode-link" asp-page="/Spielen/Woerter">
-            <span>Wörter</span>
-            <strong>Rhythmus finden</strong>
-        </a>
-        <a class="play-mode-link" asp-page="/Spielen/Fehlerfokus">
-            <span>Fokus</span>
-            <strong>Muster korrigieren</strong>
-        </a>
-    </nav>
-</section>
-
-<section class="play-workbench" aria-label="Sofortrunde">
-    <article class="play-quickstart typing-session-card" data-typing-app data-mode="Sprint60" data-words="80">
-        <div class="play-section-heading">
+<section class="play-command-grid" aria-label="Training starten">
+    <article class="panel play-quickstart typing-session-card" data-typing-app data-mode="Sprint60" data-seconds="60" data-words="120" data-timer-placement="before-target">
+        <div class="section-header">
             <div>
-                <h2>Sofortrunde</h2>
+                <h1>Sofortrunde</h1>
                 <p>Ein sauberer 60-Sekunden-Lauf mit großer Textbahn, direkter Eingabe und Reward-Moment.</p>
             </div>
-            <span class="play-chip">Sprint 60</span>
+            <a class="mode-select-link" asp-page="/Spielen/Sprint">Sprint 60</a>
         </div>
+
         <div class="typing-target play-target" data-target></div>
-        <label class="play-input-label">
-            <span>Eingabe</span>
-            <textarea class="typing-input play-input" data-input disabled autocapitalize="off" autocomplete="off" spellcheck="false"></textarea>
+        <label class="typing-input-wrap">
+            <span class="visually-hidden">Eingabe</span>
+            <textarea class="typing-input play-input" data-input disabled placeholder="Tippe hier..." autocapitalize="off" autocomplete="off" spellcheck="false"></textarea>
         </label>
         <div class="form-actions typing-actions">
-            <button type="button" data-start>Starten</button>
+            <button type="button" data-start>Neue Runde</button>
         </div>
         <div data-result></div>
     </article>
 
-    <aside class="play-side-panel" aria-label="Fokusauswahl">
-        <div class="play-section-heading">
-            <div>
-                <h2>Fokus wählen</h2>
-                <p>Direkt in den passenden Trainingsmodus springen.</p>
-            </div>
+    <aside class="panel play-mode-panel" aria-label="Trainingsmodi">
+        <div class="section-header compact">
+            <h2>Fokus wählen</h2>
+            <span class="muted">@Model.Texts.Count Texte</span>
         </div>
         <div class="play-focus-list">
-            <a asp-page="/Spielen/Sprint">
-                <strong>Sprint</strong>
-                <span>Tempo unter Zeitdruck halten</span>
+            <a class="play-mode-link is-primary" asp-page="/Spielen/Sprint">
+                <span>Sprint</span>
+                <strong>Tempo halten</strong>
+                <small>15 bis 120 Sekunden</small>
             </a>
-            <a asp-page="/Spielen/Woerter">
-                <strong>Wörtertests</strong>
-                <span>Rhythmus ohne Timer aufbauen</span>
+            <a class="play-mode-link" asp-page="/Spielen/Woerter">
+                <span>Wörter</span>
+                <strong>Rhythmus finden</strong>
+                <small>10 bis 100 Wörter</small>
             </a>
-            <a asp-page="/Spielen/Fehlerfokus">
-                <strong>Fehlerfokus</strong>
-                <span>Schwächen gezielt korrigieren</span>
+            <a class="play-mode-link" asp-page="/Spielen/Fehlerfokus">
+                <span>Fokus</span>
+                <strong>Muster korrigieren</strong>
+                <small>Schwächen gezielt trainieren</small>
             </a>
-            <a asp-page="/Ranglisten">
-                <strong>Wettbewerb</strong>
-                <span>Bestwert direkt angreifen</span>
+            <a class="play-mode-link" asp-page="/Ranglisten" asp-route-board="sprint" asp-route-period="day" asp-route-mode="sprint60">
+                <span>Wettbewerb</span>
+                <strong>Bestwert angreifen</strong>
+                <small>24h Sprint 60s</small>
             </a>
         </div>
     </aside>
 </section>
 
-<section class="play-library" aria-labelledby="play-library-title">
-    <div class="play-section-heading">
+<section class="panel play-library" aria-labelledby="play-library-title">
+    <div class="section-header compact">
         <div>
             <h2 id="play-library-title">Texttraining</h2>
             <p>Größere Texte für ruhige, realistische Tipp-Runden.</p>

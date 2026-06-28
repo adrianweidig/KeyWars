@@ -59,11 +59,11 @@ public sealed partial class WebSmokeTests : IClassFixture<KeyWarsWebFactory>
         Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
         var dashboard = await client.GetStringAsync("/");
         Assert.Contains("Max Mustermann", dashboard);
-        Assert.Contains("Sofort tippen", dashboard);
-        Assert.Contains("Tagesfokus", dashboard);
-        Assert.Contains("30-Tage-Übersicht", dashboard);
-        Assert.Contains("Team Sprint", dashboard);
-        Assert.Contains("Offen", dashboard);
+        Assert.Contains("Sofortrunde", dashboard);
+        Assert.Contains("Tages-Sprint 60s", dashboard);
+        Assert.Contains("Deine Quests", dashboard);
+        Assert.Contains("Schnell starten", dashboard);
+        Assert.Contains("Zum Wettbewerb", dashboard);
         Assert.DoesNotContain(">Open<", dashboard);
         Assert.DoesNotContain("style=", dashboard);
     }
