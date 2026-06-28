@@ -6,18 +6,19 @@
 
 <section class="page-header">
     <div>
+        <span class="eyebrow">Texttraining</span>
         <h1>@Model.Text.Title</h1>
-        <p class="lead">Texttraining mit exakt diesem Text.</p>
+        <p class="lead">Texttraining mit exakt diesem Text. Absätze werden als Enter-Stellen sichtbar markiert.</p>
     </div>
 </section>
 
-<section class="card" data-typing-app data-mode="Text" data-text-id="@Model.Text.Id">
+<section class="card typing-session-card" data-typing-app data-mode="Text" data-text-id="@Model.Text.Id">
     <div class="typing-target" data-target></div>
     <label>
         Eingabe
         <textarea class="typing-input" data-input disabled autocapitalize="off" autocomplete="off" spellcheck="false"></textarea>
     </label>
-    <div class="form-actions">
+    <div class="form-actions typing-actions">
         <button type="button" data-start>Starten</button>
     </div>
     <div data-result></div>

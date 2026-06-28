@@ -12,13 +12,26 @@
     var board = Model.Overview.Board;
     var podium = board.Entries.Take(3).ToList();
     var rows = board.Entries.Skip(3).ToList();
+    var ownPositionLabel = board.OwnEntry is null
+        ? "Noch nicht gewertet"
+        : board.OwnEntry.IsPrivatePreview
+            ? "Privat"
+            : $"#{board.OwnEntry.Rank.ToString("N0", culture)}";
+    var nextTargetLabel = board.NextTarget is null
+        ? "Top halten"
+        : $"#{board.NextTarget.Rank.ToString("N0", culture)} angreifen";
 }
 
 <section class="competition-hero">
     <div>
         <span class="eyebrow">Wettbewerb</span>
-        <h1>Ranglisten</h1>
+        <h1>Wettbewerb</h1>
         <p class="lead">Bestwerte, Arena-Rating und Challenges aus echten KeyWars-Runden. In 24h-Boards zählt wie bei klassischen Tipp-Wettbewerben nur dein bestes Ergebnis.</p>
+        <div class="competition-chase-line" aria-label="Dein aktuelles Rangziel">
+            <span><strong>@ownPositionLabel</strong> Deine Position</span>
+            <span><strong>@nextTargetLabel</strong> Nächstes Ziel</span>
+            <span><strong>@Model.Overview.CurrentDivision</strong> Division</span>
+        </div>
     </div>
     <div class="competition-hero-stats">
         <div>
@@ -32,6 +45,10 @@
         <div>
             <span>Aktives Board</span>
             <strong>@board.Title</strong>
+        </div>
+        <div>
+            <span>Rangziel</span>
+            <strong>@nextTargetLabel</strong>
         </div>
     </div>
 </section>
@@ -119,7 +136,13 @@
 
         @if (board.Entries.Count == 0)
         {
-            <div class="empty-state">@board.EmptyMessage</div>
+            <div class="empty-state featured-empty">
+                <h3>Noch kein Wert auf diesem Board</h3>
+                <p>@board.EmptyMessage</p>
+                <div class="card-actions">
+                    @CompetitionCta(query, "Wert setzen")
+                </div>
+            </div>
         }
         else
         {
@@ -187,7 +210,11 @@
             <h2>Nächstes Ziel</h2>
             @if (board.NextTarget is null)
             {
-                <p class="muted">Du bist auf diesem Board schon ganz oben oder noch nicht gewertet.</p>
+                <div class="target-rank">
+                    <span>Fokus</span>
+                    <strong>Bestwert setzen</strong>
+                    <p>Greife dieses Board mit einer gültigen Runde ab 90 % Genauigkeit an.</p>
+                </div>
             }
             else
             {
@@ -211,18 +238,19 @@
 </section>
 
 @functions {
-    private IHtmlContent CompetitionCta(LeaderboardQuery query)
+    private IHtmlContent CompetitionCta(LeaderboardQuery query, string label = "Selbst antreten")
     {
+        var encodedLabel = System.Net.WebUtility.HtmlEncode(label);
         return query.Board switch
         {
             CompetitionBoardKind.Sprint when query.Mode is TrainingMode.Words10 or TrainingMode.Words25 or TrainingMode.Words50 or TrainingMode.Words100 =>
-                Html.Raw("""<a class="button" href="/spielen/woerter">Selbst antreten</a>"""),
-            CompetitionBoardKind.Sprint => Html.Raw("""<a class="button" href="/spielen/sprint">Selbst antreten</a>"""),
+                Html.Raw($"""<a class="button" href="/spielen/woerter">{encodedLabel}</a>"""),
+            CompetitionBoardKind.Sprint => Html.Raw($"""<a class="button" href="/spielen/sprint">{encodedLabel}</a>"""),
             CompetitionBoardKind.Text when query.TextId is { } textId =>
-                Html.Raw($"""<a class="button" href="/spielen/text/{textId}">Text trainieren</a>"""),
-            CompetitionBoardKind.Challenge => Html.Raw("""<a class="button" href="/herausforderungen">Challenge öffnen</a>"""),
-            CompetitionBoardKind.Xp => Html.Raw("""<a class="button" href="/spielen">XP sammeln</a>"""),
-            _ => Html.Raw("""<a class="button" href="/arena">Arena öffnen</a>""")
+                Html.Raw($"""<a class="button" href="/spielen/text/{textId}">{(label == "Selbst antreten" ? "Text trainieren" : encodedLabel)}</a>"""),
+            CompetitionBoardKind.Challenge => Html.Raw($"""<a class="button" href="/herausforderungen">{(label == "Selbst antreten" ? "Challenge öffnen" : encodedLabel)}</a>"""),
+            CompetitionBoardKind.Xp => Html.Raw($"""<a class="button" href="/spielen">{(label == "Selbst antreten" ? "XP sammeln" : encodedLabel)}</a>"""),
+            _ => Html.Raw($"""<a class="button" href="/arena">{(label == "Selbst antreten" ? "Arena öffnen" : encodedLabel)}</a>""")
         };
     }
 }

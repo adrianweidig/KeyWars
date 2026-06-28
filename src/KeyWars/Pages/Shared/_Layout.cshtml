@@ -28,13 +28,15 @@
                     <a class="@(isActive("/Texte") ? "active" : "")" asp-page="/Texte/Index">Texte</a>
                     <a class="@(isActive("/Profil") ? "active" : "")" asp-page="/Profil/Index">Profil</a>
                 </div>
-                <div class="user-chip" title="@displayName">
-                    <span class="user-avatar" aria-hidden="true">@Initials(displayName)</span>
-                    <span class="user-label"><strong>@displayName</strong><small>@samAccount</small></span>
+                <div class="topbar-account">
+                    <div class="user-chip" title="@displayName">
+                        <span class="user-avatar" aria-hidden="true">@Initials(displayName)</span>
+                        <span class="user-label"><strong>@displayName</strong><small>@samAccount</small></span>
+                    </div>
+                    <form class="logout" asp-page="/Abmelden" method="post">
+                        <button type="submit" title="Abmelden" aria-label="Abmelden">Abmelden</button>
+                    </form>
                 </div>
-                <form class="logout" asp-page="/Abmelden" method="post">
-                    <button type="submit" title="Abmelden" aria-label="Abmelden">Abmelden</button>
-                </form>
             }
         </nav>
     </header>

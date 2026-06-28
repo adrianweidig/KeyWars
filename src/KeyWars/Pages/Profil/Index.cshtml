@@ -18,9 +18,15 @@
     <div class="profile-identity">
         <div class="profile-avatar" aria-hidden="true">@Model.Insights.Initials</div>
         <div>
+            <span class="eyebrow">Profil</span>
             <h1>@Model.Profile.DisplayName</h1>
             <p class="lead">@Model.Profile.SamAccountName · @Model.Profile.Department · @Model.Profile.Title</p>
             <p class="muted">Beigetreten am @Model.Profile.CreatedAt.LocalDateTime.ToString("d", culture) · @Model.Insights.Division · @(Model.Profile.Motto ?? "Noch kein Motto")</p>
+            <div class="hero-stat-row" aria-label="Profilübersicht">
+                <span><strong>Level @Model.Profile.Level.ToString("N0", culture)</strong> Fortschritt</span>
+                <span><strong>@Model.Profile.ArenaRating.ToString("N0", culture)</strong> Arena-Rating</span>
+                <span><strong>@Model.Profile.CurrentStreakDays.ToString("N0", culture) Tage</strong> Serie</span>
+            </div>
         </div>
     </div>
     <div class="page-actions">

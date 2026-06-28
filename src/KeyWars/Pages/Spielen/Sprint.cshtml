@@ -6,6 +6,7 @@
 
 <section class="page-header">
     <div>
+        <span class="eyebrow">Zeitdruck</span>
         <h1>Sprint</h1>
         <p class="lead">Zeitmodus mit deutschen Wörtern. Wähle die Dauer und starte die Runde.</p>
     </div>
@@ -14,14 +15,16 @@
 <section class="grid">
 @foreach (var item in Model.Modes)
 {
-    <article class="card" data-typing-app data-mode="@item.Mode" data-seconds="@item.Seconds" data-words="120">
+    <article class="card typing-session-card" data-typing-app data-mode="@item.Mode" data-seconds="@item.Seconds" data-words="120">
         <h2>@item.Seconds Sekunden</h2>
         <div class="typing-target" data-target></div>
         <label>
             Eingabe
             <textarea class="typing-input" data-input disabled autocapitalize="off" autocomplete="off" spellcheck="false"></textarea>
         </label>
-        <button type="button" data-start>Starten</button>
+        <div class="form-actions typing-actions">
+            <button type="button" data-start>Starten</button>
+        </div>
         <div data-result></div>
     </article>
 }

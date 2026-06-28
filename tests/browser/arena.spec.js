@@ -50,6 +50,21 @@ async function expectNoHorizontalOverflow(page) {
   expect(overflow.documentWidth, `Overflow durch: ${overflow.offenders.join(", ")}`).toBeLessThanOrEqual(overflow.viewportWidth + 1);
 }
 
+async function expectCompactMobileHeader(page) {
+  const header = await page.locator(".topbar").evaluate((topbar) => {
+    const bounds = topbar.getBoundingClientRect();
+    const firstHeading = document.querySelector("h1")?.getBoundingClientRect();
+    return {
+      height: Math.round(bounds.height),
+      headingTop: Math.round(firstHeading?.top ?? 9999),
+      viewportHeight: window.innerHeight
+    };
+  });
+
+  expect(header.height).toBeLessThanOrEqual(96);
+  expect(header.headingTop).toBeLessThan(header.viewportHeight * 0.32);
+}
+
 test("Dashboard und Einstellungen rendern im echten Browser", async ({ page }) => {
   await login(page, "browser.smoke");
 
@@ -59,10 +74,24 @@ test("Dashboard und Einstellungen rendern im echten Browser", async ({ page }) =
   await expect(page.locator(".event-feed")).toBeVisible();
   await expectNoHorizontalOverflow(page);
   await expect(page.getByText("30-Tage-Übersicht")).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await expectCompactMobileHeader(page);
+  await expectNoHorizontalOverflow(page);
   await page.goto("/profil/einstellungen");
+  await expectCompactMobileHeader(page);
   await expect(page.getByRole("heading", { name: "Einstellungen" })).toBeVisible();
   await expect(page.getByText("Identität aus AD/LDAP")).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("lang", "de");
+});
+
+test("Herausforderungen haben einen handlungsfähigen Empty State", async ({ page }) => {
+  await login(page, "browser.challenge.empty");
+  await page.goto("/herausforderungen");
+  await expect(page.locator(".challenge-empty")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Gruppe herausfordern" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Vorher trainieren" })).toBeVisible();
+  await expectNoHorizontalOverflow(page);
 });
 
 test("Textbibliothek bleibt auf Desktop und Mobile sauber ausgerichtet", async ({ page }) => {
@@ -87,6 +116,7 @@ test("Textbibliothek bleibt auf Desktop und Mobile sauber ausgerichtet", async (
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/texte");
+  await expectCompactMobileHeader(page);
   await expect(page.locator(".filter-panel")).toBeVisible();
   await expect(page.locator(".text-card").first()).toBeVisible();
   await expectNoHorizontalOverflow(page);
@@ -108,6 +138,7 @@ test("Spielseite zeigt Sofortrunde und Modi sauber auf Desktop und Mobile", asyn
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/spielen");
+  await expectCompactMobileHeader(page);
   await expect(page.locator(".play-quickstart")).toBeVisible();
   await expect(page.locator(".play-mode-link")).toHaveCount(3);
   await expectNoHorizontalOverflow(page);
@@ -133,13 +164,15 @@ test("Spielseite zeigt Sofortrunde und Modi sauber auf Desktop und Mobile", asyn
 test("Wettbewerbsseite bleibt responsiv und respektiert Ranglisten-Sichtbarkeit", async ({ page }) => {
   await login(page, "browser.competition.ui");
   await page.goto("/ranglisten?board=sprint&period=day&mode=sprint60");
-  await expect(page.getByRole("heading", { name: "Ranglisten" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Wettbewerb" })).toBeVisible();
+  await expect(page.locator(".competition-chase-line")).toBeVisible();
   await expect(page.locator(".competition-tabs a")).toHaveCount(5);
   await expect(page.getByRole("link", { name: "Selbst antreten" })).toHaveAttribute("href", /\/spielen\/sprint$/);
   await expectNoHorizontalOverflow(page);
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/ranglisten?board=sprint&period=day&mode=sprint60");
+  await expectCompactMobileHeader(page);
   await expect(page.locator(".competition-tabs a")).toHaveCount(5);
   await expect(page.locator(".competition-layout")).toBeVisible();
   await expectNoHorizontalOverflow(page);
@@ -163,6 +196,8 @@ test("Tippabschluss zeigt Motivation ohne bewegte Pflichtanimation", async ({ pa
   await page.waitForTimeout(5_200);
   await input.fill(target);
   await expect(page.locator(".motivation-panel")).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator(".finish-panel")).toBeVisible();
+  await expect(page.locator(".xp-reveal")).toBeVisible();
   await expect(page.locator(".motivation-event").first()).toBeVisible();
   await expect(page.locator(".xp-chip").first()).toBeVisible();
   await expectNoHorizontalOverflow(page);
@@ -292,6 +327,7 @@ test("Arena läuft mit zwei getrennten Browserkontexten über SignalR", async ({
     await expect(host).toHaveURL(/\/arena\/[0-9a-f-]{36}$/i);
     await expect(host.getByRole("button", { name: "Starten" })).toBeVisible();
     await expect(host.locator("[data-arena-timer] strong")).not.toHaveText("00:00.0");
+    await expect(host.locator(".arena-phase-steps li.active")).toHaveText("Lobby");
 
     const roomUrl = host.url();
     const roomCode = (await host.locator(".room-code strong").textContent()).trim();
@@ -316,6 +352,7 @@ test("Arena läuft mit zwei getrennten Browserkontexten über SignalR", async ({
     await host.getByRole("button", { name: "Starten" }).click();
     await expect(host.locator("[data-arena-state]")).toHaveText("Rennen läuft", { timeout: 12_000 });
     await expect(guest.locator("[data-arena-state]")).toHaveText("Rennen läuft", { timeout: 12_000 });
+    await expect(host.locator(".arena-phase-steps li.active")).toHaveText("Rennen", { timeout: 12_000 });
 
     const hostTarget = (await host.locator("[data-arena-target]").textContent()).trim();
     const guestTarget = (await guest.locator("[data-arena-target]").textContent()).trim();

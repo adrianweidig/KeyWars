@@ -48,7 +48,7 @@
 <div asp-validation-summary="ModelOnly"></div>
 
 <section class="arena-layout" data-arena-room data-room-id="@Model.Snapshot.RoomId" data-current-profile-id="@Model.CurrentProfileId" data-arena-display-mode="@displayMode" data-max-participants="@Model.Snapshot.MaxParticipants" data-show-live-wpm="@Bool(Model.ShowLiveWpm)" data-show-live-rank-changes="@Bool(Model.ShowLiveRankChanges)" data-sound-enabled="@Bool(Model.SoundEnabled)" data-sound-volume="@Model.SoundVolumePercent" data-reactions-enabled="@Bool(Model.ReactionsEnabled)" data-reduced-motion="@Bool(Model.ReducedMotion)">
-    <div class="card arena-workbench">
+    <div class="card arena-workbench typing-session-card">
         <div class="arena-status-bar">
             <div>
                 <h2>Rennen</h2>
@@ -59,6 +59,12 @@
                 <span>@InitialTimerLabel(Model.Snapshot)</span>
             </div>
         </div>
+        <ol class="arena-phase-steps" aria-label="Arena Ablauf">
+            <li class="@(Model.Snapshot.Phase == LiveRoomPhase.Lobby ? "active" : "")">Lobby</li>
+            <li class="@(Model.Snapshot.Phase == LiveRoomPhase.Countdown ? "active" : "")">Countdown</li>
+            <li class="@(Model.Snapshot.Phase == LiveRoomPhase.Running ? "active" : "")">Rennen</li>
+            <li class="@(Model.Snapshot.Finished ? "active" : "")">Ergebnis</li>
+        </ol>
         <div class="typing-target" data-arena-target>
             @if (string.IsNullOrEmpty(Model.Snapshot.TargetText))
             {
@@ -117,11 +123,11 @@
         @if (Model.ReactionsEnabled)
         {
             <div class="reaction-panel" data-arena-reactions aria-label="Positive Arena-Reaktionen senden">
-                <button type="button" class="secondary" data-reaction-key="stark" aria-label="Reaktion Stark senden">Stark</button>
-                <button type="button" class="secondary" data-reaction-key="knapp" aria-label="Reaktion Knapp senden">Knapp</button>
-                <button type="button" class="secondary" data-reaction-key="sauber" aria-label="Reaktion Sauber senden">Sauber</button>
-                <button type="button" class="secondary" data-reaction-key="revanche" aria-label="Reaktion Revanche senden">Revanche</button>
-                <button type="button" class="secondary" data-reaction-key="respekt" aria-label="Reaktion Respekt senden">Respekt</button>
+                <button type="button" class="secondary energy-chip" data-reaction-key="stark" aria-label="Reaktion Stark senden">Stark</button>
+                <button type="button" class="secondary energy-chip" data-reaction-key="knapp" aria-label="Reaktion Knapp senden">Knapp</button>
+                <button type="button" class="secondary energy-chip" data-reaction-key="sauber" aria-label="Reaktion Sauber senden">Sauber</button>
+                <button type="button" class="secondary energy-chip" data-reaction-key="revanche" aria-label="Reaktion Revanche senden">Revanche</button>
+                <button type="button" class="secondary energy-chip" data-reaction-key="respekt" aria-label="Reaktion Respekt senden">Respekt</button>
             </div>
             <div class="reaction-stream" data-arena-reaction-stream aria-live="polite" aria-atomic="false"></div>
         }

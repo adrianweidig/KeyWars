@@ -6,25 +6,43 @@
 
 <section class="page-header">
     <div>
+        <span class="eyebrow">Gruppenwettbewerb</span>
         <h1>Herausforderungen</h1>
         <p class="lead">Asynchrone Gruppenrennen mit zwei bis vielen Personen aus bereits angemeldeten KeyWars-Profilen.</p>
     </div>
-    <a class="button" asp-page="/Herausforderungen/Neu">Neue Herausforderung</a>
+    <div class="page-actions">
+        <a class="button" asp-page="/Herausforderungen/Neu">Neue Herausforderung</a>
+        <a class="button secondary" asp-page="/Ranglisten" asp-route-board="challenge">Challenge-Board</a>
+    </div>
 </section>
 
 <section class="card">
-    <table class="table">
-        <thead><tr><th>Titel</th><th>Modus</th><th>Status</th><th>Ende</th></tr></thead>
-        <tbody>
-        @foreach (var challenge in Model.Challenges)
-        {
-            <tr>
-                <td data-label="Titel"><a asp-page="/Herausforderungen/Details" asp-route-id="@challenge.Id">@challenge.Title</a></td>
-                <td data-label="Modus">@challenge.Mode</td>
-                <td data-label="Status"><span class="pill">@challenge.Status</span></td>
-                <td data-label="Ende">@challenge.ExpiresAt.LocalDateTime.ToString("g")</td>
-            </tr>
-        }
-        </tbody>
-    </table>
+    @if (Model.Challenges.Count == 0)
+    {
+        <div class="empty-state featured-empty challenge-empty">
+            <h3>Noch keine Herausforderung aktiv</h3>
+            <p>Starte eine Gruppenrunde für Klasse, Team oder Abteilung. Alle bekommen denselben Modus und vergleichen ihr bestes Ergebnis.</p>
+            <div class="empty-action-grid">
+                <a class="button" asp-page="/Herausforderungen/Neu">Gruppe herausfordern</a>
+                <a class="button secondary" asp-page="/Spielen/Index">Vorher trainieren</a>
+            </div>
+        </div>
+    }
+    else
+    {
+        <table class="table">
+            <thead><tr><th>Titel</th><th>Modus</th><th>Status</th><th>Ende</th></tr></thead>
+            <tbody>
+            @foreach (var challenge in Model.Challenges)
+            {
+                <tr>
+                    <td data-label="Titel"><a asp-page="/Herausforderungen/Details" asp-route-id="@challenge.Id">@challenge.Title</a></td>
+                    <td data-label="Modus">@challenge.Mode</td>
+                    <td data-label="Status"><span class="pill">@challenge.Status</span></td>
+                    <td data-label="Ende">@challenge.ExpiresAt.LocalDateTime.ToString("g")</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    }
 </section>

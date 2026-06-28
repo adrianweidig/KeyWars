@@ -4,10 +4,20 @@
     ViewData["Title"] = "Arena";
 }
 
-<section class="page-header">
+<section class="page-header arena-lobby-hero">
     <div>
+        <span class="eyebrow">Live-Wettbewerb</span>
         <h1>Live-Arena</h1>
-        <p class="lead">Starte ein gemeinsames Rennen, tritt per Code bei oder öffne einen intern sichtbaren Raum.</p>
+        <p class="lead">Starte ein gemeinsames Rennen, tritt per Code bei oder springe in eine offene Lobby. Fortschritt und Fehler werden live am Text sichtbar.</p>
+        <div class="hero-stat-row" aria-label="Arena Status">
+            <span><strong>@Model.Rooms.Count</strong> offene Lobbys</span>
+            <span><strong>Textboard</strong> live</span>
+            <span><strong>Rating</strong> nach Rennen</span>
+        </div>
+    </div>
+    <div class="page-actions">
+        <a class="button" asp-page="/Arena/Neu">Raum erstellen</a>
+        <a class="button secondary" asp-page="/Arena/Beitreten">Code eingeben</a>
     </div>
 </section>
 
@@ -16,19 +26,25 @@
         <span class="badge">Neu</span>
         <h2>Raum erstellen</h2>
         <p class="muted">Wähle Text, Sichtbarkeit und Teilnehmerzahl für ein klassisches Rennen.</p>
-        <a class="button" asp-page="/Arena/Neu">Raum erstellen</a>
+        <div class="card-actions">
+            <a class="button" asp-page="/Arena/Neu">Raum erstellen</a>
+        </div>
     </article>
     <article class="card arena-entry">
         <span class="badge">Code</span>
         <h2>Mit Code beitreten</h2>
         <p class="muted">Füge den sechsstelligen Code ein. KeyWars prüft Format und Raumzugang.</p>
-        <a class="button secondary" asp-page="/Arena/Beitreten">Code eingeben</a>
+        <div class="card-actions">
+            <a class="button secondary" asp-page="/Arena/Beitreten">Code eingeben</a>
+        </div>
     </article>
     <article class="card arena-entry">
         <span class="badge">Offen</span>
         <h2>Intern offene Räume</h2>
         <p class="muted">@Model.Rooms.Count @(Model.Rooms.Count == 1 ? "Raum wartet" : "Räume warten") in der Lobby.</p>
-        <a class="button secondary" href="#offene-raeume">Räume ansehen</a>
+        <div class="card-actions">
+            <a class="button secondary" href="#offene-raeume">Räume ansehen</a>
+        </div>
     </article>
 </section>
 

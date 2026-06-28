@@ -8,8 +8,13 @@
 
 <section class="page-header">
     <div>
+        <span class="eyebrow">Quests</span>
         <h1>Ziele</h1>
         <p class="lead">Tagesmissionen und Wochenziele stärken kurze, wiederholbare Trainingsschleifen.</p>
+    </div>
+    <div class="page-actions">
+        <a class="button" asp-page="/Spielen/Index">Training starten</a>
+        <a class="button secondary" asp-page="/Profil/Erfolge">Erfolge ansehen</a>
     </div>
 </section>
 
@@ -24,7 +29,7 @@
         </div>
         <p>@mission.Description</p>
         <progress class="progress xp-progress" value="@percent.ToString("0.#", CultureInfo.InvariantCulture)" max="100" aria-label="Fortschritt für @mission.Title">@percent.ToString("0.#", culture) %</progress>
-        <p class="muted">@mission.CurrentValue.ToString("N0", culture) / @mission.TargetValue.ToString("N0", culture) · @(mission.Completed ? "abgeschlossen" : "offen")</p>
+        <p class="muted">@mission.CurrentValue.ToString("N0", culture) / @mission.TargetValue.ToString("N0", culture) · @(mission.Completed ? "abgeschlossen" : percent >= 75 ? "fast geschafft" : "offen")</p>
     </article>
 }
 </section>

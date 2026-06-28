@@ -18,6 +18,7 @@ export function attachArenaPages() {
     const connectionQuality = root.querySelector("[data-arena-connection-quality]");
     const hiddenCountLabel = root.querySelector("[data-arena-hidden-count]");
     const windowNote = root.querySelector("[data-arena-window-note]");
+    const phaseSteps = [...root.querySelectorAll(".arena-phase-steps li")];
     const participantList = participants?.closest("table");
     const reactionPanel = root.querySelector("[data-arena-reactions]");
     const reactionStream = root.querySelector("[data-arena-reaction-stream]");
@@ -577,6 +578,7 @@ export function attachArenaPages() {
       }
 
       const running = snapshot.phase === "Running";
+      renderPhaseSteps();
       if (state) {
         state.textContent = phaseLabel(snapshot.phase);
       }
@@ -603,6 +605,21 @@ export function attachArenaPages() {
       }
 
       renderTimer();
+    };
+
+    const renderPhaseSteps = () => {
+      if (phaseSteps.length === 0 || !snapshot) {
+        return;
+      }
+
+      const order = ["Lobby", "Countdown", "Running", "Results"];
+      const currentIndex = snapshot.finished || ["RoundResults", "SeriesResults", "Closed"].includes(snapshot.phase)
+        ? 3
+        : Math.max(0, order.indexOf(snapshot.phase));
+      phaseSteps.forEach((step, index) => {
+        step.classList.toggle("active", index === currentIndex);
+        step.classList.toggle("done", index < currentIndex);
+      });
     };
 
     const renderTimer = () => {

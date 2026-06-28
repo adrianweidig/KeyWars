@@ -4,10 +4,16 @@
     ViewData["Title"] = "Texte";
 }
 
-<section class="page-header">
+<section class="page-header text-library-header">
     <div>
+        <span class="eyebrow">Textbibliothek</span>
         <h1>Texte</h1>
-        <p class="lead">Eigene Texte bleiben privat oder werden organisationsweit für Training und Herausforderungen freigegeben.</p>
+        <p class="lead">Wähle längere, sinnvolle Trainingsvorlagen oder pflege eigene Texte für realistische Tipp-Runden.</p>
+        <div class="hero-stat-row" aria-label="Textbibliothek Status">
+            <span><strong>@Model.Texts.Count</strong> sichtbar</span>
+            <span><strong>Privat</strong> möglich</span>
+            <span><strong>Rating</strong> nur geeignete Texte</span>
+        </div>
     </div>
     <div class="page-actions">
         <a class="button" asp-page="/Texte/Neu">Neuer Text</a>
@@ -36,6 +42,17 @@
 </section>
 
 <section class="grid text-library-grid">
+    @if (Model.Texts.Count == 0)
+    {
+        <div class="empty-state featured-empty">
+            <h3>Keine Texte gefunden</h3>
+            <p>Setze den Filter zurück oder lege einen längeren Trainingsbaustein mit klarem Titel an.</p>
+            <div class="card-actions">
+                <a class="button" asp-page="/Texte/Neu">Text anlegen</a>
+                <a class="button secondary" asp-page="/Texte/Index">Filter zurücksetzen</a>
+            </div>
+        </div>
+    }
     @foreach (var text in Model.Texts)
     {
         <article class="card text-card">

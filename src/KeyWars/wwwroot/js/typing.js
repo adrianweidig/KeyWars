@@ -349,18 +349,40 @@ export function attachTypingApps() {
 
       const data = await response.json();
       const progressPercent = Number.isFinite(data.progressPercent) ? Math.max(0, Math.min(100, data.progressPercent)) : 0;
-      result.innerHTML = `<div class="metric-row">
-        <div class="metric"><span>WPM</span><strong>${numberFormat.format(data.wpm)}</strong></div>
-        <div class="metric"><span>Genauigkeit</span><strong>${numberFormat.format(data.accuracy)} %</strong></div>
-        <div class="metric"><span>Konsistenz</span><strong>${numberFormat.format(data.consistency)} %</strong></div>
-        <div class="metric"><span>Korrekte Zeichen</span><strong>${data.correctCharacters}</strong></div>
-        <div class="metric"><span>Level</span><strong>${data.level}</strong></div>
-        <div class="metric"><span>XP</span><strong>${data.experiencePoints}</strong></div>
-      </div>
-      <progress class="progress xp-progress" value="${progressPercent}" max="100" aria-label="Fortschritt bis zum nächsten Level">${progressPercent} %</progress>
-      <p class="muted">Noch ${data.remainingXp} XP bis Level ${data.level + 1}.</p>
+      const personalBest = Array.isArray(data.motivation?.events) &&
+        data.motivation.events.some((item) => item.type === "PersonalBest");
+      const finishTitle = personalBest ? "Neuer Bestwert" : data.completed ? "Runde sauber abgeschlossen" : "Runde gewertet";
+      const finishDetail = data.completed
+        ? "Der Zieltext wurde vollständig erreicht."
+        : `${data.incorrectCharacters} Fehlerzeichen bleiben im Ergebnis sichtbar.`;
+      result.innerHTML = `<section class="finish-panel ${personalBest ? "personal-best" : ""}">
+        <div class="finish-score">
+          <span>${finishTitle}</span>
+          <strong>${numberFormat.format(data.wpm)}</strong>
+          <small>WPM</small>
+        </div>
+        <div class="finish-summary">
+          <p>${finishDetail}</p>
+          <div class="metric-row result-metrics">
+            <div class="metric"><span>Genauigkeit</span><strong>${numberFormat.format(data.accuracy)} %</strong></div>
+            <div class="metric"><span>Konsistenz</span><strong>${numberFormat.format(data.consistency)} %</strong></div>
+            <div class="metric"><span>Korrekte Zeichen</span><strong>${data.correctCharacters}</strong></div>
+            <div class="metric"><span>Level</span><strong>${data.level}</strong></div>
+          </div>
+        </div>
+      </section>
+      <section class="xp-reveal" aria-label="Level-Fortschritt">
+        <div>
+          <span>XP gesamt</span>
+          <strong>${numberFormat.format(data.experiencePoints)}</strong>
+        </div>
+        <div class="xp-reveal-bar">
+          <progress class="progress xp-progress" value="${progressPercent}" max="100" aria-label="Fortschritt bis zum nächsten Level">${progressPercent} %</progress>
+          <span>Noch ${numberFormat.format(data.remainingXp)} XP bis Level ${data.level + 1}.</span>
+        </div>
+      </section>
       ${renderMotivation(data.motivation)}
-      <p class="metric-note">WPM basiert auf korrekten Zeichen, Roh-WPM auf allen Eingaben. Konsistenz misst die Schwankung der abgeschlossenen Wortzeiten.</p>`;
+      <p class="metric-note">WPM basiert auf korrekten Zeichen. Konsistenz misst die Schwankung der abgeschlossenen Wortzeiten.</p>`;
       result.append(analysis);
       renderAnalysis(data);
       session = null;

@@ -7,12 +7,13 @@
 
 <section class="play-hero">
     <div class="play-hero-copy">
+        <span class="eyebrow">Trainingsstart</span>
         <h1>Spielen</h1>
-        <p class="lead">Starte eine Runde, wähle einen Fokus oder trainiere mit einem gespeicherten Text.</p>
+        <p class="lead">Starte sofort eine Runde, halte den Fokus auf dem Text und sammle sichtbaren Fortschritt statt nur Zahlen.</p>
         <div class="play-hero-stats" aria-label="Trainingsübersicht">
             <span><strong>60s</strong>Sofortrunde</span>
             <span><strong>@Model.Texts.Count</strong>Texte</span>
-            <span><strong>XP</strong>Belohnung</span>
+            <span><strong>Rank</strong>Wettbewerb</span>
         </div>
     </div>
     <nav class="play-mode-rail" aria-label="Trainingsmodi">
@@ -32,11 +33,11 @@
 </section>
 
 <section class="play-workbench" aria-label="Sofortrunde">
-    <article class="play-quickstart" data-typing-app data-mode="Sprint60" data-words="80">
+    <article class="play-quickstart typing-session-card" data-typing-app data-mode="Sprint60" data-words="80">
         <div class="play-section-heading">
             <div>
                 <h2>Sofortrunde</h2>
-                <p>Ein sauberer 60-Sekunden-Lauf mit deutscher Wortliste.</p>
+                <p>Ein sauberer 60-Sekunden-Lauf mit großer Textbahn, direkter Eingabe und Reward-Moment.</p>
             </div>
             <span class="play-chip">Sprint 60</span>
         </div>
@@ -45,7 +46,7 @@
             <span>Eingabe</span>
             <textarea class="typing-input play-input" data-input disabled autocapitalize="off" autocomplete="off" spellcheck="false"></textarea>
         </label>
-        <div class="form-actions">
+        <div class="form-actions typing-actions">
             <button type="button" data-start>Starten</button>
         </div>
         <div data-result></div>
@@ -61,15 +62,19 @@
         <div class="play-focus-list">
             <a asp-page="/Spielen/Sprint">
                 <strong>Sprint</strong>
-                <span>15 bis 120 Sekunden</span>
+                <span>Tempo unter Zeitdruck halten</span>
             </a>
             <a asp-page="/Spielen/Woerter">
                 <strong>Wörtertests</strong>
-                <span>10 bis 100 Wörter</span>
+                <span>Rhythmus ohne Timer aufbauen</span>
             </a>
             <a asp-page="/Spielen/Fehlerfokus">
                 <strong>Fehlerfokus</strong>
-                <span>Aus deinen Abweichungen</span>
+                <span>Schwächen gezielt korrigieren</span>
+            </a>
+            <a asp-page="/Ranglisten">
+                <strong>Wettbewerb</strong>
+                <span>Bestwert direkt angreifen</span>
             </a>
         </div>
     </aside>

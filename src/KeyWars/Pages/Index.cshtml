@@ -11,16 +11,17 @@
     var chartHeight = Math.Max(1, (int)Math.Ceiling(recentActivity.Count / (double)activityColumns)) * activityStep;
 }
 
-<section class="page-header">
+<section class="page-header dashboard-hero">
     <div>
+        <span class="eyebrow">Trainings-Cockpit</span>
         <h1>Hallo, @Model.Profile.DisplayName</h1>
         <p class="lead">@Model.Recommendation.Text</p>
     </div>
-    <div class="page-actions">
-        <a class="button" asp-page="/Spielen/Index">Sofort tippen</a>
-        <a class="button secondary" asp-page="/Arena/Neu">Live-Raum starten</a>
-        <a class="button secondary" asp-page="/Herausforderungen/Neu">Gruppe herausfordern</a>
-        <a class="button secondary" asp-page="/Texte/Neu">Eigenen Text verwenden</a>
+    <div class="page-actions hero-actions">
+        <a class="button" asp-page="/Spielen/Index"><span>Sofort tippen</span><small>60 Sekunden Fokus</small></a>
+        <a class="button secondary" asp-page="/Arena/Neu"><span>Live-Raum</span><small>Rennen starten</small></a>
+        <a class="button secondary" asp-page="/Ranglisten"><span>Wettbewerb</span><small>Rang verbessern</small></a>
+        <a class="button secondary" asp-page="/Texte/Neu"><span>Eigener Text</span><small>realistisch trainieren</small></a>
     </div>
 </section>
 
@@ -52,7 +53,13 @@
         <h2>30-Tage-Übersicht</h2>
         @if (recentActivity.All(item => item.Intensity == 0))
         {
-            <p class="muted">Noch keine Aktivität in den letzten 30 Tagen.</p>
+            <div class="empty-state compact-empty">
+                <h3>Starte deine erste Serie</h3>
+                <p>Eine kurze Runde reicht, damit hier dein Trainingsrhythmus sichtbar wird.</p>
+                <div class="card-actions">
+                    <a class="button compact-button" asp-page="/Spielen/Index">Runde starten</a>
+                </div>
+            </div>
         }
         else
         {
@@ -127,7 +134,13 @@
         <h2>Offene Wettbewerbe</h2>
         @if (Model.Challenges.Count == 0)
         {
-            <p class="muted">Aktuell warten keine Gruppenherausforderungen.</p>
+            <div class="empty-state compact-empty">
+                <h3>Keine Challenge offen</h3>
+                <p>Erstelle eine kurze Gruppenrunde und gib anderen ein konkretes Ziel.</p>
+                <div class="card-actions">
+                    <a class="button secondary compact-button" asp-page="/Herausforderungen/Neu">Gruppe herausfordern</a>
+                </div>
+            </div>
         }
         else
         {
