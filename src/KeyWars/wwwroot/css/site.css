@@ -5352,3 +5352,23 @@ body.app-authenticated {
     transition: none;
   }
 }
+
+.text-library-grid .text-card .card-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  align-items: stretch;
+}
+
+.text-library-grid .text-card .card-actions .button {
+  width: 100%;
+  min-width: 0;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+@media (max-width: 520px) {
+  .text-library-grid .text-card .card-actions {
+    grid-template-columns: 1fr;
+  }
+}
