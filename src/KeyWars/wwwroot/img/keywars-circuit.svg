@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="620" viewBox="0 0 960 620" role="img" aria-label="Abstraktes KeyWars Tippmuster">
+  <defs>
+    <linearGradient id="trace" x1="120" y1="80" x2="880" y2="560" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2de2ee" stop-opacity=".92"/>
+      <stop offset=".48" stop-color="#61ee8f" stop-opacity=".72"/>
+      <stop offset="1" stop-color="#f3c94d" stop-opacity=".64"/>
+    </linearGradient>
+    <radialGradient id="node" cx="50%" cy="50%" r="50%">
+      <stop stop-color="#e9fbff" stop-opacity=".95"/>
+      <stop offset=".42" stop-color="#2de2ee" stop-opacity=".56"/>
+      <stop offset="1" stop-color="#2de2ee" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="glow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <g fill="none" stroke="url(#trace)" stroke-linecap="round" stroke-linejoin="round" opacity=".42">
+    <path d="M104 124h170l46 46h156l54 54h210"/>
+    <path d="M162 236h160l44 44h118l72-72h228"/>
+    <path d="M92 362h220l76-76h202l36 36h184"/>
+    <path d="M204 478h178l54-54h132l46 46h238"/>
+    <path d="M764 96v92l-58 58v92l72 72v102"/>
+    <path d="M560 84v116l-54 54v112l-68 68v92"/>
+    <path d="M346 74v88l48 48v126l-62 62v106"/>
+  </g>
+  <g filter="url(#glow)">
+    <circle cx="104" cy="124" r="16" fill="url(#node)"/>
+    <circle cx="320" cy="170" r="12" fill="url(#node)"/>
+    <circle cx="530" cy="224" r="18" fill="url(#node)"/>
+    <circle cx="740" cy="224" r="12" fill="url(#node)"/>
+    <circle cx="162" cy="236" r="12" fill="url(#node)"/>
+    <circle cx="484" cy="280" r="14" fill="url(#node)"/>
+    <circle cx="92" cy="362" r="14" fill="url(#node)"/>
+    <circle cx="590" cy="286" r="11" fill="url(#node)"/>
+    <circle cx="810" cy="322" r="16" fill="url(#node)"/>
+    <circle cx="204" cy="478" r="13" fill="url(#node)"/>
+    <circle cx="568" cy="424" r="15" fill="url(#node)"/>
+    <circle cx="852" cy="470" r="18" fill="url(#node)"/>
+  </g>
+</svg>

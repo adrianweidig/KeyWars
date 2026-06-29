@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="32px" height="32px" viewBox="0 0 32 32" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <!-- Generator: Sketch 62 (91390) - https://sketch.com -->
+    <title>logo-studio</title>
+    <desc>Created with Sketch.</desc>
+    <g id="Website" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="landing-page" transform="translate(-263.000000, -734.000000)">
+            <rect id="section-container" fill="#FFFFFF" x="0" y="0" width="1440" height="1024"></rect>
+            <g id="logos" transform="translate(143.000000, 734.000000)">
+                <g fill-rule="nonzero" id="invision-studio-3">
+                    <g transform="translate(120.000000, 0.000000)">
+                        <polygon id="Path" fill="#E91F61" points="0 0 32 0 32 32 0 32"></polygon>
+                        <polygon id="Path" fill="#FFFFFF" points="20.575 20.63125 27.43125 20.63125 27.43125 27.4875 20.575 27.4875"></polygon>
+                    </g>
+                </g>
+                <g id="export"></g>
+            </g>
+        </g>
+    </g>
+</svg>

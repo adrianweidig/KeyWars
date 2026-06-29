@@ -145,18 +145,24 @@ public static class ApiEndpoints
         };
     }
 
-    private static object BuildMotivationEvent(GamificationEvent item) => new
+    private static object BuildMotivationEvent(GamificationEvent item)
     {
-        item.Id,
-        Type = item.Type.ToString(),
-        item.Title,
-        item.Description,
-        Rarity = item.Rarity.ToString(),
-        item.XpDelta,
-        item.LevelBefore,
-        item.LevelAfter,
-        item.CreatedAt
-    };
+        var visual = MotivationVisuals.ForEvent(item);
+        return new
+        {
+            item.Id,
+            Type = item.Type.ToString(),
+            item.Title,
+            item.Description,
+            Rarity = item.Rarity.ToString(),
+            item.XpDelta,
+            item.LevelBefore,
+            item.LevelAfter,
+            item.CreatedAt,
+            visual.VisualKey,
+            visual.Accent
+        };
+    }
 
     private static bool IsJsonRequest(HttpRequest request)
     {

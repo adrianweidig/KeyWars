@@ -1,0 +1,5 @@
+Humaaans
+License: CC0
+Source: https://www.humaaans.com/
+
+The official project page describes the assets as free for personal and commercial use under CC0. This repository vendors only assets discovered from the official project page or records that the full library download was not automatable.

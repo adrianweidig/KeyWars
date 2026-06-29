@@ -33,22 +33,22 @@
         </div>
         <div class="play-focus-list">
             <a class="play-mode-link is-primary" asp-page="/Spielen/Sprint">
-                <span>Sprint</span>
+                <span class="play-mode-label">@UiIcons.Svg("stopwatch", "kw-icon") Sprint</span>
                 <strong>Tempo halten</strong>
                 <small>15 bis 120 Sekunden</small>
             </a>
             <a class="play-mode-link" asp-page="/Spielen/Woerter">
-                <span>Wörter</span>
+                <span class="play-mode-label">@UiIcons.Svg("words", "kw-icon") Wörter</span>
                 <strong>Rhythmus finden</strong>
                 <small>10 bis 100 Wörter</small>
             </a>
             <a class="play-mode-link" asp-page="/Spielen/Fehlerfokus">
-                <span>Fokus</span>
+                <span class="play-mode-label">@UiIcons.Svg("bolt", "kw-icon") Fokus</span>
                 <strong>Muster korrigieren</strong>
                 <small>Schwächen gezielt trainieren</small>
             </a>
             <a class="play-mode-link" asp-page="/Ranglisten" asp-route-board="sprint" asp-route-period="day" asp-route-mode="sprint60">
-                <span>Wettbewerb</span>
+                <span class="play-mode-label">@UiIcons.Svg("trophy", "kw-icon") Wettbewerb</span>
                 <strong>Bestwert angreifen</strong>
                 <small>24h Sprint 60s</small>
             </a>

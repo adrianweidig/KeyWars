@@ -30,6 +30,7 @@ docker-compose.override.yml
 *.tar
 *.tar.gz
 *.tgz
+!third_party/visual-assets/originals/*.tgz
 *.log
 *.tmp
 *.bak

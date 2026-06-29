@@ -21,6 +21,9 @@ FORBIDDEN = [
 ALLOW = {
     ".env.example",
 }
+ALLOW_PATTERNS = [
+    re.compile(r"^third_party/visual-assets/originals/[^/]+\.tgz$", re.IGNORECASE),
+]
 REQUIRED = [
     "AGENTS.md",
     "LICENSE",
@@ -66,7 +69,7 @@ def main() -> int:
     violations = [
         path
         for path in files
-        if path not in ALLOW and any(pattern.search(path) for pattern in FORBIDDEN)
+        if not is_allowed(path) and any(pattern.search(path) for pattern in FORBIDDEN)
     ]
     if violations:
         print("Forbidden generated or local runtime files are tracked:", file=sys.stderr)
@@ -95,6 +98,10 @@ def is_text_file(path: str) -> bool:
         return True
 
     return file_path.suffix.lower() in TEXT_FILE_SUFFIXES
+
+
+def is_allowed(path: str) -> bool:
+    return path in ALLOW or any(pattern.search(path) for pattern in ALLOW_PATTERNS)
 
 
 def contains_mojibake(path: str) -> bool:

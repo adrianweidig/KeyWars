@@ -22,8 +22,10 @@
 @foreach (var mission in Model.Missions)
 {
     var percent = mission.TargetValue <= 0 ? 0 : Math.Min(100, mission.CurrentValue * 100d / mission.TargetValue);
-    <article class="card quest-card @(mission.Completed ? "completed" : "")">
+    var visual = MotivationVisuals.ForMissionKey(mission.Key);
+    <article class="card quest-card accent-@visual.Accent @(mission.Completed ? "completed" : "")">
         <div class="quest-card-head">
+            <span class="quest-icon is-@visual.Accent" aria-hidden="true">@UiIcons.Svg(visual.VisualKey, "kw-icon")</span>
             <h2>@mission.Title</h2>
             <span class="xp-chip">+@mission.XpReward.ToString("N0", culture) XP</span>
         </div>

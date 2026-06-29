@@ -1,8 +1,11 @@
 {
   "private": true,
   "scripts": {
-    "test:browser": "playwright test",
-    "test:real-ad": "playwright test -c playwright.real-ad.config.js",
+    "assets:fetch": "node scripts/run-modern-node.js scripts/vendor-visual-assets.mjs fetch",
+    "assets:build": "node scripts/run-modern-node.js scripts/vendor-visual-assets.mjs build",
+    "assets:verify": "node scripts/run-modern-node.js scripts/vendor-visual-assets.mjs verify",
+    "test:browser": "node scripts/run-modern-node.js node_modules/@playwright/test/cli.js test",
+    "test:real-ad": "node scripts/run-modern-node.js node_modules/@playwright/test/cli.js test -c playwright.real-ad.config.js",
     "vendor:signalr": "node -e \"const fs=require('fs'), path=require('path'); const dir='src/KeyWars/wwwroot/vendor/signalr'; dir.split(/[\\\\/]/).reduce((p,s)=>{const n=p?path.join(p,s):s; if(!fs.existsSync(n)) fs.mkdirSync(n); return n;}, ''); fs.copyFileSync('node_modules/@microsoft/signalr/dist/browser/signalr.min.js', path.join(dir,'signalr.min.js')); fs.copyFileSync('node_modules/@microsoft/signalr/dist/browser/signalr.min.js.map', path.join(dir,'signalr.min.js.map'));\""
   },
   "devDependencies": {

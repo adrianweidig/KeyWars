@@ -59,11 +59,14 @@
 
         @if (podium.Count == 0)
         {
-            <div class="empty-state compact-empty leaderboard-empty">
-                <h3>Noch kein Tageswert</h3>
-                <p>Setze den ersten 60s-Wert und starte das Board.</p>
-                <div class="card-actions">
-                    <a class="button compact-button" asp-page="/Spielen/Sprint">Sprint starten</a>
+            <div class="empty-state compact-empty leaderboard-empty illustrated-empty">
+                <img src="~/vendor/keywars-assets/illustrations/motivator-leaderboard.svg" alt="" width="220" height="165" loading="lazy" />
+                <div>
+                    <h3>Noch kein Tageswert</h3>
+                    <p>Setze den ersten 60s-Wert und starte das Board.</p>
+                    <div class="card-actions">
+                        <a class="button compact-button" asp-page="/Spielen/Sprint">Sprint starten</a>
+                    </div>
                 </div>
             </div>
         }
@@ -73,7 +76,16 @@
                 @foreach (var entry in podium)
                 {
                     <article class="mini-podium-player rank-@entry.Rank @(entry.IsCurrentUser ? "is-user" : "")">
-                        <span class="podium-crown" aria-hidden="true">@(entry.Rank == 1 ? "♛" : entry.Rank.ToString(culture))</span>
+                        <span class="podium-crown" aria-hidden="true">
+                            @if (entry.Rank == 1)
+                            {
+                                @UiIcons.Svg("trophy", "kw-icon")
+                            }
+                            else
+                            {
+                                @entry.Rank.ToString(culture)
+                            }
+                        </span>
                         <span class="user-avatar" aria-hidden="true">@entry.Initials</span>
                         <strong>@entry.DisplayName</strong>
                         <small>@entry.PrimaryValue WPM</small>
@@ -114,8 +126,9 @@
             @foreach (var mission in missions)
             {
                 var percent = mission.TargetValue <= 0 ? 0 : Math.Min(100, mission.CurrentValue * 100d / mission.TargetValue);
-                <div class="quest-card @(mission.Completed ? "completed" : "")">
-                    <span class="quest-icon @QuestIconClass(mission.Title)" aria-hidden="true">@QuestIcon(mission.Title)</span>
+                var visual = MotivationVisuals.ForMissionKey(mission.Key);
+                <div class="quest-card accent-@visual.Accent @(mission.Completed ? "completed" : "")">
+                    <span class="quest-icon is-@visual.Accent" aria-hidden="true">@UiIcons.Svg(visual.VisualKey, "kw-icon")</span>
                     <strong>@mission.Title</strong>
                     <p>@mission.Description</p>
                     <progress class="progress xp-progress small" value="@percent.ToString("0.#", CultureInfo.InvariantCulture)" max="100" aria-label="Fortschritt für @mission.Title">@percent.ToString("0.#", culture) %</progress>
@@ -135,15 +148,19 @@
         </div>
         @if (recentResults.Count == 0)
         {
-            <p class="muted">Nach deiner ersten Runde erscheinen hier WPM, Genauigkeit und Modus.</p>
+            <div class="empty-state compact-empty illustrated-empty">
+                <img src="~/vendor/keywars-assets/illustrations/motivator-results.svg" alt="" width="200" height="150" loading="lazy" />
+                <p class="muted">Nach deiner ersten Runde erscheinen hier WPM, Genauigkeit und Modus.</p>
+            </div>
         }
         else
         {
             <div class="result-list">
                 @foreach (var item in recentResults)
                 {
+                    var visual = MotivationVisuals.ForTrainingMode(item.Mode);
                     <div class="result-row">
-                        <span class="result-icon @ModeIconClass(item.Mode)" aria-hidden="true">@ModeIcon(item.Mode)</span>
+                        <span class="result-icon is-@visual.Accent" aria-hidden="true">@UiIcons.Svg(visual.VisualKey, "kw-icon")</span>
                         <span>
                             <strong>@DisplayNames.For(item.Mode)</strong>
                             <small>@item.CreatedAt.LocalDateTime.ToString("g", culture)</small>
@@ -160,54 +177,11 @@
 <section class="panel quickstart-panel">
     <h2>Schnell starten</h2>
     <div class="quickstart-grid">
-        <a class="quickstart-card" asp-page="/Spielen/Index"><span class="quickstart-icon">▶</span><strong>Sofortrunde</strong><small>Sprint 60 Sekunden</small><span aria-hidden="true">›</span></a>
-        <a class="quickstart-card" asp-page="/Spielen/Woerter"><span class="quickstart-icon">▤</span><strong>Wörtertest</strong><small>alle Wortlängen</small><span aria-hidden="true">›</span></a>
-        <a class="quickstart-card" asp-page="/Spielen/Fehlerfokus"><span class="quickstart-icon">⌁</span><strong>Fehlerfokus</strong><small>schwache Zeichen</small><span aria-hidden="true">›</span></a>
-        <a class="quickstart-card" asp-page="/Arena/Index"><span class="quickstart-icon">♜</span><strong>Arena-Rennen</strong><small>Live gegen andere</small><span aria-hidden="true">›</span></a>
-        <a class="quickstart-card" asp-page="/Texte/Index"><span class="quickstart-icon">▣</span><strong>Text wählen</strong><small>eigene oder öffentliche</small><span aria-hidden="true">›</span></a>
-        <a class="quickstart-card" asp-page="/Herausforderungen/Neu"><span class="quickstart-icon">♛</span><strong>Herausforderung</strong><small>Gruppe fordern</small><span aria-hidden="true">›</span></a>
+        <a class="quickstart-card" asp-page="/Spielen/Index"><span class="quickstart-icon is-sprint" aria-hidden="true">@UiIcons.Svg("play-fill", "kw-icon")</span><strong>Sofortrunde</strong><small>Sprint 60 Sekunden</small><span class="quickstart-arrow" aria-hidden="true">@UiIcons.Svg("chevron", "kw-icon")</span></a>
+        <a class="quickstart-card" asp-page="/Spielen/Woerter"><span class="quickstart-icon is-words" aria-hidden="true">@UiIcons.Svg("words", "kw-icon")</span><strong>Wörtertest</strong><small>alle Wortlängen</small><span class="quickstart-arrow" aria-hidden="true">@UiIcons.Svg("chevron", "kw-icon")</span></a>
+        <a class="quickstart-card" asp-page="/Spielen/Fehlerfokus"><span class="quickstart-icon is-bolt" aria-hidden="true">@UiIcons.Svg("bolt", "kw-icon")</span><strong>Fehlerfokus</strong><small>schwache Zeichen</small><span class="quickstart-arrow" aria-hidden="true">@UiIcons.Svg("chevron", "kw-icon")</span></a>
+        <a class="quickstart-card" asp-page="/Arena/Index"><span class="quickstart-icon is-arena" aria-hidden="true">@UiIcons.Svg("people", "kw-icon")</span><strong>Arena-Rennen</strong><small>Live gegen andere</small><span class="quickstart-arrow" aria-hidden="true">@UiIcons.Svg("chevron", "kw-icon")</span></a>
+        <a class="quickstart-card" asp-page="/Texte/Index"><span class="quickstart-icon is-text" aria-hidden="true">@UiIcons.Svg("texts", "kw-icon")</span><strong>Text wählen</strong><small>eigene oder öffentliche</small><span class="quickstart-arrow" aria-hidden="true">@UiIcons.Svg("chevron", "kw-icon")</span></a>
+        <a class="quickstart-card" asp-page="/Herausforderungen/Neu"><span class="quickstart-icon is-challenge" aria-hidden="true">@UiIcons.Svg("flag", "kw-icon")</span><strong>Herausforderung</strong><small>Gruppe fordern</small><span class="quickstart-arrow" aria-hidden="true">@UiIcons.Svg("chevron", "kw-icon")</span></a>
     </div>
 </section>
-
-@functions {
-    private static string QuestIcon(string title)
-    {
-        if (title.Contains("Streak", StringComparison.OrdinalIgnoreCase) || title.Contains("Serie", StringComparison.OrdinalIgnoreCase))
-        {
-            return "♦";
-        }
-
-        if (title.Contains("Fehler", StringComparison.OrdinalIgnoreCase))
-        {
-            return "↯";
-        }
-
-        return "◎";
-    }
-
-    private static string QuestIconClass(string title)
-    {
-        if (title.Contains("Streak", StringComparison.OrdinalIgnoreCase) || title.Contains("Serie", StringComparison.OrdinalIgnoreCase))
-        {
-            return "is-fire";
-        }
-
-        return title.Contains("Fehler", StringComparison.OrdinalIgnoreCase) ? "is-bolt" : "is-target";
-    }
-
-    private static string ModeIcon(TrainingMode mode) => mode switch
-    {
-        TrainingMode.WeaknessFocus => "↯",
-        TrainingMode.Words10 or TrainingMode.Words25 or TrainingMode.Words50 or TrainingMode.Words100 => "▤",
-        TrainingMode.Text => "▣",
-        _ => "▶"
-    };
-
-    private static string ModeIconClass(TrainingMode mode) => mode switch
-    {
-        TrainingMode.WeaknessFocus => "is-bolt",
-        TrainingMode.Words10 or TrainingMode.Words25 or TrainingMode.Words50 or TrainingMode.Words100 => "is-words",
-        TrainingMode.Text => "is-text",
-        _ => "is-sprint"
-    };
-}

@@ -75,12 +75,15 @@
 <section class="grid text-library-grid">
     @if (Model.Texts.Count == 0)
     {
-        <div class="empty-state featured-empty">
-            <h3>Keine Texte gefunden</h3>
-            <p>Setze den Filter zurück oder lege einen längeren Trainingsbaustein mit klarem Titel an.</p>
-            <div class="card-actions">
-                <a class="button" asp-page="/Texte/Neu">Text anlegen</a>
-                <a class="button secondary" asp-page="/Texte/Index">Filter zurücksetzen</a>
+        <div class="empty-state featured-empty illustrated-empty">
+            <img src="~/vendor/keywars-assets/illustrations/motivator-texts.svg" alt="" width="280" height="210" loading="lazy" />
+            <div>
+                <h3>Keine Texte gefunden</h3>
+                <p>Setze den Filter zurück oder lege einen längeren Trainingsbaustein mit klarem Titel an.</p>
+                <div class="card-actions">
+                    <a class="button" asp-page="/Texte/Neu">Text anlegen</a>
+                    <a class="button secondary" asp-page="/Texte/Index">Filter zurücksetzen</a>
+                </div>
             </div>
         </div>
     }

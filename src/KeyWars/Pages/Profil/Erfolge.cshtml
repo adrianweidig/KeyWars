@@ -19,28 +19,38 @@
 </section>
 
 <section class="achievement-shelf">
-@if (Model.Achievements.Count == 0)
+@if (Model.UnlockedCount == 0)
 {
-    <div class="empty-state">
-        <h3>Noch keine Erfolge freigeschaltet</h3>
-        <p>Schließe eine gültige Runde ab, halte deine Genauigkeit hoch oder starte ein Arena-Rennen.</p>
-        <div class="card-actions">
-            <a class="button" asp-page="/Spielen/Index">Runde starten</a>
-            <a class="button secondary" asp-page="/Arena/Index">Arena öffnen</a>
+    <div class="empty-state illustrated-empty">
+        <img src="~/vendor/keywars-assets/illustrations/motivator-achievements.svg" alt="" width="280" height="210" loading="lazy" />
+        <div>
+            <h3>Noch keine Erfolge freigeschaltet</h3>
+            <p>Schließe eine gültige Runde ab, halte deine Genauigkeit hoch oder starte ein Arena-Rennen.</p>
+            <div class="card-actions">
+                <a class="button" asp-page="/Spielen/Index">Runde starten</a>
+                <a class="button secondary" asp-page="/Arena/Index">Arena öffnen</a>
+            </div>
         </div>
     </div>
 }
 @foreach (var achievement in Model.Achievements)
 {
     var rarity = RarityFor(achievement.Key);
-    <article class="card achievement-card rarity-@rarity">
-        <div class="achievement-medal">@MedalFor(achievement.Key)</div>
+    <article class="card achievement-card rarity-@rarity accent-@achievement.Accent @(achievement.Unlocked ? "is-unlocked" : "is-locked")">
+        <div class="achievement-medal">@UiIcons.Svg(achievement.VisualKey, "kw-icon")<span>@MedalFor(achievement.Key)</span></div>
         <div>
-            <span class="meta-badge">@RarityLabel(rarity)</span>
+            <span class="meta-badge">@achievement.Category · @RarityLabel(rarity)</span>
             <h2>@achievement.Title</h2>
         </div>
         <p>@achievement.Description</p>
-        <p class="muted">Freigeschaltet am @achievement.UnlockedAt.LocalDateTime.ToString("g", culture)</p>
+        @if (achievement.UnlockedAt is { } unlockedAt)
+        {
+            <p class="muted">Freigeschaltet am @unlockedAt.LocalDateTime.ToString("g", culture)</p>
+        }
+        else
+        {
+            <p class="muted locked-line">@UiIcons.Svg("lock", "kw-icon") Noch gesperrt</p>
+        }
     </article>
 }
 </section>
@@ -70,4 +80,5 @@
         _ when key.StartsWith("streak-", StringComparison.Ordinal) => "STK",
         _ => "KW"
     };
+
 }

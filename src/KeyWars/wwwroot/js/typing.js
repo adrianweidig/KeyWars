@@ -116,8 +116,8 @@ export function attachTypingApps() {
     const resetTimer = () => {
       cancelAnimationFrame(timerFrame);
       startedAt = null;
-      timerValue.textContent = isTimed() ? formatDuration(timedSeconds() * 1000) : "Bereit";
-      timerLabel.textContent = isTimed() ? "bereit" : "Start bei Eingabe";
+      timerValue.textContent = "Bereit";
+      timerLabel.textContent = isTimed() ? `${timedSeconds()} s ab Eingabe` : "Start bei Eingabe";
     };
 
     const beginAttempt = async () => {
@@ -295,10 +295,15 @@ export function attachTypingApps() {
       const levelUp = Number(motivation.levelAfter || 0) > Number(motivation.levelBefore || 0);
       const eventRows = events.map((item) => {
         const rarity = String(item.rarity || "Common").toLowerCase();
+        const visualKey = safeVisualKey(item.visualKey || "xp");
+        const accent = safeVisualKey(item.accent || rarity || "common");
         const xp = Number(item.xpDelta || 0) > 0 ? `<span class="xp-chip">+${numberFormat.format(item.xpDelta)} XP</span>` : "";
-        return `<div class="motivation-event rarity-${escapeHtml(rarity)}">
-          <strong>${escapeHtml(item.title || "Reward")}</strong>
-          <span>${escapeHtml(item.description || "")}</span>
+        return `<div class="motivation-event rarity-${escapeHtml(rarity)} accent-${escapeHtml(accent)}">
+          <span class="motivation-event-icon" aria-hidden="true">${iconSvg(visualKey)}</span>
+          <span class="motivation-event-copy">
+            <strong>${escapeHtml(item.title || "Reward")}</strong>
+            <span>${escapeHtml(item.description || "")}</span>
+          </span>
           ${xp}
         </div>`;
       }).join("");
@@ -311,7 +316,9 @@ export function attachTypingApps() {
         : "Fortschritt wurde gespeichert.";
 
       return `<section class="motivation-panel ${levelUp ? "level-up" : ""}">
+        <img class="motivation-burst" src="/vendor/keywars-assets/illustrations/reward-burst.svg" alt="" width="180" height="120" loading="lazy">
         <div class="motivation-header">
+          <span class="motivation-level-icon" aria-hidden="true">${iconSvg(levelUp ? "level-up" : "xp")}</span>
           <div>
             <h3>${headline}</h3>
             <p class="muted">${subline}</p>
@@ -537,6 +544,15 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll("\"", "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function safeVisualKey(value) {
+  const key = String(value || "").toLowerCase();
+  return /^[a-z0-9-]+$/.test(key) ? key : "xp";
+}
+
+function iconSvg(key) {
+  return `<svg class="kw-icon" aria-hidden="true" focusable="false"><use href="/vendor/keywars-assets/keywars-icons.svg#kw-${safeVisualKey(key)}"></use></svg>`;
 }
 
 function normalizeTypingText(value) {

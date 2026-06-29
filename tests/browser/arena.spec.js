@@ -51,6 +51,38 @@ async function expectNoHorizontalOverflow(page) {
   expect(overflow.documentWidth, `Overflow auf ${page.url()} durch: ${overflow.offenders.join(", ")}`).toBeLessThanOrEqual(overflow.viewportWidth + 1);
 }
 
+async function expectOfflineRuntimeAssets(page) {
+  const audit = await page.evaluate(() => {
+    const origin = window.location.origin;
+    const domUrls = [...document.querySelectorAll("img[src], script[src], link[href], svg use[href]")]
+      .map((element) => {
+        const raw = element.getAttribute("src") || element.getAttribute("href") || "";
+        const absolute = element.src || element.href || raw;
+        return { raw, absolute };
+      });
+    const resourceUrls = performance.getEntriesByType("resource")
+      .map((entry) => ({ raw: entry.name, absolute: entry.name }));
+    const all = [...domUrls, ...resourceUrls];
+    const external = all
+      .filter((item) => /^https?:\/\//i.test(item.absolute))
+      .filter((item) => new URL(item.absolute).origin !== origin)
+      .map((item) => item.absolute);
+    const keywarsIconUses = [...document.querySelectorAll("svg use")]
+      .filter((item) => (item.getAttribute("href") || "").startsWith("/vendor/keywars-assets/keywars-icons.svg#kw-"))
+      .length;
+    const localIllustrations = [...document.querySelectorAll("img[src*='/vendor/keywars-assets/illustrations/'], img[src^='/vendor/keywars-assets/illustrations/']")]
+      .length;
+    return {
+      external: [...new Set(external)],
+      keywarsIconUses,
+      localIllustrations
+    };
+  });
+
+  expect(audit.external, `Externe Runtime-Assets auf ${page.url()}`).toEqual([]);
+  expect(audit.keywarsIconUses).toBeGreaterThan(0);
+}
+
 async function expectCompactMobileHeader(page) {
   const header = await page.locator(".mobile-topbar").evaluate((topbar) => {
     const bounds = topbar.getBoundingClientRect();
@@ -114,6 +146,11 @@ async function expectArenaCoreInFirstView(page) {
   expect(layout.inputBottom).toBeLessThan(layout.viewportHeight - 76);
 }
 
+async function expectArenaConnected(page) {
+  await expect(page.locator("[data-arena-connection-quality]")).toHaveText(/Verbindung: (aktiv|neu verbunden)/, { timeout: 15_000 });
+  await expect(page.getByText("Arena-Verbindung ist nicht aktiv.")).toHaveCount(0);
+}
+
 async function expectMobilePageEndClearOfBottomNav(page) {
   await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
   await page.waitForTimeout(100);
@@ -146,6 +183,27 @@ async function expectMobilePageEndClearOfBottomNav(page) {
   expect(clearance.lastBottom, `Letztes Element wird von Bottom-Nav verdeckt: ${clearance.lastText}`).toBeLessThanOrEqual(clearance.navTop - 4);
 }
 
+async function expectArenaCreateFormBeforePreview(page) {
+  const order = await page.evaluate(() => {
+    const form = document.querySelector(".arena-create-form")?.getBoundingClientRect();
+    const preview = document.querySelector(".arena-create-preview")?.getBoundingClientRect();
+    const titleInput = document.querySelector(".arena-create-form input[name='Input.Title']")?.getBoundingClientRect();
+    if (!form || !preview || !titleInput) {
+      throw new Error("Arena-Erstellen-Formular oder Vorschau fehlt.");
+    }
+
+    return {
+      formTop: Math.round(form.top),
+      previewTop: Math.round(preview.top),
+      titleInputBottom: Math.round(titleInput.bottom),
+      viewportHeight: window.innerHeight
+    };
+  });
+
+  expect(order.formTop).toBeLessThan(order.previewTop);
+  expect(order.titleInputBottom).toBeLessThan(order.viewportHeight * 0.58);
+}
+
 test("Dashboard und Einstellungen rendern im echten Browser", async ({ page }) => {
   await login(page, "browser.smoke");
 
@@ -155,6 +213,7 @@ test("Dashboard und Einstellungen rendern im echten Browser", async ({ page }) =
   await expect(page.locator(".daily-board-panel")).toBeVisible();
   await expect(page.locator(".quest-card").first()).toBeVisible();
   await expect(page.locator(".recent-results-panel")).toBeVisible();
+  await expectOfflineRuntimeAssets(page);
   await expectNoHorizontalOverflow(page);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
@@ -169,6 +228,24 @@ test("Dashboard und Einstellungen rendern im echten Browser", async ({ page }) =
   await expect(page.getByRole("heading", { name: "Einstellungen" })).toBeVisible();
   await expect(page.getByText("Identität aus AD/LDAP")).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("lang", "de");
+});
+
+test("Offline-Visuals zeigen Achievement-Katalog und Mission-Icons", async ({ page }) => {
+  await login(page, "browser.visual.assets");
+
+  await page.goto("/profil/erfolge");
+  await expect(page.getByRole("heading", { name: "Erfolge", exact: true })).toBeVisible();
+  expect(await page.locator(".achievement-card").count()).toBeGreaterThan(20);
+  await expect(page.locator(".achievement-card.is-locked").first()).toBeVisible();
+  await expect(page.locator("img[src*='motivator-achievements.svg']")).toBeVisible();
+  await expectOfflineRuntimeAssets(page);
+  await expectNoHorizontalOverflow(page);
+
+  await page.goto("/profil/ziele");
+  await expect(page.getByRole("heading", { name: "Ziele" })).toBeVisible();
+  await expect(page.locator(".quest-card .quest-icon .kw-icon").first()).toBeVisible();
+  await expectOfflineRuntimeAssets(page);
+  await expectNoHorizontalOverflow(page);
 });
 
 test("App-Shell nutzt Mobile- und Tablet-Breakpoints ohne tote Fläche", async ({ page }) => {
@@ -194,6 +271,9 @@ test("Mobile Bottom-Navigation verdeckt keine Formular- oder Trainingsenden", as
   for (const route of ["/arena", "/arena/neu", "/spielen/sprint", "/spielen/fehlerfokus", "/texte/sammlungen/neu", "/herausforderungen/neu"]) {
     await page.goto(route);
     await expectResponsiveAppShell(page, 390);
+    if (route === "/arena/neu") {
+      await expectArenaCreateFormBeforePreview(page);
+    }
     await expectMobilePageEndClearOfBottomNav(page);
     await expectNoHorizontalOverflow(page);
   }
@@ -221,6 +301,41 @@ test("Tageschallenge startet aus einem klaren manuellen Zustand", async ({ page 
   await expectCompactMobileHeader(page);
   await expectResponsiveAppShell(page, 390);
   await expect(page.locator(".daily-challenge-card.typing-idle")).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+});
+
+test("Vorbereitete Sofortrunden zeigen keinen stehenden Countdown oder tote Werte", async ({ page }) => {
+  await login(page, "browser.prepared.timer");
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  await page.goto("/");
+  await expect(page.locator(".dashboard-quick-round.typing-prepared")).toBeVisible({ timeout: 15_000 });
+  const dashboardPrepared = await page.locator(".dashboard-quick-round").evaluate((card) => {
+    const timer = card.querySelector(".typing-timer");
+    const timerStrong = timer?.querySelector("strong");
+    const footer = card.querySelector(".dashboard-round-footer");
+    return {
+      timerText: timer?.textContent || "",
+      timerValueVisible: timerStrong instanceof HTMLElement && getComputedStyle(timerStrong).display !== "none",
+      footerVisible: footer instanceof HTMLElement && getComputedStyle(footer).display !== "none"
+    };
+  });
+  expect(dashboardPrepared.timerText).not.toMatch(/\d{2}:\d{2}\.\d/u);
+  expect(dashboardPrepared.timerValueVisible).toBe(false);
+  expect(dashboardPrepared.footerVisible).toBe(false);
+
+  await page.goto("/spielen");
+  await expect(page.locator(".play-quickstart.typing-prepared")).toBeVisible({ timeout: 15_000 });
+  const playPrepared = await page.locator(".play-quickstart").evaluate((card) => {
+    const timer = card.querySelector(".typing-timer");
+    const timerStrong = timer?.querySelector("strong");
+    return {
+      timerText: timer?.textContent || "",
+      timerValueVisible: timerStrong instanceof HTMLElement && getComputedStyle(timerStrong).display !== "none"
+    };
+  });
+  expect(playPrepared.timerText).not.toMatch(/\d{2}:\d{2}\.\d/u);
+  expect(playPrepared.timerValueVisible).toBe(false);
   await expectNoHorizontalOverflow(page);
 });
 
@@ -456,6 +571,9 @@ test("Tippabschluss zeigt Motivation ohne bewegte Pflichtanimation", async ({ pa
   await expect(page.locator(".xp-reveal")).toBeVisible();
   await expect(page.locator(".motivation-event").first()).toBeVisible();
   await expect(page.locator(".xp-chip").first()).toBeVisible();
+  const finishedStatus = await page.locator(".play-quickstart .typing-timer").evaluate((timer) =>
+    getComputedStyle(timer, "::before").content);
+  expect(finishedStatus).toContain("FERTIG");
   await expectNoHorizontalOverflow(page);
 });
 
@@ -599,6 +717,8 @@ test("Arena läuft mit zwei getrennten Browserkontexten über SignalR", async ({
     await guest.getByRole("button", { name: "Beitreten" }).click();
     await expect(guest).toHaveURL(roomUrl);
     await expect(guest.getByRole("button", { name: "Starten" })).toHaveCount(0);
+    await expectArenaConnected(host);
+    await expectArenaConnected(guest);
 
     await guest.getByRole("button", { name: "Bereit" }).click();
     await expect(guest.getByRole("button", { name: "Nicht bereit" })).toBeVisible();

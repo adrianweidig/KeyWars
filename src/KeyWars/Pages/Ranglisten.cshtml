@@ -35,24 +35,29 @@
     </div>
     <div class="competition-hero-stats">
         <div>
+            <span class="competition-stat-icon" aria-hidden="true">@UiIcons.Svg("award", "kw-icon")</span>
             <span>Deine Division</span>
             <strong>@Model.Overview.CurrentDivision</strong>
         </div>
         <div>
+            <span class="competition-stat-icon" aria-hidden="true">@UiIcons.Svg("graph", "kw-icon")</span>
             <span>Persönliches Bestes</span>
             <strong>@Model.Overview.PersonalBest</strong>
         </div>
         <div>
+            <span class="competition-stat-icon" aria-hidden="true">@UiIcons.Svg("trophy", "kw-icon")</span>
             <span>Aktives Board</span>
             <strong>@board.Title</strong>
         </div>
         <div>
+            <span class="competition-stat-icon" aria-hidden="true">@UiIcons.Svg("target", "kw-icon")</span>
             <span>Rangziel</span>
             <strong>@nextTargetLabel</strong>
         </div>
         @if (podium.Count > 0)
         {
             <div class="competition-board-peek">
+                <span class="competition-stat-icon" aria-hidden="true">@UiIcons.Svg("trophy", "kw-icon")</span>
                 <span>Top-Ausschnitt</span>
                 <ol>
                     @foreach (var entry in podium)
@@ -151,11 +156,14 @@
 
         @if (board.Entries.Count == 0)
         {
-            <div class="empty-state featured-empty">
-                <h3>Noch kein Wert auf diesem Board</h3>
-                <p>@board.EmptyMessage</p>
-                <div class="card-actions">
-                    @CompetitionCta(query, "Wert setzen")
+            <div class="empty-state featured-empty illustrated-empty">
+                <img src="~/vendor/keywars-assets/illustrations/motivator-leaderboard.svg" alt="" width="280" height="210" loading="lazy" />
+                <div>
+                    <h3>Noch kein Wert auf diesem Board</h3>
+                    <p>@board.EmptyMessage</p>
+                    <div class="card-actions">
+                        @CompetitionCta(query, "Wert setzen")
+                    </div>
                 </div>
             </div>
         }
@@ -165,7 +173,7 @@
                 @foreach (var entry in podium)
                 {
                     <article class="podium-card rank-@entry.Rank @(entry.IsCurrentUser ? "is-current" : "")">
-                        <span class="podium-rank">#@entry.Rank.ToString("N0", culture)</span>
+                        <span class="podium-rank">@UiIcons.Svg(entry.Rank == 1 ? "trophy" : "award", "kw-icon") #@entry.Rank.ToString("N0", culture)</span>
                         <span class="user-avatar" aria-hidden="true">@entry.Initials</span>
                         <h3>@entry.DisplayName</h3>
                         <strong>@entry.PrimaryValue</strong>

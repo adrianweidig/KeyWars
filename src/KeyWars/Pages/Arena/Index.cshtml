@@ -23,6 +23,7 @@
 
 <section class="arena-entry-grid">
     <article class="card arena-entry arena-entry-primary">
+        <span class="arena-entry-icon is-live" aria-hidden="true">@UiIcons.Svg("people", "kw-icon")</span>
         <span class="badge">Sofort</span>
         <h2>Rennen anlegen</h2>
         <p class="muted">Wähle einen Text, teile den Code und starte nach dem Countdown. Ideal für kurze Wettkampf-Sessions.</p>
@@ -31,6 +32,7 @@
         </div>
     </article>
     <article class="card arena-entry">
+        <span class="arena-entry-icon is-code" aria-hidden="true">@UiIcons.Svg("keyboard", "kw-icon")</span>
         <span class="badge">Code</span>
         <h2>Challenge annehmen</h2>
         <p class="muted">Füge den Raumcode ein und springe direkt in die Lobby deines Gegners.</p>
@@ -39,6 +41,7 @@
         </div>
     </article>
     <article class="card arena-entry">
+        <span class="arena-entry-icon is-open" aria-hidden="true">@UiIcons.Svg("flag", "kw-icon")</span>
         <span class="badge">Offen</span>
         <h2>Offene Lobbys</h2>
         <p class="muted">Sieh nach, ob gerade jemand auf Mitspieler wartet, oder sammle vorher Tempo in einer Sofortrunde.</p>
@@ -55,12 +58,15 @@
     </div>
     @if (Model.Rooms.Count == 0)
     {
-        <div class="empty-state">
-            <h3>Keine Lobby wartet gerade</h3>
-            <p>Starte selbst ein kurzes Rennen oder nutze eine Sofortrunde, bis der nächste Gegner online ist.</p>
-            <div class="card-actions">
-                <a class="button" asp-page="/Arena/Neu">Live-Rennen starten</a>
-                <a class="button secondary" asp-page="/Spielen/Index">Sofortrunde spielen</a>
+        <div class="empty-state illustrated-empty">
+            <img src="~/vendor/keywars-assets/illustrations/motivator-arena.svg" alt="" width="280" height="210" loading="lazy" />
+            <div>
+                <h3>Keine Lobby wartet gerade</h3>
+                <p>Starte selbst ein kurzes Rennen oder nutze eine Sofortrunde, bis der nächste Gegner online ist.</p>
+                <div class="card-actions">
+                    <a class="button" asp-page="/Arena/Neu">Live-Rennen starten</a>
+                    <a class="button secondary" asp-page="/Spielen/Index">Sofortrunde spielen</a>
+                </div>
             </div>
         </div>
     }

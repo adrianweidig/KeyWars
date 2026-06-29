@@ -174,14 +174,19 @@
         <h2>Ziele und Erfolge</h2>
         @if (Model.Insights.CurrentGoals.Count == 0 && Model.Insights.FeaturedAchievements.Count == 0)
         {
-            <p class="muted">Aktuelle Ziele und freigeschaltete Erfolge erscheinen hier nach den ersten Trainings.</p>
+            <div class="empty-state compact-empty illustrated-empty">
+                <img src="~/vendor/keywars-assets/illustrations/motivator-achievements.svg" alt="" width="220" height="165" loading="lazy" />
+                <p class="muted">Aktuelle Ziele und freigeschaltete Erfolge erscheinen hier nach den ersten Trainings.</p>
+            </div>
         }
         <div class="quest-grid compact">
         @foreach (var mission in Model.Insights.CurrentGoals.Take(4))
         {
             var percent = mission.TargetValue <= 0 ? 0 : Math.Min(100, mission.CurrentValue * 100d / mission.TargetValue);
-            <div class="quest-card @(mission.Completed ? "completed" : "")">
+            var visual = MotivationVisuals.ForMissionKey(mission.Key);
+            <div class="quest-card accent-@visual.Accent @(mission.Completed ? "completed" : "")">
                 <div class="quest-card-head">
+                    <span class="quest-icon is-@visual.Accent" aria-hidden="true">@UiIcons.Svg(visual.VisualKey, "kw-icon")</span>
                     <strong>@mission.Title</strong>
                     <span class="xp-chip">+@mission.XpReward.ToString("N0", culture) XP</span>
                 </div>

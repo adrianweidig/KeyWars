@@ -24,7 +24,7 @@ module.exports = defineConfig({
   ],
   outputDir: "output/playwright/test-results",
   webServer: {
-    command: `node tests/browser/start-keywars.mjs ${port}`,
+    command: `node scripts/run-modern-node.js tests/browser/start-keywars.mjs ${port}`,
     url: `${baseURL}/health/ready`,
     timeout: 120_000,
     reuseExistingServer: !process.env.CI,

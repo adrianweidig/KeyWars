@@ -35,6 +35,7 @@
 
 html {
   min-height: 100%;
+  overflow-x: hidden;
   font-family: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   background: var(--bg);
   color: var(--text);
@@ -584,6 +585,18 @@ a:hover {
   color: var(--muted);
 }
 
+.play-mode-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.play-mode-label .kw-icon {
+  width: 15px;
+  height: 15px;
+  color: var(--app-cyan);
+}
+
 .play-library {
   padding: 18px;
 }
@@ -723,6 +736,23 @@ a:hover {
   font-size: 1.18rem;
 }
 
+.competition-stat-icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  margin-bottom: 2px;
+  border: 1px solid rgba(66, 227, 220, 0.26);
+  border-radius: 50%;
+  color: var(--app-cyan);
+  background: radial-gradient(circle at 50% 35%, rgba(45, 226, 238, 0.26), rgba(10, 28, 42, 0.38));
+}
+
+.competition-stat-icon .kw-icon {
+  width: 16px;
+  height: 16px;
+}
+
 .competition-privacy {
   display: flex;
   align-items: center;
@@ -847,8 +877,18 @@ a:hover {
 }
 
 .podium-rank {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   color: var(--ok);
   font-weight: 900;
+}
+
+.podium-rank .kw-icon {
+  width: 17px;
+  height: 17px;
+  color: var(--reward);
+  filter: drop-shadow(0 0 10px rgba(242, 184, 75, 0.28));
 }
 
 .podium-card h3,
@@ -1279,6 +1319,19 @@ progress.xp-progress::-moz-progress-bar {
   gap: 10px;
 }
 
+.quest-card-head .quest-icon {
+  flex: 0 0 auto;
+}
+
+.quest-card-head h2 {
+  flex: 1 1 auto;
+}
+
+.quest-card-head > strong {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .quest-card-head > :first-child {
   min-width: 0;
   overflow-wrap: anywhere;
@@ -1397,6 +1450,20 @@ progress.xp-progress::-moz-progress-bar {
   align-content: start;
 }
 
+.achievement-card.is-locked {
+  border-color: rgba(169, 185, 204, 0.16);
+  background:
+    linear-gradient(135deg, rgba(169, 185, 204, 0.06), transparent 58%),
+    rgba(14, 21, 29, 0.72);
+  opacity: 0.74;
+}
+
+.achievement-card.is-locked .achievement-medal {
+  border-color: rgba(169, 185, 204, 0.22);
+  color: var(--muted);
+  filter: grayscale(0.25);
+}
+
 .achievement-card p {
   grid-column: 1 / -1;
   margin: 0;
@@ -1408,6 +1475,7 @@ progress.xp-progress::-moz-progress-bar {
 
 .achievement-medal {
   display: grid;
+  grid-template-rows: 1fr auto;
   place-items: center;
   width: 58px;
   height: 58px;
@@ -1419,6 +1487,16 @@ progress.xp-progress::-moz-progress-bar {
   color: var(--warn);
   font-size: 0.78rem;
   font-weight: 900;
+}
+
+.achievement-medal .kw-icon {
+  width: 24px;
+  height: 24px;
+  filter: drop-shadow(0 0 12px rgba(242, 184, 75, 0.34));
+}
+
+.achievement-medal span {
+  line-height: 1;
 }
 
 .achievement-card.rarity-rare .achievement-medal,
@@ -1435,6 +1513,12 @@ progress.xp-progress::-moz-progress-bar {
   background:
     linear-gradient(135deg, rgba(143, 120, 255, 0.13), transparent 54%),
     var(--surface);
+}
+
+.locked-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
 }
 
 .muted {
@@ -2197,6 +2281,7 @@ select:focus-visible {
 }
 
 .motivation-panel {
+  position: relative;
   display: grid;
   gap: 12px;
   margin-top: 14px;
@@ -2206,6 +2291,7 @@ select:focus-visible {
   background:
     linear-gradient(135deg, rgba(53, 211, 154, 0.1), rgba(242, 184, 75, 0.055)),
     var(--surface);
+  overflow: hidden;
 }
 
 .motivation-panel.level-up {
@@ -2213,11 +2299,42 @@ select:focus-visible {
   animation: reward-pop var(--motion-celebration) var(--ease-emphasis);
 }
 
+.motivation-burst {
+  position: absolute;
+  inset: -22px 12px auto auto;
+  width: 150px;
+  height: auto;
+  opacity: 0.18;
+  pointer-events: none;
+}
+
 .motivation-header {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.motivation-level-icon,
+.motivation-event-icon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid rgba(242, 184, 75, 0.42);
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 50% 35%, rgba(242, 184, 75, 0.24), transparent 62%),
+    rgba(19, 34, 51, 0.76);
+  color: var(--reward);
+}
+
+.motivation-level-icon .kw-icon,
+.motivation-event-icon .kw-icon {
+  width: 20px;
+  height: 20px;
 }
 
 .motivation-header h3,
@@ -2226,6 +2343,8 @@ select:focus-visible {
 }
 
 .motivation-events {
+  position: relative;
+  z-index: 1;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 10px;
@@ -2233,6 +2352,8 @@ select:focus-visible {
 
 .motivation-event {
   display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  align-items: center;
   gap: 6px;
   min-height: 98px;
   padding: 10px;
@@ -2240,6 +2361,12 @@ select:focus-visible {
   border-radius: 8px;
   background: rgba(19, 34, 51, 0.78);
   animation: badge-unlock var(--motion-normal) var(--ease-emphasis);
+}
+
+.motivation-event-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
 }
 
 .motivation-event.rarity-rare {
@@ -2258,7 +2385,7 @@ select:focus-visible {
   display: block;
 }
 
-.motivation-event span {
+.motivation-event .motivation-event-copy > span {
   color: var(--muted);
   font-size: 0.88rem;
 }
@@ -2473,6 +2600,32 @@ select:focus-visible {
   display: grid;
   align-content: start;
   gap: 10px;
+}
+
+.arena-entry-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid rgba(66, 227, 220, 0.25);
+  border-radius: 50%;
+  color: var(--app-cyan);
+  background: radial-gradient(circle at 50% 34%, rgba(45, 226, 238, 0.4), rgba(12, 38, 58, 0.48));
+}
+
+.arena-entry-icon.is-code {
+  color: var(--app-gold);
+  background: radial-gradient(circle at 50% 34%, rgba(243, 201, 77, 0.42), rgba(68, 48, 15, 0.46));
+}
+
+.arena-entry-icon.is-open {
+  color: var(--app-green);
+  background: radial-gradient(circle at 50% 34%, rgba(97, 238, 143, 0.36), rgba(19, 70, 45, 0.46));
+}
+
+.arena-entry-icon .kw-icon {
+  width: 21px;
+  height: 21px;
 }
 
 .arena-create-layout {
@@ -3231,6 +3384,24 @@ select:focus-visible {
     display: grid;
   }
 
+  .illustrated-empty {
+    grid-template-columns: 1fr;
+  }
+
+  .illustrated-empty img {
+    width: min(100%, 220px);
+    justify-self: center;
+  }
+
+  .motivation-event {
+    grid-template-columns: 38px minmax(0, 1fr);
+  }
+
+  .motivation-event .xp-chip {
+    grid-column: 2;
+    justify-self: start;
+  }
+
   .level-cockpit .section-title-row {
     display: grid;
     gap: 10px;
@@ -3799,7 +3970,7 @@ button.tertiary {
 
 .arena-entry {
   min-height: 210px;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
 }
 
 .arena-entry .badge,
@@ -3939,6 +4110,25 @@ button.tertiary {
     rgba(14, 21, 29, 0.92);
 }
 
+.illustrated-empty {
+  display: grid;
+  grid-template-columns: minmax(112px, 0.38fr) minmax(0, 0.62fr);
+  align-items: center;
+  gap: 14px;
+}
+
+.illustrated-empty img {
+  width: min(100%, 280px);
+  height: auto;
+  aspect-ratio: 4 / 3;
+  object-fit: contain;
+  filter: drop-shadow(0 16px 30px rgba(37, 200, 216, 0.16));
+}
+
+.achievement-shelf > .illustrated-empty {
+  grid-column: 1 / -1;
+}
+
 .featured-empty {
   min-height: 180px;
   align-content: center;
@@ -3963,6 +4153,28 @@ button.tertiary {
 
 .quest-card {
   border-color: rgba(169, 185, 204, 0.18);
+}
+
+.quest-card.accent-speed,
+.achievement-card.accent-speed {
+  border-color: rgba(45, 226, 238, 0.34);
+}
+
+.quest-card.accent-precision,
+.achievement-card.accent-precision {
+  border-color: rgba(143, 227, 109, 0.34);
+}
+
+.quest-card.accent-arena,
+.achievement-card.accent-arena,
+.achievement-card.accent-team {
+  border-color: rgba(143, 120, 255, 0.4);
+}
+
+.quest-card.accent-weekly,
+.achievement-card.accent-mission,
+.achievement-card.accent-level {
+  border-color: rgba(242, 184, 75, 0.42);
 }
 
 .quest-card:not(.completed):has(progress[value^="7"]),
@@ -4203,6 +4415,25 @@ body.app-authenticated {
     linear-gradient(180deg, #07111b 0%, var(--app-bg) 48%, #04080d 100%);
 }
 
+body.app-authenticated::before {
+  background-image:
+    url("/img/keywars-circuit.svg"),
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.028) 1px, transparent 1px);
+  background-position:
+    right -150px top -62px,
+    0 0,
+    0 0;
+  background-repeat:
+    no-repeat,
+    repeat,
+    repeat;
+  background-size:
+    min(960px, 82vw) auto,
+    42px 42px,
+    42px 42px;
+}
+
 .app-shell {
   min-height: 100dvh;
 }
@@ -4236,6 +4467,15 @@ body.app-authenticated {
 .app-icon {
   width: 19px;
   height: 19px;
+  flex: 0 0 auto;
+  fill: currentColor;
+}
+
+.kw-icon {
+  width: 18px;
+  height: 18px;
+  display: block;
+  fill: currentColor;
   flex: 0 0 auto;
 }
 
@@ -4420,6 +4660,19 @@ body.app-authenticated {
   color: #fff;
 }
 
+.status-icon {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+}
+
+.status-icon.is-streak {
+  color: var(--app-gold);
+  filter: drop-shadow(0 0 10px rgba(243, 201, 77, 0.34));
+}
+
 .level-chip {
   background: rgba(24, 42, 64, 0.9);
 }
@@ -4476,6 +4729,33 @@ body.app-authenticated {
   background:
     radial-gradient(circle at 50% 30%, rgba(243, 201, 77, 0.38), transparent 58%),
     rgba(243, 201, 77, 0.08);
+}
+
+.rank-token {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 42px;
+  color: var(--app-gold);
+}
+
+.rank-token .kw-icon {
+  position: absolute;
+  width: 42px;
+  height: 42px;
+  opacity: 0.62;
+  filter: drop-shadow(0 0 14px rgba(243, 201, 77, 0.32));
+}
+
+.next-rank .rank-token strong {
+  position: relative;
+  z-index: 1;
+  min-width: auto;
+  height: auto;
+  border: 0;
+  background: transparent;
+  color: #fff;
 }
 
 .app-tools {
@@ -4636,6 +4916,12 @@ body.app-authenticated {
   color: var(--app-green);
 }
 
+.dashboard-quick-round.typing-finished .typing-timer::before,
+.play-quickstart.typing-finished .typing-timer::before {
+  content: "FERTIG";
+  color: var(--reward);
+}
+
 .dashboard-quick-round .typing-timer::after,
 .play-quickstart .typing-timer::after {
   content: "";
@@ -4651,6 +4937,12 @@ body.app-authenticated {
     linear-gradient(90deg, var(--app-green) 0 54%, rgba(255, 255, 255, 0.11) 54% 100%);
 }
 
+.dashboard-quick-round.typing-finished .typing-timer::after,
+.play-quickstart.typing-finished .typing-timer::after {
+  background:
+    linear-gradient(90deg, var(--reward) 0 100%, rgba(255, 255, 255, 0.11) 100% 100%);
+}
+
 .dashboard-quick-round .typing-timer strong,
 .play-quickstart .typing-timer strong {
   color: #fff;
@@ -4659,6 +4951,18 @@ body.app-authenticated {
 
 .dashboard-quick-round .typing-timer span,
 .play-quickstart .typing-timer span {
+  display: none;
+}
+
+.dashboard-quick-round.typing-prepared .typing-timer,
+.play-quickstart.typing-prepared .typing-timer {
+  grid-template-columns: auto minmax(160px, 1fr);
+}
+
+.dashboard-quick-round.typing-prepared .typing-timer strong,
+.dashboard-quick-round.typing-prepared .typing-timer span,
+.play-quickstart.typing-prepared .typing-timer strong,
+.play-quickstart.typing-prepared .typing-timer span {
   display: none;
 }
 
@@ -4716,6 +5020,11 @@ body.app-authenticated {
   font-size: 1.12rem;
 }
 
+.dashboard-quick-round.typing-prepared .dashboard-round-footer,
+.dashboard-quick-round.typing-running .dashboard-round-footer {
+  display: none;
+}
+
 .daily-board-panel {
   display: flex;
   flex-direction: column;
@@ -4769,6 +5078,12 @@ body.app-authenticated {
   min-height: 18px;
   color: var(--app-gold);
   font-weight: 900;
+}
+
+.podium-crown .kw-icon {
+  width: 18px;
+  height: 18px;
+  filter: drop-shadow(0 0 10px rgba(243, 201, 77, 0.36));
 }
 
 .mini-podium-player strong,
@@ -4863,23 +5178,70 @@ body.app-authenticated {
   font-weight: 900;
 }
 
+.quest-icon .kw-icon,
+.result-icon .kw-icon,
+.quickstart-icon .kw-icon {
+  width: 18px;
+  height: 18px;
+  filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.18));
+}
+
 .quest-icon.is-target,
+.quest-icon.is-training,
+.quest-icon.is-precision,
+.quest-icon.is-common,
 .result-icon.is-sprint,
-.quickstart-icon {
+.quickstart-icon.is-sprint {
   background: radial-gradient(circle at 50% 35%, rgba(97, 238, 143, 0.62), rgba(20, 90, 58, 0.45));
 }
 
 .quest-icon.is-fire,
-.result-icon.is-words {
+.quest-icon.is-streak,
+.quest-icon.is-weekly,
+.quest-icon.is-mission,
+.quest-icon.is-rare,
+.result-icon.is-speed,
+.result-icon.is-words,
+.quickstart-icon.is-words,
+.quickstart-icon.is-challenge {
   color: var(--app-gold);
   background: radial-gradient(circle at 50% 35%, rgba(243, 201, 77, 0.52), rgba(97, 73, 20, 0.42));
 }
 
 .quest-icon.is-bolt,
+.quest-icon.is-speed,
+.quest-icon.is-focus,
+.quest-icon.is-texts,
+.result-icon.is-training,
+.result-icon.is-focus,
+.result-icon.is-texts,
+.result-icon.is-common,
 .result-icon.is-bolt,
-.result-icon.is-text {
+.result-icon.is-text,
+.quickstart-icon.is-bolt,
+.quickstart-icon.is-arena,
+.quickstart-icon.is-text {
   color: var(--app-cyan);
   background: radial-gradient(circle at 50% 35%, rgba(45, 226, 238, 0.42), rgba(16, 62, 87, 0.48));
+}
+
+.quickstart-icon.is-arena {
+  color: #d6cbff;
+  background: radial-gradient(circle at 50% 35%, rgba(143, 120, 255, 0.45), rgba(40, 31, 82, 0.5));
+}
+
+.quest-icon.is-arena,
+.quest-icon.is-team,
+.result-icon.is-arena,
+.result-icon.is-team {
+  color: #d6cbff;
+  background: radial-gradient(circle at 50% 35%, rgba(143, 120, 255, 0.45), rgba(40, 31, 82, 0.5));
+}
+
+.quest-icon.is-epic,
+.result-icon.is-epic {
+  color: #f0eaff;
+  background: radial-gradient(circle at 50% 35%, rgba(143, 120, 255, 0.64), rgba(69, 44, 141, 0.48));
 }
 
 .quest-footer {
@@ -4954,6 +5316,18 @@ body.app-authenticated {
 
 .quickstart-card .quickstart-icon {
   grid-row: 1 / 3;
+}
+
+.quickstart-arrow {
+  grid-row: 1 / 3;
+  display: grid;
+  place-items: center;
+  color: var(--app-muted);
+}
+
+.quickstart-arrow .kw-icon {
+  width: 15px;
+  height: 15px;
 }
 
 .quickstart-card strong,
@@ -5281,7 +5655,7 @@ body.app-authenticated {
     border-left: 0;
   }
 
-  .status-cockpit .next-rank span,
+  .status-cockpit .next-rank > span:first-child,
   .app-tools {
     display: none;
   }
@@ -5371,6 +5745,11 @@ body.app-authenticated {
     grid-template-columns: auto auto minmax(80px, 1fr);
     gap: 8px;
     margin-bottom: 10px;
+  }
+
+  .dashboard-quick-round.typing-prepared .typing-timer,
+  .play-quickstart.typing-prepared .typing-timer {
+    grid-template-columns: auto minmax(80px, 1fr);
   }
 
   .mini-podium {
@@ -5848,8 +6227,12 @@ body.app-public.auth-exit-page .shell {
     min-height: 0;
   }
 
+  .arena-create-form {
+    order: 1;
+  }
+
   .arena-create-preview {
-    order: -1;
+    order: 2;
   }
 
   .arena-room-page .app-main {
