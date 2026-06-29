@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.7 - 2026-06-29
+
+- Made the visual asset manifest rebuild deterministic so
+  `npm run assets:build` no longer dirties a clean checkout by refreshing only
+  the manifest generation timestamp.
+
 ## v0.2.6 - 2026-06-29
 
 - Added an offline visual asset pipeline for KeyWars with vendored source

@@ -664,6 +664,7 @@ function crc32(buffer) {
 }
 
 function readManifestData() {
+  const existingGeneratedAt = readExistingGeneratedAt();
   const manifestSources = sources.map(function(source) {
     const originalRelative = path.join("third_party", "visual-assets", "originals", source.originalFile).replace(/\\/g, "/");
     const absolute = path.join(root, originalRelative);
@@ -744,10 +745,23 @@ function readManifestData() {
   });
 
   return {
-    generatedAt: new Date().toISOString(),
+    generatedAt: existingGeneratedAt || new Date().toISOString(),
     offlineRuntimePolicy: "Runtime pages must load only same-origin assets from wwwroot. Source downloads are build-time only.",
     sources: manifestSources
   };
+}
+
+function readExistingGeneratedAt() {
+  if (!fs.existsSync(manifestPath)) {
+    return "";
+  }
+
+  try {
+    const manifest = readJson(manifestPath);
+    return typeof manifest.generatedAt === "string" ? manifest.generatedAt : "";
+  } catch {
+    return "";
+  }
 }
 
 function writeManifest(manifest) {
