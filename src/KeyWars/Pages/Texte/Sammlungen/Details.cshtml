@@ -11,12 +11,21 @@
     </div>
 </section>
 
-<section class="grid">
+<section class="grid text-library-grid collection-text-grid">
 @foreach (var text in Model.Texts)
 {
-    <article class="card">
-        <h2>@text.Title</h2>
-        <a class="button secondary" asp-page="/Spielen/Text" asp-route-id="@text.Id">Trainieren</a>
+    <article class="card text-card collection-text-card">
+        <div>
+            <h2>@text.Title</h2>
+            <div class="metadata-row">
+                <span class="meta-badge">@text.CharacterCount Zeichen</span>
+                <span class="meta-badge">@(text.IsStandard ? "Standard" : DisplayNames.For(text.Visibility))</span>
+            </div>
+        </div>
+        <div class="card-actions">
+            <a class="button" asp-page="/Spielen/Text" asp-route-id="@text.Id">Trainieren</a>
+            <a class="button secondary" asp-page="/Texte/Details" asp-route-id="@text.Id">Ansehen</a>
+        </div>
     </article>
 }
 </section>

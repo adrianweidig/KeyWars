@@ -171,7 +171,7 @@ builder.Services.AddRateLimiter(options =>
         var key = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
         return RateLimitPartition.GetFixedWindowLimiter(key, _ => new FixedWindowRateLimiterOptions
         {
-            PermitLimit = 10,
+            PermitLimit = developmentLogin ? 200 : 10,
             QueueLimit = 0,
             Window = TimeSpan.FromMinutes(1),
             AutoReplenishment = true

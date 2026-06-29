@@ -6,6 +6,7 @@
     var currentParticipant = Model.Snapshot.Participants.FirstOrDefault(item => item.ProfileId == Model.CurrentProfileId);
     var isHost = Model.Snapshot.CreatorProfileId == Model.CurrentProfileId;
     var inLobby = Model.Snapshot.Phase == LiveRoomPhase.Lobby;
+    var isRunning = Model.Snapshot.Phase == LiveRoomPhase.Running;
     var readyButtonText = currentParticipant?.Ready == true ? "Nicht bereit" : "Bereit";
     var rankedParticipants = Model.Snapshot.Participants
         .OrderBy(item => item.Placement ?? int.MaxValue)
@@ -28,20 +29,20 @@
             <span class="copy-status" data-copy-status aria-live="polite"></span>
         </div>
     </div>
-    <div class="page-actions">
+    <div class="page-actions arena-room-actions">
         @if (inLobby)
         {
-            <form method="post" asp-page-handler="Ready" data-arena-ready-form data-ready="@((currentParticipant?.Ready == true).ToString().ToLowerInvariant())">
+            <form method="post" asp-page-handler="Ready" data-arena-ready-form data-ready="@((currentParticipant?.Ready == true).ToString().ToLowerInvariant())" class="lobby-only-action">
                 <button type="submit" class="secondary">@readyButtonText</button>
             </form>
         }
         @if (isHost && inLobby)
         {
-            <form method="post" asp-page-handler="Start" data-arena-start-form>
+            <form method="post" asp-page-handler="Start" data-arena-start-form class="lobby-only-action">
                 <button type="submit">Starten</button>
             </form>
         }
-        <button type="button" class="secondary" data-arena-leave>Raum verlassen</button>
+        <button type="button" class="secondary arena-leave-button" data-arena-leave>Raum verlassen</button>
     </div>
 </section>
 
@@ -75,12 +76,12 @@
                 @Model.Snapshot.TargetText
             }
         </div>
-        <div class="form-grid form-grid-spaced">
+        <div class="form-grid form-grid-spaced arena-input-grid">
             <label>
                 Eingabe
                 <textarea asp-for="Input" class="typing-input" data-arena-input autocapitalize="off" autocomplete="off" spellcheck="false"></textarea>
             </label>
-            <button type="button" class="secondary" data-arena-dnf>Runde aufgeben</button>
+            <button type="button" class="secondary arena-running-action @(isRunning ? "" : "is-hidden")" data-arena-dnf>Runde aufgeben</button>
         </div>
         <section class="live-typing-board @displayMode" data-arena-live-board aria-label="Live-Texte der Teilnehmenden">
             <div class="live-typing-board-header">

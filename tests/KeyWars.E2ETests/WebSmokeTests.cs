@@ -86,6 +86,41 @@ public sealed partial class WebSmokeTests : IClassFixture<KeyWarsWebFactory>
     }
 
     [Fact]
+    public async Task LogoutUsesPublicShellAndRedirectsToSignedOutState()
+    {
+        var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        await LoginAsync(client);
+
+        var logoutPage = await client.GetStringAsync("/abmelden");
+        var decodedLogout = WebUtility.HtmlDecode(logoutPage);
+
+        Assert.Contains("KeyWars verlassen", decodedLogout);
+        Assert.Contains("Jetzt abmelden", decodedLogout);
+        Assert.DoesNotContain("status-cockpit", logoutPage);
+        Assert.DoesNotContain("desktop-sidebar", logoutPage);
+        Assert.DoesNotContain("mobile-bottom-nav", logoutPage);
+        Assert.DoesNotContain("Tage Streak", decodedLogout);
+
+        var token = AntiForgeryRegex().Match(logoutPage).Groups["token"].Value;
+        var response = await client.PostAsync("/abmelden", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["__RequestVerificationToken"] = token
+        }));
+
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.Equal("/abmelden?abgemeldet=1", response.Headers.Location?.ToString());
+
+        var signedOutPage = await client.GetStringAsync("/abmelden?abgemeldet=1");
+        var decodedSignedOut = WebUtility.HtmlDecode(signedOutPage);
+
+        Assert.Contains("Du bist abgemeldet", decodedSignedOut);
+        Assert.Contains("Wieder anmelden", decodedSignedOut);
+        Assert.DoesNotContain("status-cockpit", signedOutPage);
+        Assert.DoesNotContain("desktop-sidebar", signedOutPage);
+        Assert.DoesNotContain("mobile-bottom-nav", signedOutPage);
+    }
+
+    [Fact]
     public async Task LegacyArenaRaceRouteRedirectsToCanonicalRoomWithoutManualFinishFallback()
     {
         var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
@@ -333,8 +368,8 @@ public sealed partial class WebSmokeTests : IClassFixture<KeyWarsWebFactory>
 
         var arena = await client.GetStringAsync("/arena");
 
-        Assert.Contains("Raum erstellen", arena);
-        Assert.Contains("Code eingeben", arena);
+        Assert.Contains("Live-Rennen starten", arena);
+        Assert.Contains("Code beitreten", arena);
         Assert.Contains("Offene Runde", arena);
         Assert.Contains("Max Mustermann", arena);
         Assert.Contains("1 / 8", arena);

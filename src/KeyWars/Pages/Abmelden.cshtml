@@ -2,8 +2,29 @@
 @model KeyWars.Pages.AbmeldenModel
 @{
     ViewData["Title"] = "Abmelden";
+    ViewData["ForcePublicShell"] = true;
+    ViewData["BodyClass"] = "auth-exit-page";
 }
 
-<section class="card">
-    <p>Du wirst abgemeldet.</p>
+<section class="auth-exit-card" aria-labelledby="logout-title">
+    <div class="auth-exit-mark" aria-hidden="true">KW</div>
+    @if (Model.SignedOut)
+    {
+        <span class="eyebrow">Sitzung beendet</span>
+        <h1 id="logout-title">Du bist abgemeldet</h1>
+        <p>Deine Trainingsdaten bleiben geschützt. Melde dich wieder an, wenn du den nächsten Sprint starten möchtest.</p>
+        <div class="form-actions">
+            <a class="button" asp-page="/Anmelden">Wieder anmelden</a>
+        </div>
+    }
+    else
+    {
+        <span class="eyebrow">Sicher abmelden</span>
+        <h1 id="logout-title">KeyWars verlassen</h1>
+        <p>Beende deine aktuelle Sitzung. Fortschritt, Arena-Ergebnisse und Ranglisten bleiben gespeichert.</p>
+        <form method="post" class="form-actions">
+            <button type="submit" class="logout-confirm-button">Jetzt abmelden</button>
+            <a class="button secondary" asp-page="/Index">Zurück zum Training</a>
+        </form>
+    }
 </section>

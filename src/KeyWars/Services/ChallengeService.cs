@@ -102,16 +102,33 @@ public sealed class ChallengeService(
         }
 
         var round = await db.ChallengeRounds.SingleAsync(item => item.ChallengeId == challengeId && item.RoundNumber == 1, cancellationToken);
-        var existingBinding = await db.ChallengeAttemptBindings.AnyAsync(item => item.ChallengeRoundId == round.Id && item.UserProfileId == profileId, cancellationToken);
-        if (existingBinding)
-        {
-            throw new InvalidOperationException("Für diese Challenge-Runde wurde bereits ein Versuch gestartet.");
-        }
-
         var existingResult = await db.ChallengeRoundResults.AnyAsync(item => item.ChallengeRoundId == round.Id && item.UserProfileId == profileId, cancellationToken);
         if (existingResult)
         {
             throw new InvalidOperationException("Diese Challenge-Runde wurde bereits abgeschlossen.");
+        }
+
+        var existingBinding = await db.ChallengeAttemptBindings.SingleOrDefaultAsync(item => item.ChallengeRoundId == round.Id && item.UserProfileId == profileId, cancellationToken);
+        if (existingBinding is not null)
+        {
+            if (!existingBinding.Consumed && await attempts.TryGetActiveSessionAsync(profileId, existingBinding.TypingAttemptId, cancellationToken) is { } existingSession)
+            {
+                if (challenge.Status == ChallengeStatus.Open)
+                {
+                    challenge.Status = ChallengeStatus.Running;
+                }
+
+                if (participant.Status == ParticipantStatus.Joined)
+                {
+                    participant.Status = ParticipantStatus.Running;
+                }
+
+                await db.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+                return existingSession;
+            }
+
+            throw new InvalidOperationException("Für diese Challenge-Runde wurde bereits ein Versuch gestartet.");
         }
 
         var session = await attempts.StartAsync(profileId, new StartAttemptRequest(TrainingMode.Text, challenge.TrainingTextId, null, null), cancellationToken);

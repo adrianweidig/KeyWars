@@ -5,13 +5,19 @@ export function attachTypingApps() {
     const startButton = root.querySelector("[data-start]");
     const result = root.querySelector("[data-result]");
     const challengeId = root.dataset.challengeId || "";
+    const autoPrepare = root.dataset.autoPrepare !== "false";
+    const initialStartLabel = root.dataset.startLabel || startButton.textContent.trim() || "Starten";
+    const preparedStartLabel = root.dataset.preparedLabel || (challengeId ? "Bereit" : "Neue Runde");
+    const finishedStartLabel = root.dataset.finishedLabel || (challengeId ? "Abgeschlossen" : preparedStartLabel);
+    const idleMessage = root.dataset.idleMessage || "Runde bereit. Starte, sobald du tippen willst.";
+    const hideStartWhenPrepared = root.dataset.hideStartWhenPrepared === "true";
     const timer = document.createElement("div");
     const timerValue = document.createElement("strong");
     const timerLabel = document.createElement("span");
     const analysis = document.createElement("div");
     timer.className = "typing-timer";
-    timerValue.textContent = "00:00.0";
-    timerLabel.textContent = "Bereit";
+    timerValue.textContent = "Bereit";
+    timerLabel.textContent = "Start bei Eingabe";
     timer.append(timerValue, timerLabel);
     analysis.className = "typing-analysis";
     result.classList.add("typing-result");
@@ -49,7 +55,7 @@ export function attachTypingApps() {
 
     const render = () => {
       if (!session) {
-        target.textContent = "Runde wird vorbereitet.";
+        target.textContent = root.classList.contains("typing-idle") ? idleMessage : "Runde wird vorbereitet.";
         return;
       }
 
@@ -101,6 +107,8 @@ export function attachTypingApps() {
 
       startedAt = performance.now();
       lastWordBoundaryAt = startedAt;
+      root.classList.remove("typing-prepared");
+      root.classList.add("typing-running");
       timerLabel.textContent = isTimed() ? "verbleibend" : "vergangen";
       timerFrame = requestAnimationFrame(updateTimer);
     };
@@ -108,8 +116,8 @@ export function attachTypingApps() {
     const resetTimer = () => {
       cancelAnimationFrame(timerFrame);
       startedAt = null;
-      timerValue.textContent = isTimed() ? formatDuration(timedSeconds() * 1000) : "00:00.0";
-      timerLabel.textContent = "Bereit";
+      timerValue.textContent = isTimed() ? formatDuration(timedSeconds() * 1000) : "Bereit";
+      timerLabel.textContent = isTimed() ? "bereit" : "Start bei Eingabe";
     };
 
     const beginAttempt = async () => {
@@ -146,6 +154,7 @@ export function attachTypingApps() {
         prepared = false;
         finished = true;
         input.disabled = true;
+        startButton.hidden = false;
         startButton.disabled = false;
         startButton.textContent = "Erneut versuchen";
         return false;
@@ -320,6 +329,8 @@ export function attachTypingApps() {
 
       finishing = true;
       finished = true;
+      root.classList.remove("typing-prepared", "typing-running");
+      root.classList.add("typing-finished");
       stopTimer();
       input.disabled = true;
       if (input.value.length > 0 && !(await beginAttempt())) {
@@ -390,14 +401,40 @@ export function attachTypingApps() {
       result.append(analysis);
       renderAnalysis(data);
       session = null;
+      startButton.hidden = false;
       startButton.disabled = false;
-      startButton.textContent = challengeId ? "Abgeschlossen" : "Neue Runde";
+      startButton.textContent = finishedStartLabel;
       if (challengeId) {
         startButton.disabled = true;
       }
     };
 
+    const renderIdle = () => {
+      root.classList.add("typing-idle");
+      root.classList.remove("typing-prepared", "typing-running", "typing-finished");
+      prepared = false;
+      finishing = false;
+      finished = false;
+      session = null;
+      serverStarted = false;
+      beginPromise = null;
+      input.value = "";
+      input.disabled = true;
+      result.textContent = "";
+      analysis.textContent = "";
+      backspaces = 0;
+      focusLosses = 0;
+      mistakeMap.clear();
+      resetTimer();
+      target.textContent = idleMessage;
+      startButton.hidden = false;
+      startButton.disabled = false;
+      startButton.textContent = initialStartLabel;
+    };
+
     const prepare = async () => {
+      root.classList.remove("typing-idle");
+      root.classList.remove("typing-prepared", "typing-running", "typing-finished");
       prepared = false;
       finishing = false;
       finished = false;
@@ -427,6 +464,7 @@ export function attachTypingApps() {
       });
       if (!response.ok) {
         target.textContent = "Die Runde konnte nicht vorbereitet werden.";
+        startButton.hidden = false;
         startButton.disabled = false;
         startButton.textContent = "Erneut versuchen";
         return;
@@ -436,9 +474,11 @@ export function attachTypingApps() {
       input.value = "";
       input.disabled = false;
       prepared = true;
+      root.classList.add("typing-prepared");
       resetTimer();
+      startButton.hidden = hideStartWhenPrepared;
       startButton.disabled = challengeId;
-      startButton.textContent = challengeId ? "Bereit" : "Neue Runde";
+      startButton.textContent = preparedStartLabel;
       render();
     };
 
@@ -477,7 +517,11 @@ export function attachTypingApps() {
       }
     });
 
-    prepare();
+    if (autoPrepare) {
+      prepare();
+    } else {
+      renderIdle();
+    }
   });
 }
 

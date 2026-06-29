@@ -78,6 +78,27 @@ public sealed class ChallengeLifecycleTests
     }
 
     [Fact]
+    public async Task ChallengeStartReturnsExistingPreparedAttemptWhenStillActive()
+    {
+        await using var context = await ChallengeTestContext.CreateAsync();
+        var challenge = await context.Service.CreateAsync(
+            context.Creator.Id,
+            new CreateChallengeRequest("Fortsetzen", context.Text.Id, ChallengeMode.Classic, [context.Invitee.Id], 1, 1));
+        await context.Service.JoinAsync(challenge.Id, context.Invitee.Id);
+
+        var first = await context.Service.StartAttemptAsync(challenge.Id, context.Invitee.Id, context.Attempts);
+        var second = await context.Service.StartAttemptAsync(challenge.Id, context.Invitee.Id, context.Attempts);
+
+        Assert.Equal(first.Id, second.Id);
+        Assert.Equal(first.Nonce, second.Nonce);
+        Assert.Equal(first.Text, second.Text);
+        Assert.Single(await context.Db.ChallengeAttemptBindings.ToListAsync());
+
+        var participant = await context.Db.ChallengeParticipants.SingleAsync(item => item.ChallengeId == challenge.Id && item.UserProfileId == context.Invitee.Id);
+        Assert.Equal(ParticipantStatus.Running, participant.Status);
+    }
+
+    [Fact]
     public async Task NormalTrainingAttemptCannotFinishChallenge()
     {
         await using var context = await ChallengeTestContext.CreateAsync();

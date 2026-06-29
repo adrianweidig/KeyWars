@@ -249,4 +249,15 @@ public sealed class TypingAndRankingTests
             Assert.True(TypingEngine.SplitGraphemes(normalized).Count >= 350, $"{text.Key} braucht einen größeren Beispieltext.");
         }
     }
+
+    [Fact]
+    public void GeneratedWordTestsUseCoherentTrainingText()
+    {
+        var text = TypingEngine.BuildWordTest(80);
+
+        Assert.Equal(80, TypingEngine.CountWords(text));
+        Assert.Contains('.', text);
+        Assert.Contains("Training", text, StringComparison.OrdinalIgnoreCase);
+        Assert.False(text.StartsWith("aber achten Änderung", StringComparison.Ordinal));
+    }
 }

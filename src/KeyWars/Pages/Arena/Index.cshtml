@@ -8,7 +8,7 @@
     <div>
         <span class="eyebrow">Live-Wettbewerb</span>
         <h1>Live-Arena</h1>
-        <p class="lead">Starte ein gemeinsames Rennen, tritt per Code bei oder springe in eine offene Lobby. Fortschritt und Fehler werden live am Text sichtbar.</p>
+        <p class="lead">Starte ein gemeinsames Rennen mit sichtbarem Textfortschritt, Fehlern und Zieleinlauf. Der Tippbereich bleibt zuerst, Raumverwaltung bleibt sekundär.</p>
         <div class="hero-stat-row" aria-label="Arena Status">
             <span><strong>@Model.Rooms.Count</strong> offene Lobbys</span>
             <span><strong>Textboard</strong> live</span>
@@ -16,32 +16,32 @@
         </div>
     </div>
     <div class="page-actions">
-        <a class="button" asp-page="/Arena/Neu">Raum erstellen</a>
-        <a class="button secondary" asp-page="/Arena/Beitreten">Code eingeben</a>
+        <a class="button" asp-page="/Arena/Neu">Live-Rennen starten</a>
+        <a class="button secondary" asp-page="/Arena/Beitreten">Code beitreten</a>
     </div>
 </section>
 
 <section class="arena-entry-grid">
-    <article class="card arena-entry">
-        <span class="badge">Neu</span>
-        <h2>Raum erstellen</h2>
-        <p class="muted">Wähle Text, Sichtbarkeit und Teilnehmerzahl für ein klassisches Rennen.</p>
+    <article class="card arena-entry arena-entry-primary">
+        <span class="badge">Sofort</span>
+        <h2>Rennen anlegen</h2>
+        <p class="muted">Wähle einen Text, teile den Code und starte nach dem Countdown. Ideal für kurze Wettkampf-Sessions.</p>
         <div class="card-actions">
-            <a class="button" asp-page="/Arena/Neu">Raum erstellen</a>
+            <a class="button" asp-page="/Arena/Neu">Live-Rennen starten</a>
         </div>
     </article>
     <article class="card arena-entry">
         <span class="badge">Code</span>
-        <h2>Mit Code beitreten</h2>
-        <p class="muted">Füge den sechsstelligen Code ein. KeyWars prüft Format und Raumzugang.</p>
+        <h2>Challenge annehmen</h2>
+        <p class="muted">Füge den Raumcode ein und springe direkt in die Lobby deines Gegners.</p>
         <div class="card-actions">
-            <a class="button secondary" asp-page="/Arena/Beitreten">Code eingeben</a>
+            <a class="button secondary" asp-page="/Arena/Beitreten">Code beitreten</a>
         </div>
     </article>
     <article class="card arena-entry">
         <span class="badge">Offen</span>
-        <h2>Intern offene Räume</h2>
-        <p class="muted">@Model.Rooms.Count @(Model.Rooms.Count == 1 ? "Raum wartet" : "Räume warten") in der Lobby.</p>
+        <h2>Offene Lobbys</h2>
+        <p class="muted">Sieh nach, ob gerade jemand auf Mitspieler wartet, oder sammle vorher Tempo in einer Sofortrunde.</p>
         <div class="card-actions">
             <a class="button secondary" href="#offene-raeume">Räume ansehen</a>
         </div>
@@ -56,11 +56,11 @@
     @if (Model.Rooms.Count == 0)
     {
         <div class="empty-state">
-            <h3>Noch kein offener Raum</h3>
-            <p>Erstelle den ersten Raum oder tritt einer privaten Runde per Code bei.</p>
+            <h3>Keine Lobby wartet gerade</h3>
+            <p>Starte selbst ein kurzes Rennen oder nutze eine Sofortrunde, bis der nächste Gegner online ist.</p>
             <div class="card-actions">
-                <a class="button" asp-page="/Arena/Neu">Raum erstellen</a>
-                <a class="button secondary" asp-page="/Arena/Beitreten">Code eingeben</a>
+                <a class="button" asp-page="/Arena/Neu">Live-Rennen starten</a>
+                <a class="button secondary" asp-page="/Spielen/Index">Sofortrunde spielen</a>
             </div>
         </div>
     }

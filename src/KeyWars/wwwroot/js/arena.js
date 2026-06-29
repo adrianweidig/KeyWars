@@ -578,6 +578,7 @@ export function attachArenaPages() {
       }
 
       const running = snapshot.phase === "Running";
+      const lobby = snapshot.phase === "Lobby";
       renderPhaseSteps();
       if (state) {
         state.textContent = phaseLabel(snapshot.phase);
@@ -589,19 +590,22 @@ export function attachArenaPages() {
 
       if (dnfButton) {
         dnfButton.disabled = !running || finishedLocally;
+        setHidden(dnfButton, !running);
       }
 
       const current = snapshot.participants?.find((participant) => participant.profileId === currentProfileId);
       const readyButton = readyForm?.querySelector("button");
+      setHidden(readyForm, !lobby);
       if (readyButton) {
         readyButton.textContent = readyPending ? "Wird gespeichert..." : current?.ready ? "Nicht bereit" : "Bereit";
-        readyButton.disabled = readyPending || !snapshot || snapshot.phase !== "Lobby";
+        readyButton.disabled = readyPending || !snapshot || !lobby;
       }
 
       const startButton = startForm?.querySelector("button");
+      setHidden(startForm, !lobby);
       if (startButton) {
         startButton.textContent = startPending ? "Startet..." : "Starten";
-        startButton.disabled = startPending || !snapshot || snapshot.phase !== "Lobby";
+        startButton.disabled = startPending || !snapshot || !lobby;
       }
 
       renderTimer();

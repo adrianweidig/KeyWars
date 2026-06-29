@@ -50,6 +50,21 @@
             <span>Rangziel</span>
             <strong>@nextTargetLabel</strong>
         </div>
+        @if (podium.Count > 0)
+        {
+            <div class="competition-board-peek">
+                <span>Top-Ausschnitt</span>
+                <ol>
+                    @foreach (var entry in podium)
+                    {
+                        <li>
+                            <strong>#@entry.Rank.ToString("N0", culture) @entry.DisplayName</strong>
+                            <small>@entry.PrimaryValue</small>
+                        </li>
+                    }
+                </ol>
+            </div>
+        }
     </div>
 </section>
 
@@ -75,7 +90,7 @@
 </nav>
 
 <section class="competition-controls" aria-label="Ranglistenfilter">
-    <form method="get" class="competition-filter-grid">
+    <form method="get" class="competition-filter-grid @(query.Board == CompetitionBoardKind.Text ? "text-filter" : "")">
         <input type="hidden" name="board" value="@Model.BoardValue(query.Board)" />
         <label>
             Zeitraum
@@ -109,7 +124,7 @@
                 <select name="textId">
                     @foreach (var text in Model.Overview.TextOptions)
                     {
-                        <option value="@text.Id" selected="@(query.TextId == text.Id)">@text.Title (@text.CharacterCount.ToString("N0", culture) Zeichen)</option>
+                        <option value="@text.Id" selected="@(query.TextId == text.Id)">@TextOptionLabel(text.Title, text.CharacterCount)</option>
                     }
                 </select>
             </label>
@@ -238,6 +253,13 @@
 </section>
 
 @functions {
+    private string TextOptionLabel(string title, int characterCount)
+    {
+        const int maxTitleLength = 18;
+        var compactTitle = title.Length <= maxTitleLength ? title : $"{title[..(maxTitleLength - 1)]}…";
+        return $"{compactTitle} · {characterCount.ToString("N0", CultureInfo.GetCultureInfo("de-DE"))} Zeichen";
+    }
+
     private IHtmlContent CompetitionCta(LeaderboardQuery query, string label = "Selbst antreten")
     {
         var encodedLabel = System.Net.WebUtility.HtmlEncode(label);

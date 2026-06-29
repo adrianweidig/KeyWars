@@ -16,9 +16,11 @@
     var isActive = (string prefix) => currentPage.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
     var isStart = currentPage.Equals("/Index", StringComparison.OrdinalIgnoreCase);
     var isAuthenticated = User.Identity?.IsAuthenticated == true;
+    var forcePublicShell = ViewData["ForcePublicShell"] as bool? == true;
+    var showAuthenticatedShell = isAuthenticated && !forcePublicShell;
     UserProfile? layoutProfile = null;
     LevelProgress? layoutProgress = null;
-    if (isAuthenticated)
+    if (showAuthenticatedShell)
     {
         layoutProfile = await CurrentUser.RequireProfileAsync(User, Context.RequestAborted);
         layoutProgress = MotivationService.GetLevelProgress(layoutProfile.ExperiencePoints);
@@ -28,12 +30,12 @@
     var samAccount = layoutProfile?.SamAccountName ?? User.FindFirst("samAccountName")?.Value ?? "";
     var bodyClass = string.Join(
         " ",
-        new[] { ViewData["BodyClass"] as string, isAuthenticated ? "app-authenticated" : "app-public" }
+        new[] { ViewData["BodyClass"] as string, showAuthenticatedShell ? "app-authenticated" : "app-public" }
             .Where(value => !string.IsNullOrWhiteSpace(value)));
 }
 <body class="@bodyClass">
     <div class="app-shell">
-        @if (isAuthenticated)
+        @if (showAuthenticatedShell)
         {
             <header class="desktop-topbar" aria-label="App-Leiste">
                 <a class="brand app-brand" asp-page="/Index" aria-label="KeyWars Startseite">
@@ -104,7 +106,7 @@
         }
 
         <div class="app-main">
-            @if (isAuthenticated && layoutProfile is not null && layoutProgress is not null)
+            @if (showAuthenticatedShell && layoutProfile is not null && layoutProgress is not null)
             {
                 var xpTotal = Math.Max(1, layoutProgress.NextLevelXp);
                 <header class="status-cockpit" aria-label="Trainingsstatus">
@@ -131,7 +133,7 @@
             </main>
         </div>
 
-        @if (isAuthenticated)
+        @if (showAuthenticatedShell)
         {
             <nav class="mobile-bottom-nav" aria-label="Schnellnavigation">
                 <a class="@(isStart ? "active" : "")" asp-page="/Index">@SvgIcon("home")<span>Start</span></a>

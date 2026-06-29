@@ -21,7 +21,38 @@
     </div>
 </section>
 
-<section class="card filter-panel">
+@if (Model.Texts.Count > 0)
+{
+    <section class="mobile-training-priority card" aria-labelledby="mobile-training-priority-title">
+        <div class="section-title-row">
+            <div>
+                <span class="eyebrow">Jetzt starten</span>
+                <h2 id="mobile-training-priority-title">Sofort trainieren</h2>
+            </div>
+            <a class="button secondary compact-button" href="#text-filter">Suchen</a>
+        </div>
+        <div class="mobile-text-quick-grid">
+            @foreach (var text in Model.Texts.Take(2))
+            {
+                <article class="mobile-text-quick-card">
+                    <div>
+                        <h3>@text.Title</h3>
+                        <div class="metadata-row">
+                            <span class="meta-badge">@text.CharacterCount Zeichen</span>
+                            <span class="meta-badge">@(text.IsStandard ? "Standard" : DisplayNames.For(text.Visibility))</span>
+                        </div>
+                    </div>
+                    <div class="card-actions">
+                        <a class="button" asp-page="/Spielen/Text" asp-route-id="@text.Id">Trainieren</a>
+                        <a class="button secondary" asp-page="/Texte/Details" asp-route-id="@text.Id">Ansehen</a>
+                    </div>
+                </article>
+            }
+        </div>
+    </section>
+}
+
+<section id="text-filter" class="card filter-panel">
     <form method="get" class="filter-form">
         <label>
             Suche
@@ -69,4 +100,16 @@
             </div>
         </article>
     }
+</section>
+
+<section class="text-library-mobile-actions card" aria-labelledby="text-library-mobile-actions-title">
+    <div>
+        <span class="eyebrow">Verwaltung</span>
+        <h2 id="text-library-mobile-actions-title">Eigene Texte pflegen</h2>
+        <p>Lege längere Trainingsvorlagen oder Sammlungen an, wenn du gezielt mit eigenen Inhalten üben möchtest.</p>
+    </div>
+    <div class="card-actions">
+        <a class="button" asp-page="/Texte/Neu">Neuer Text</a>
+        <a class="button secondary" asp-page="/Texte/Sammlungen/Neu">Sammlung anlegen</a>
+    </div>
 </section>

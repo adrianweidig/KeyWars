@@ -311,10 +311,11 @@ public sealed class TypingEngine(TimeProvider timeProvider)
             throw new ArgumentOutOfRangeException(nameof(wordCount), "Die Wortzahl darf maximal 200 betragen.");
         }
 
+        var source = GermanWordBank.WordTestWords;
         var words = new string[wordCount];
         for (var index = 0; index < wordCount; index++)
         {
-            words[index] = GermanWordBank.Words[index % GermanWordBank.Words.Length];
+            words[index] = source[index % source.Length];
         }
 
         return string.Join(' ', words);
@@ -340,6 +341,16 @@ public sealed class TypingEngine(TimeProvider timeProvider)
 
 public static class GermanWordBank
 {
+    private const string WordTestCorpus = "Der frühe Morgen beginnt ruhig, doch im Team wartet bereits die nächste Aufgabe. " +
+        "Eine Kollegin prüft den Kalender, ein Kollege sortiert die wichtigsten Nachrichten und alle schreiben mit klarem Rhythmus. " +
+        "Gute Tipptechnik entsteht nicht durch Hast, sondern durch sichere Bewegungen, kurze Pausen und einen Blick für Fehler. " +
+        "Wer den Text aufmerksam verfolgt, erkennt Namen, Zahlen und Satzzeichen rechtzeitig und bleibt auch unter Zeitdruck präzise. " +
+        "Im Wettbewerb zählt das beste Ergebnis, aber im Training zählt jede saubere Wiederholung. " +
+        "Nach einigen Minuten fühlt sich die Tastatur vertrauter an, die Finger finden schneller ihren Weg und der Kopf bleibt frei für den Inhalt. " +
+        "So wird aus einer einzelnen Runde ein sichtbarer Fortschritt, der zum nächsten Versuch motiviert.";
+
+    public static readonly string[] WordTestWords = WordTestCorpus.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
     public static readonly string[] Words =
     [
         "aber", "achten", "Änderung", "Arbeit", "Aufgabe", "Büro", "Chance", "Code", "denken", "direkt",

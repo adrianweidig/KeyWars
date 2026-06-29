@@ -46,6 +46,27 @@ public sealed class AttemptService(
         return session;
     }
 
+    public async Task<AttemptSession?> TryGetActiveSessionAsync(Guid profileId, Guid attemptId, CancellationToken cancellationToken = default)
+    {
+        var now = timeProvider.GetUtcNow();
+        await ExpireSessionsAsync(now, cancellationToken);
+        var attempt = await db.TypingAttempts.SingleOrDefaultAsync(item => item.Id == attemptId && item.UserProfileId == profileId, cancellationToken);
+        if (attempt is null ||
+            attempt.FinishedAt is not null ||
+            attempt.Phase is AttemptPhase.Finished or AttemptPhase.Expired or AttemptPhase.Aborted)
+        {
+            return null;
+        }
+
+        if (!sessionStore.TryGet(attemptId, out var session) || session is null)
+        {
+            return null;
+        }
+
+        ValidateSession(profileId, attempt.Nonce, session);
+        return session.Phase is AttemptPhase.Prepared or AttemptPhase.Started ? session : null;
+    }
+
     public async Task<AttemptBeginResponse> BeginAsync(Guid profileId, BeginAttemptRequest request, CancellationToken cancellationToken = default)
     {
         var now = timeProvider.GetUtcNow();

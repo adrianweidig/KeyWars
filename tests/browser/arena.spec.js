@@ -66,6 +66,86 @@ async function expectCompactMobileHeader(page) {
   expect(header.firstPanelTop).toBeLessThan(header.viewportHeight * 0.16);
 }
 
+async function expectResponsiveAppShell(page, width) {
+  await expect(page.locator(".desktop-sidebar")).toBeHidden();
+  await expect(page.locator(".desktop-topbar")).toBeHidden();
+  await expect(page.locator(".mobile-topbar")).toBeVisible();
+  await expect(page.locator(".mobile-bottom-nav")).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+
+  const metrics = await page.evaluate(() => {
+    const shell = document.querySelector(".shell");
+    const main = document.querySelector(".app-main");
+    const shellBounds = shell?.getBoundingClientRect();
+    const mainBounds = main?.getBoundingClientRect();
+    return {
+      viewportWidth: window.innerWidth,
+      shellWidth: Math.round(shellBounds?.width ?? 0),
+      shellLeft: Math.round(shellBounds?.left ?? 0),
+      shellRightGap: Math.round(window.innerWidth - (shellBounds?.right ?? 0)),
+      mainLeft: Math.round(mainBounds?.left ?? 0)
+    };
+  });
+
+  expect(metrics.mainLeft).toBeLessThanOrEqual(2);
+  expect(metrics.shellWidth).toBeGreaterThanOrEqual(width >= 768 ? 700 : width - 24);
+  expect(Math.abs(metrics.shellLeft - metrics.shellRightGap)).toBeLessThanOrEqual(18);
+}
+
+async function expectArenaCoreInFirstView(page) {
+  const layout = await page.evaluate(() => {
+    const timer = document.querySelector("[data-arena-timer]")?.getBoundingClientRect();
+    const target = document.querySelector("[data-arena-target]")?.getBoundingClientRect();
+    const input = document.querySelector("[data-arena-input]")?.getBoundingClientRect();
+    if (!timer || !target || !input) {
+      throw new Error("Arena-Kern fehlt.");
+    }
+
+    return {
+      viewportHeight: window.innerHeight,
+      timerTop: Math.round(timer.top),
+      targetTop: Math.round(target.top),
+      inputBottom: Math.round(input.bottom)
+    };
+  });
+
+  expect(layout.timerTop).toBeLessThan(layout.viewportHeight * 0.32);
+  expect(layout.targetTop).toBeLessThan(layout.viewportHeight * 0.52);
+  expect(layout.inputBottom).toBeLessThan(layout.viewportHeight - 76);
+}
+
+async function expectMobilePageEndClearOfBottomNav(page) {
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await page.waitForTimeout(100);
+  const clearance = await page.evaluate(() => {
+    const nav = document.querySelector(".mobile-bottom-nav");
+    const main = document.querySelector(".app-main");
+    if (!(nav instanceof HTMLElement) || !(main instanceof HTMLElement)) {
+      throw new Error("Mobile shell is missing.");
+    }
+
+    const visibleElements = [...main.querySelectorAll("button, a, input, select, textarea, .card, .panel, .competition-main, .competition-card")]
+      .filter((element) => element instanceof HTMLElement)
+      .filter((element) => {
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+      });
+    const last = visibleElements
+      .sort((left, right) => left.getBoundingClientRect().bottom - right.getBoundingClientRect().bottom)
+      .at(-1);
+    const lastRect = last?.getBoundingClientRect();
+    const navRect = nav.getBoundingClientRect();
+    return {
+      lastBottom: Math.round(lastRect?.bottom ?? 0),
+      navTop: Math.round(navRect.top),
+      lastText: (last?.textContent || last?.getAttribute("aria-label") || last?.getAttribute("name") || "").trim().replace(/\s+/g, " ").slice(0, 80)
+    };
+  });
+
+  expect(clearance.lastBottom, `Letztes Element wird von Bottom-Nav verdeckt: ${clearance.lastText}`).toBeLessThanOrEqual(clearance.navTop - 4);
+}
+
 test("Dashboard und Einstellungen rendern im echten Browser", async ({ page }) => {
   await login(page, "browser.smoke");
 
@@ -79,6 +159,7 @@ test("Dashboard und Einstellungen rendern im echten Browser", async ({ page }) =
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
   await expectCompactMobileHeader(page);
+  await expectResponsiveAppShell(page, 390);
   await expect(page.locator(".mobile-bottom-nav")).toBeVisible();
   await expect(page.locator(".dashboard-quick-round")).toBeVisible();
   await expect(page.locator(".daily-board-panel")).toBeVisible();
@@ -90,6 +171,78 @@ test("Dashboard und Einstellungen rendern im echten Browser", async ({ page }) =
   await expect(page.locator("html")).toHaveAttribute("lang", "de");
 });
 
+test("App-Shell nutzt Mobile- und Tablet-Breakpoints ohne tote Fläche", async ({ page }) => {
+  await login(page, "browser.shell.breakpoints");
+  const routes = ["/", "/spielen", "/ranglisten", "/arena", "/texte", "/tageschallenge", "/profil/einstellungen"];
+
+  for (const viewport of [
+    { width: 390, height: 844 },
+    { width: 768, height: 1024 }
+  ]) {
+    await page.setViewportSize(viewport);
+    for (const route of routes) {
+      await page.goto(route);
+      await expectResponsiveAppShell(page, viewport.width);
+    }
+  }
+});
+
+test("Mobile Bottom-Navigation verdeckt keine Formular- oder Trainingsenden", async ({ page }) => {
+  await login(page, "browser.bottom.nav.clearance");
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  for (const route of ["/arena", "/arena/neu", "/spielen/sprint", "/spielen/fehlerfokus", "/texte/sammlungen/neu", "/herausforderungen/neu"]) {
+    await page.goto(route);
+    await expectResponsiveAppShell(page, 390);
+    await expectMobilePageEndClearOfBottomNav(page);
+    await expectNoHorizontalOverflow(page);
+  }
+});
+
+test("Tageschallenge startet aus einem klaren manuellen Zustand", async ({ page }) => {
+  await login(page, "browser.daily.challenge");
+  await page.goto("/tageschallenge");
+  await expect(page.getByRole("heading", { name: "Tageschallenge" })).toBeVisible();
+  await expect(page.locator(".daily-challenge-card.typing-idle")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Tageschallenge starten" })).toBeVisible();
+  await expect(page.locator(".daily-challenge-card .typing-timer")).toBeHidden();
+  await expect(page.locator(".daily-challenge-card [data-input]")).toBeHidden();
+  await expectNoHorizontalOverflow(page);
+
+  await page.getByRole("button", { name: "Tageschallenge starten" }).click();
+  await expect(page.locator(".daily-challenge-card")).not.toHaveClass(/typing-idle/);
+  await expect(page.locator(".daily-challenge-card .typing-timer")).toBeVisible();
+  await expect(page.locator(".daily-challenge-card [data-input]")).toBeVisible();
+  await expect(page.locator(".daily-challenge-card [data-input]")).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Lauf aktiv" })).toBeHidden();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/tageschallenge");
+  await expectCompactMobileHeader(page);
+  await expectResponsiveAppShell(page, 390);
+  await expect(page.locator(".daily-challenge-card.typing-idle")).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+});
+
+test("Logout nutzt eine neutrale Public-Shell ohne private Statusdaten", async ({ page }) => {
+  await login(page, "browser.logout.public");
+  await page.goto("/abmelden");
+  await expect(page.getByRole("heading", { name: "KeyWars verlassen" })).toBeVisible();
+  await expect(page.locator(".status-cockpit")).toHaveCount(0);
+  await expect(page.locator(".desktop-sidebar")).toHaveCount(0);
+  await expect(page.locator(".mobile-bottom-nav")).toHaveCount(0);
+  await expect(page.getByText("Tage Streak")).toHaveCount(0);
+  await expectNoHorizontalOverflow(page);
+
+  await page.getByRole("button", { name: "Jetzt abmelden" }).click();
+  await expect(page).toHaveURL(/\/abmelden\?abgemeldet=1$/);
+  await expect(page.getByRole("heading", { name: "Du bist abgemeldet" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Wieder anmelden" })).toBeVisible();
+  await expect(page.locator(".status-cockpit")).toHaveCount(0);
+  await expect(page.locator(".desktop-sidebar")).toHaveCount(0);
+  await expect(page.locator(".mobile-bottom-nav")).toHaveCount(0);
+});
+
 test("Herausforderungen haben einen handlungsfähigen Empty State", async ({ page }) => {
   await login(page, "browser.challenge.empty");
   await page.goto("/herausforderungen");
@@ -97,6 +250,36 @@ test("Herausforderungen haben einen handlungsfähigen Empty State", async ({ pag
   await expect(page.getByRole("link", { name: "Gruppe herausfordern" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Vorher trainieren" })).toBeVisible();
   await expectNoHorizontalOverflow(page);
+});
+
+test("Challenge-Spiel bleibt nach vorbereiteter Runde und Reload spielbar", async ({ page, browser, baseURL }, testInfo) => {
+  const suffix = `${testInfo.workerIndex}.${Date.now()}`;
+  const partnerContext = await browser.newContext({ baseURL, colorScheme: "dark", reducedMotion: "reduce" });
+  try {
+    const partner = await partnerContext.newPage();
+    await login(partner, `browser.challenge.partner.${suffix}`);
+
+    await login(page, `browser.challenge.owner.${suffix}`);
+    await page.goto("/herausforderungen/neu");
+    await page.getByLabel("Titel").fill(`Browser Challenge ${suffix}`);
+    const firstPerson = page.locator('fieldset input[type="checkbox"]').first();
+    await expect(firstPerson).toBeVisible();
+    await firstPerson.check();
+    await page.getByRole("button", { name: "Herausforderung senden" }).click();
+    await expect(page).toHaveURL(/\/herausforderungen\/[0-9a-f-]{36}$/i);
+
+    await page.getByRole("link", { name: "Runde spielen" }).click();
+    await expect(page).toHaveURL(/\/herausforderungen\/[0-9a-f-]{36}\/spielen$/i);
+    await expect(page.locator("[data-input]")).toBeEnabled({ timeout: 15_000 });
+    await expect(page.locator("[data-target]")).not.toContainText("konnte nicht vorbereitet werden");
+
+    await page.reload();
+    await expect(page.locator("[data-input]")).toBeEnabled({ timeout: 15_000 });
+    await expect(page.locator("[data-target]")).not.toContainText("konnte nicht vorbereitet werden");
+    await expectNoHorizontalOverflow(page);
+  } finally {
+    await partnerContext.close();
+  }
 });
 
 test("Textbibliothek bleibt auf Desktop und Mobile sauber ausgerichtet", async ({ page }) => {
@@ -122,8 +305,27 @@ test("Textbibliothek bleibt auf Desktop und Mobile sauber ausgerichtet", async (
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/texte");
   await expectCompactMobileHeader(page);
+  await expectResponsiveAppShell(page, 390);
+  await expect(page.locator(".mobile-training-priority")).toBeVisible();
+  await expect(page.locator(".mobile-training-priority").getByRole("link", { name: "Trainieren" }).first()).toBeVisible();
   await expect(page.locator(".filter-panel")).toBeVisible();
   await expect(page.locator(".text-card").first()).toBeVisible();
+  const mobilePriority = await page.evaluate(() => {
+    const priority = document.querySelector(".mobile-training-priority");
+    const train = priority?.querySelector("a[href*='/spielen/text']");
+    const filter = document.querySelector(".filter-panel");
+    const priorityBounds = priority?.getBoundingClientRect();
+    const trainBounds = train?.getBoundingClientRect();
+    const filterBounds = filter?.getBoundingClientRect();
+    return {
+      priorityTop: Math.round(priorityBounds?.top ?? 9999),
+      trainBottom: Math.round(trainBounds?.bottom ?? 9999),
+      filterTop: Math.round(filterBounds?.top ?? 0),
+      safeBottom: Math.round(window.innerHeight - 88)
+    };
+  });
+  expect(mobilePriority.priorityTop).toBeLessThan(mobilePriority.filterTop);
+  expect(mobilePriority.trainBottom).toBeLessThan(mobilePriority.safeBottom);
   await expectNoHorizontalOverflow(page);
 });
 
@@ -144,6 +346,7 @@ test("Spielseite zeigt Sofortrunde und Modi sauber auf Desktop und Mobile", asyn
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/spielen");
   await expectCompactMobileHeader(page);
+  await expectResponsiveAppShell(page, 390);
   await expect(page.locator(".play-quickstart")).toBeVisible();
   await expect(page.locator(".play-mode-link")).toHaveCount(4);
   await expectNoHorizontalOverflow(page);
@@ -178,9 +381,57 @@ test("Wettbewerbsseite bleibt responsiv und respektiert Ranglisten-Sichtbarkeit"
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/ranglisten?board=sprint&period=day&mode=sprint60");
   await expectCompactMobileHeader(page);
+  await expectResponsiveAppShell(page, 390);
   await expect(page.locator(".competition-tabs a")).toHaveCount(5);
   await expect(page.locator(".competition-layout")).toBeVisible();
   await expectNoHorizontalOverflow(page);
+  const mobileTabs = await page.evaluate(() => [...document.querySelectorAll(".competition-tabs a")].map((tab) => {
+    const bounds = tab.getBoundingClientRect();
+    return {
+      text: tab.textContent.trim(),
+      left: Math.round(bounds.left),
+      right: Math.round(bounds.right),
+      viewportWidth: window.innerWidth
+    };
+  }));
+  expect(mobileTabs.map((tab) => tab.text)).toEqual(["Arena", "Sprint", "Texte", "Challenges", "XP"]);
+  const mobileTabRail = await page.locator(".competition-tabs").evaluate((tabs) => ({
+    clientWidth: tabs.clientWidth,
+    scrollWidth: tabs.scrollWidth,
+    top: Math.round(tabs.getBoundingClientRect().top),
+    bottom: Math.round(tabs.getBoundingClientRect().bottom),
+    viewportHeight: window.innerHeight
+  }));
+  expect(mobileTabs[0].left).toBeGreaterThanOrEqual(0);
+  expect(mobileTabRail.scrollWidth).toBeGreaterThanOrEqual(mobileTabRail.clientWidth);
+  expect(mobileTabRail.bottom).toBeLessThan(mobileTabRail.viewportHeight - 68);
+  const mobileHeroStats = await page.evaluate(() => {
+    const stats = document.querySelector(".competition-hero-stats");
+    if (!stats) {
+      return { display: "missing", visibleText: "" };
+    }
+
+    return {
+      display: getComputedStyle(stats).display,
+      visibleText: stats.textContent.replace(/\s+/g, " ").trim()
+    };
+  });
+  expect(mobileHeroStats.display === "none" || mobileHeroStats.visibleText.includes("Top-Ausschnitt")).toBe(true);
+
+  await page.setViewportSize({ width: 768, height: 1024 });
+  await page.goto("/ranglisten?board=sprint&period=day&mode=sprint60");
+  await expectResponsiveAppShell(page, 768);
+  const tabletCompetition = await page.evaluate(() => {
+    const hero = document.querySelector(".competition-hero")?.getBoundingClientRect();
+    const board = document.querySelector(".competition-main")?.getBoundingClientRect();
+    return {
+      heroBottom: Math.round(hero?.bottom ?? 9999),
+      boardTop: Math.round(board?.top ?? 9999),
+      viewportHeight: window.innerHeight
+    };
+  });
+  expect(tabletCompetition.heroBottom).toBeLessThan(tabletCompetition.viewportHeight * 0.72);
+  expect(tabletCompetition.boardTop).toBeLessThan(tabletCompetition.viewportHeight);
 
   await page.goto("/profil/einstellungen");
   await page.getByLabel("In Ranglisten sichtbar").uncheck();
@@ -358,12 +609,19 @@ test("Arena läuft mit zwei getrennten Browserkontexten über SignalR", async ({
     await expect(host.locator("[data-arena-state]")).toHaveText("Rennen läuft", { timeout: 12_000 });
     await expect(guest.locator("[data-arena-state]")).toHaveText("Rennen läuft", { timeout: 12_000 });
     await expect(host.locator(".arena-phase-steps li.active")).toHaveText("Rennen", { timeout: 12_000 });
+    await expect(host.getByRole("button", { name: "Starten" })).toHaveCount(0);
+    await expect(host.getByRole("button", { name: "Nicht bereit" })).toHaveCount(0);
 
     const hostTarget = (await host.locator("[data-arena-target]").textContent()).trim();
     const guestTarget = (await guest.locator("[data-arena-target]").textContent()).trim();
     await expect(host.locator("[data-arena-input]")).toBeEnabled();
     await expect(guest.locator("[data-arena-input]")).toBeEnabled();
     await expect.poll(async () => (await host.locator("[data-arena-timer] strong").textContent()).trim()).not.toBe("00:00.0");
+
+    await host.setViewportSize({ width: 390, height: 844 });
+    await expectResponsiveAppShell(host, 390);
+    await expectArenaCoreInFirstView(host);
+    await host.setViewportSize({ width: 1366, height: 768 });
 
     const layoutOrder = await host.evaluate(() => {
       const target = document.querySelector("[data-arena-target]")?.getBoundingClientRect();

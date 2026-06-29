@@ -29,6 +29,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 html {
   min-height: 100%;
   font-family: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
@@ -767,6 +771,10 @@ a:hover {
   grid-template-columns: minmax(190px, 0.22fr) minmax(240px, 0.32fr) minmax(280px, 1fr) auto;
   gap: 12px;
   align-items: end;
+}
+
+.competition-filter-grid.text-filter {
+  grid-template-columns: minmax(170px, 0.22fr) minmax(380px, 1fr) auto;
 }
 
 .competition-filter-grid label {
@@ -4603,10 +4611,16 @@ body.app-authenticated {
 
 .dashboard-quick-round .typing-timer::before,
 .play-quickstart .typing-timer::before {
-  content: "LIVE";
-  color: var(--app-green);
+  content: "BEREIT";
+  color: var(--app-cyan);
   font-size: 0.78rem;
   font-weight: 900;
+}
+
+.dashboard-quick-round.typing-running .typing-timer::before,
+.play-quickstart.typing-running .typing-timer::before {
+  content: "LIVE";
+  color: var(--app-green);
 }
 
 .dashboard-quick-round .typing-timer::after,
@@ -4614,6 +4628,12 @@ body.app-authenticated {
   content: "";
   height: 5px;
   border-radius: 999px;
+  background:
+    linear-gradient(90deg, var(--app-cyan) 0 18%, rgba(255, 255, 255, 0.11) 18% 100%);
+}
+
+.dashboard-quick-round.typing-running .typing-timer::after,
+.play-quickstart.typing-running .typing-timer::after {
   background:
     linear-gradient(90deg, var(--app-green) 0 54%, rgba(255, 255, 255, 0.11) 54% 100%);
 }
@@ -5013,6 +5033,47 @@ body.app-authenticated {
   padding: 10px;
 }
 
+@media (min-width: 1024px) {
+  .competition-page .competition-hero {
+    gap: 12px;
+    margin-bottom: 10px;
+  }
+
+  .competition-page .competition-hero > div:first-child {
+    min-height: 168px;
+    padding: 18px 22px;
+  }
+
+  .competition-page .competition-hero > div:first-child::after {
+    right: 18px;
+    bottom: 18px;
+    width: min(220px, 26%);
+    height: 46px;
+    opacity: 0.34;
+  }
+
+  .competition-page .competition-hero h1 {
+    font-size: clamp(2.35rem, 1.7rem + 2vw, 3.4rem);
+  }
+
+  .competition-page .competition-hero .lead {
+    margin-top: 8px;
+  }
+
+  .competition-page .competition-hero-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-content: start;
+  }
+
+  .competition-page .competition-hero-stats div {
+    min-height: 52px;
+  }
+
+  .competition-page .competition-hero-stats strong {
+    font-size: 1.02rem;
+  }
+}
+
 .mobile-topbar,
 .mobile-bottom-nav,
 .mobile-menu-panel,
@@ -5367,8 +5428,804 @@ body.app-authenticated {
   white-space: nowrap;
 }
 
+.mobile-training-priority,
+.text-library-mobile-actions {
+  display: none;
+}
+
+.mobile-text-quick-card {
+  display: grid;
+  gap: 12px;
+  min-height: 0;
+  padding: 14px;
+  border: 1px solid rgba(66, 227, 220, 0.28);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(45, 226, 238, 0.1), rgba(97, 238, 143, 0.04)),
+    rgba(7, 10, 13, 0.5);
+}
+
+.mobile-text-quick-card h3 {
+  margin: 0;
+  font-size: 1.05rem;
+  line-height: 1.28;
+}
+
 @media (max-width: 520px) {
   .text-library-grid .text-card .card-actions {
     grid-template-columns: 1fr;
+  }
+}
+
+/* Vision-audit responsive pass: these late rules lock the app shell to the intended breakpoints. */
+.competition-board-peek {
+  grid-column: 1 / -1;
+  min-height: auto !important;
+}
+
+.competition-board-peek ol {
+  display: grid;
+  gap: 8px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.competition-board-peek li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 32px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(169, 185, 204, 0.14);
+}
+
+.competition-board-peek small {
+  color: var(--app-cyan);
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.arena-entry-primary {
+  border-color: rgba(45, 226, 238, 0.38);
+  background:
+    linear-gradient(135deg, rgba(45, 226, 238, 0.12), rgba(97, 238, 143, 0.06)),
+    var(--surface);
+}
+
+.arena-room-actions {
+  align-items: center;
+}
+
+.arena-leave-button {
+  border-color: rgba(255, 100, 124, 0.3);
+}
+
+.arena-input-grid label {
+  min-width: 0;
+}
+
+.daily-challenge-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.daily-challenge-card {
+  gap: 16px;
+}
+
+.daily-challenge-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.daily-challenge-card-head h2 {
+  margin: 4px 0 0;
+}
+
+.daily-challenge-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 1px solid rgba(242, 184, 75, 0.34);
+  border-radius: 999px;
+  background: rgba(242, 184, 75, 0.09);
+  color: var(--reward);
+  font-size: 0.82rem;
+  font-weight: 820;
+  white-space: nowrap;
+}
+
+.typing-session-card.typing-idle .typing-timer,
+.typing-session-card.typing-idle .typing-input-wrap {
+  display: none;
+}
+
+.typing-session-card.typing-idle .typing-target {
+  display: grid;
+  align-items: center;
+  min-height: 116px;
+  border-color: rgba(66, 227, 220, 0.32);
+  background:
+    linear-gradient(135deg, rgba(37, 200, 216, 0.12), rgba(53, 211, 154, 0.05)),
+    var(--surface-action);
+  color: #dff8ff;
+  font-size: clamp(1.05rem, 0.92rem + 0.55vw, 1.35rem);
+  line-height: 1.45;
+}
+
+.daily-challenge-card.typing-idle .typing-actions button {
+  min-width: min(280px, 100%);
+  box-shadow: 0 14px 32px rgba(37, 200, 216, 0.2);
+}
+
+body.app-public.auth-exit-page {
+  background:
+    radial-gradient(circle at 50% 12%, rgba(37, 200, 216, 0.16), transparent 34rem),
+    linear-gradient(180deg, #080d12 0%, #071017 100%);
+}
+
+body.app-public.auth-exit-page .app-shell {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+body.app-public.auth-exit-page .app-main {
+  width: min(100%, 560px);
+}
+
+body.app-public.auth-exit-page .shell {
+  width: 100%;
+  margin: 0;
+}
+
+.auth-exit-card {
+  display: grid;
+  justify-items: start;
+  gap: 14px;
+  padding: clamp(24px, 5vw, 38px);
+  border: 1px solid rgba(66, 227, 220, 0.28);
+  border-radius: 10px;
+  background:
+    linear-gradient(135deg, rgba(37, 200, 216, 0.12), transparent 48%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0)),
+    rgba(14, 21, 29, 0.96);
+  box-shadow: var(--shadow);
+}
+
+.auth-exit-mark {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--accent-strong), var(--accent));
+  color: #07110f;
+  font-weight: 900;
+  box-shadow: 0 16px 38px rgba(37, 200, 216, 0.24);
+}
+
+.auth-exit-card h1 {
+  margin: 0;
+  font-size: clamp(2.1rem, 1.65rem + 1.8vw, 3rem);
+  line-height: 1.02;
+}
+
+.auth-exit-card p {
+  margin: 0;
+  color: #d7e7f6;
+  font-size: 1.03rem;
+  line-height: 1.55;
+}
+
+.auth-exit-card .form-actions {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.auth-exit-card .logout-confirm-button {
+  border-color: rgba(242, 184, 75, 0.44);
+  background:
+    linear-gradient(180deg, rgba(242, 184, 75, 0.96), rgba(218, 149, 49, 0.9));
+  color: #120d05;
+  box-shadow: 0 16px 34px rgba(242, 184, 75, 0.16);
+}
+
+.auth-exit-card .logout-confirm-button:hover {
+  border-color: rgba(242, 184, 75, 0.68);
+  background:
+    linear-gradient(180deg, rgba(255, 206, 109, 0.98), rgba(226, 162, 54, 0.94));
+}
+
+@media (max-width: 1023.98px) {
+  :root {
+    --mobile-nav-height: 74px;
+    --mobile-page-bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom) + 76px);
+  }
+
+  body.app-authenticated {
+    overflow-x: clip;
+  }
+
+  body.app-authenticated .desktop-sidebar,
+  body.app-authenticated .desktop-topbar {
+    display: none !important;
+  }
+
+  body.app-authenticated .mobile-topbar {
+    display: flex !important;
+  }
+
+  body.app-authenticated .mobile-bottom-nav {
+    display: grid !important;
+  }
+
+  body.app-authenticated .app-main {
+    width: 100% !important;
+    min-width: 0;
+    margin-left: 0 !important;
+    padding: 68px 14px var(--mobile-page-bottom) !important;
+  }
+
+  body.app-authenticated .shell,
+  body.app-authenticated.play-page .shell,
+  body.app-authenticated.competition-page .shell,
+  body.app-authenticated.arena-room-page .shell {
+    width: 100% !important;
+    max-width: min(920px, calc(100vw - 28px)) !important;
+    margin: 0 auto !important;
+    padding-bottom: calc(env(safe-area-inset-bottom) + 24px);
+  }
+
+  body.app-authenticated .status-cockpit {
+    width: 100% !important;
+    max-width: min(920px, calc(100vw - 28px));
+    margin-inline: auto;
+  }
+
+  .page-header,
+  .text-library-header,
+  .arena-lobby-hero,
+  .daily-challenge-card-head,
+  .competition-page .competition-hero,
+  .competition-page .competition-layout,
+  .competition-page .competition-filter-grid,
+  .dashboard-grid,
+  .dashboard-cockpit,
+  .dashboard-grid-two,
+  .play-command-grid,
+  .settings-layout,
+  .arena-create-layout,
+  .arena-secondary,
+  .arena-entry-grid {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+  }
+
+  .form-grid,
+  .arena-create-form,
+  .settings-form,
+  .filter-form {
+    max-width: none;
+    width: 100%;
+  }
+
+  .button,
+  button,
+  input[type="submit"],
+  .profile-menu,
+  .mobile-menu-button {
+    min-height: 44px;
+  }
+
+  .page-actions,
+  .form-actions,
+  .card-actions {
+    gap: 10px;
+  }
+
+  .page-actions .button,
+  .page-actions button,
+  .form-actions .button,
+  .form-actions button {
+    width: 100%;
+  }
+
+  .competition-page .competition-hero {
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+
+  .competition-page .competition-hero > div:first-child {
+    min-height: 0;
+    padding: 18px;
+  }
+
+  .competition-page .competition-hero h1 {
+    font-size: clamp(2rem, 1.55rem + 2vw, 3rem);
+  }
+
+  .competition-page .competition-hero .lead {
+    margin-top: 8px;
+    font-size: 0.98rem;
+    line-height: 1.5;
+  }
+
+  .competition-chase-line {
+    margin-top: 14px;
+  }
+
+  .competition-hero-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 12px;
+  }
+
+  .competition-hero-stats div {
+    min-height: 56px;
+    padding: 10px;
+  }
+
+  .competition-tabs {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(84px, 1fr));
+    gap: 8px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
+  .competition-tabs a {
+    min-width: 84px;
+    min-height: 44px;
+    padding: 10px 12px;
+    text-align: center;
+    white-space: nowrap;
+  }
+
+  .competition-controls,
+  .competition-main,
+  .competition-card {
+    padding: 14px;
+  }
+
+  .competition-board-head {
+    display: grid;
+    gap: 12px;
+  }
+
+  .podium-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .podium-card,
+  .podium-card.rank-2,
+  .podium-card.rank-3 {
+    min-height: 132px;
+    margin-top: 0;
+    padding: 12px;
+  }
+
+  .podium-card strong {
+    font-size: 1.25rem;
+  }
+
+  .arena-lobby-hero .page-actions,
+  .arena-room-page .arena-page-header .page-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    justify-content: stretch;
+  }
+
+  .arena-entry-primary {
+    min-height: 0;
+  }
+
+  .arena-create-preview {
+    order: -1;
+  }
+
+  .arena-room-page .app-main {
+    padding-top: 62px !important;
+  }
+
+  .arena-room-page .arena-page-header {
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .arena-room-page .arena-page-header h1 {
+    font-size: clamp(1.1rem, 0.95rem + 1vw, 1.45rem);
+  }
+
+  .arena-room-page .arena-workbench {
+    gap: 8px;
+    padding: 12px;
+  }
+
+  .arena-room-page .arena-status-bar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .arena-room-page .arena-status-bar h2 {
+    font-size: 1.08rem;
+  }
+
+  .arena-room-page .arena-status-bar p {
+    font-size: 0.86rem;
+  }
+
+  .arena-room-page .typing-timer {
+    min-width: 112px;
+    padding: 6px 9px;
+  }
+
+  .arena-room-page .typing-timer strong {
+    font-size: 1.18rem;
+  }
+
+  .arena-room-page .arena-phase-steps {
+    gap: 6px;
+  }
+
+  .arena-room-page .arena-phase-steps li {
+    min-height: 30px;
+    padding: 5px 7px;
+    font-size: 0.78rem;
+  }
+
+  .arena-room-page .typing-target,
+  .typing-session-card > .typing-target {
+    min-height: 128px;
+    max-height: min(34dvh, 240px);
+    overflow: auto;
+    padding: 14px;
+    font-size: clamp(0.98rem, 0.9rem + 0.45vw, 1.18rem);
+    line-height: 1.65;
+  }
+
+  .arena-room-page .typing-input,
+  .typing-session-card > label .typing-input {
+    min-height: 78px;
+  }
+
+  .daily-challenge-card.typing-idle .typing-target {
+    min-height: 96px;
+  }
+
+  .arena-workbench .form-grid,
+  .arena-input-grid,
+  .live-typing-row,
+  .live-typing-board.compact .live-typing-row,
+  .live-typing-board.focused .live-typing-row {
+    grid-template-columns: 1fr !important;
+  }
+
+  .arena-running-action {
+    width: 100%;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1023.98px) {
+  body.app-authenticated .app-main {
+    padding-inline: 16px !important;
+  }
+
+  body.app-authenticated .shell,
+  body.app-authenticated.play-page .shell,
+  body.app-authenticated.competition-page .shell,
+  body.app-authenticated.arena-room-page .shell,
+  body.app-authenticated .status-cockpit {
+    max-width: min(936px, calc(100vw - 32px)) !important;
+  }
+
+  .play-command-grid,
+  .dashboard-cockpit {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+@media (max-width: 767.98px) {
+  :root {
+    --mobile-nav-height: 78px;
+    --mobile-page-bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom) + 104px);
+  }
+
+  body.app-authenticated .app-main {
+    padding: 62px 10px var(--mobile-page-bottom) !important;
+  }
+
+  body.app-authenticated .shell,
+  body.app-authenticated.play-page .shell,
+  body.app-authenticated.competition-page .shell,
+  body.app-authenticated.arena-room-page .shell,
+  body.app-authenticated .status-cockpit {
+    max-width: calc(100vw - 20px) !important;
+  }
+
+  body.app-authenticated .shell {
+    padding-bottom: calc(env(safe-area-inset-bottom) + 34px);
+  }
+
+  .page-header,
+  .arena-lobby-hero,
+  .text-library-header {
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+
+  .text-library-header {
+    padding: 16px;
+  }
+
+  .text-library-header .lead {
+    margin-top: 8px;
+    font-size: 0.95rem;
+    line-height: 1.42;
+  }
+
+  .text-library-header .hero-stat-row,
+  .text-library-header .page-actions {
+    display: none !important;
+  }
+
+  .mobile-training-priority {
+    display: grid;
+    gap: 12px;
+    margin-bottom: 12px;
+    padding: 14px;
+  }
+
+  .mobile-training-priority .section-title-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .mobile-training-priority h2,
+  .text-library-mobile-actions h2 {
+    margin: 0;
+    font-size: 1.24rem;
+    line-height: 1.18;
+  }
+
+  .mobile-training-priority .compact-button {
+    width: auto;
+    min-height: 38px;
+    padding-inline: 11px;
+  }
+
+  .mobile-text-quick-grid {
+    display: grid;
+    gap: 10px;
+  }
+
+  .mobile-text-quick-card:nth-child(n+2) {
+    display: none;
+  }
+
+  .mobile-text-quick-card .metadata-row {
+    margin-top: 8px;
+  }
+
+  .mobile-text-quick-card .card-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 8px;
+    padding-top: 0;
+  }
+
+  .text-library-mobile-actions {
+    display: grid;
+    gap: 12px;
+    margin-top: 14px;
+  }
+
+  .text-library-mobile-actions p {
+    margin: 6px 0 0;
+    color: var(--muted);
+  }
+
+  .page-header h1 {
+    font-size: clamp(1.75rem, 1.4rem + 4vw, 2.45rem);
+  }
+
+  .page-header .lead {
+    font-size: 0.96rem;
+  }
+
+  .mobile-topbar {
+    height: 54px;
+    padding-inline: 12px;
+  }
+
+  .status-cockpit {
+    min-height: 92px;
+    margin-bottom: 10px;
+    padding: 10px;
+  }
+
+  .competition-page .competition-hero h1 {
+    font-size: 2.25rem;
+  }
+
+  .competition-hero-stats {
+    display: none;
+    grid-template-columns: 1fr;
+  }
+
+  .competition-hero-stats:has(.competition-board-peek) {
+    display: grid;
+  }
+
+  .competition-hero-stats > div:not(.competition-board-peek) {
+    display: none;
+  }
+
+  .competition-board-peek {
+    display: grid;
+  }
+
+  .competition-board-peek li {
+    display: grid;
+    gap: 2px;
+  }
+
+  .competition-tabs {
+    display: flex;
+    overflow-x: auto;
+    scrollbar-width: none;
+    margin-inline: 0;
+    padding-bottom: 4px;
+  }
+
+  .competition-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .competition-tabs a {
+    flex: 0 0 auto;
+    min-width: 96px;
+    padding-inline: 8px;
+    white-space: nowrap;
+  }
+
+  .podium-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .podium-card,
+  .podium-card.rank-2,
+  .podium-card.rank-3 {
+    min-height: 0;
+  }
+
+  .competition-table td {
+    align-items: flex-start;
+  }
+
+  .arena-lobby-hero .page-actions,
+  .arena-room-page .arena-page-header .page-actions,
+  .page-actions,
+  .form-actions,
+  .card-actions {
+    grid-template-columns: 1fr !important;
+  }
+
+  .daily-challenge-badge {
+    width: fit-content;
+    white-space: normal;
+  }
+
+  .daily-challenge-page .status-cockpit {
+    min-height: 82px;
+  }
+
+  .daily-challenge-hero {
+    padding: 14px;
+  }
+
+  .daily-challenge-hero h1 {
+    font-size: 2.05rem;
+  }
+
+  .daily-challenge-hero .lead {
+    font-size: 0.92rem;
+    line-height: 1.42;
+  }
+
+  .daily-challenge-hero .hero-stat-row {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    margin-top: 10px;
+  }
+
+  .daily-challenge-hero .hero-stat-row span {
+    min-width: 0;
+    min-height: 48px;
+    padding: 7px;
+    font-size: 0.73rem;
+    line-height: 1.2;
+  }
+
+  .daily-challenge-hero .hero-stat-row strong {
+    font-size: 0.96rem;
+  }
+
+  .daily-challenge-card {
+    gap: 10px;
+    padding: 14px;
+  }
+
+  .daily-challenge-card-head h2 {
+    font-size: 1.22rem;
+  }
+
+  .daily-challenge-card.typing-idle .typing-target {
+    min-height: 70px;
+    padding: 10px;
+    font-size: 0.94rem;
+    line-height: 1.36;
+  }
+
+  .auth-exit-card .form-actions {
+    grid-template-columns: 1fr !important;
+  }
+
+  .arena-room-page .arena-page-header .lead,
+  .arena-room-page .arena-page-header .room-code-share {
+    display: none;
+  }
+
+  .arena-room-page .arena-phase-steps {
+    display: none;
+  }
+
+  .arena-room-page .typing-target,
+  .typing-session-card > .typing-target {
+    min-height: 112px;
+    padding: 12px;
+    font-size: 0.96rem;
+    line-height: 1.58;
+  }
+
+  .arena-room-page .typing-target {
+    max-height: min(22dvh, 176px);
+  }
+
+  .typing-session-card > .typing-target {
+    max-height: min(19dvh, 156px);
+  }
+
+  .arena-room-page .typing-input,
+  .typing-session-card > label .typing-input {
+    min-height: 64px;
+    font-size: 0.96rem;
+  }
+
+  .live-typing-board {
+    padding: 12px;
+  }
+
+  .live-typing-preview {
+    max-height: 150px;
+    overflow: auto;
+  }
+
+  .typing-actions {
+    justify-content: stretch;
+  }
+
+  .typing-actions button {
+    width: 100%;
   }
 }

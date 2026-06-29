@@ -15,7 +15,7 @@
 <section class="grid">
 @foreach (var item in Model.Modes)
 {
-    <article class="card typing-session-card" data-typing-app data-mode="@item.Mode" data-words="@item.Words">
+    <article class="card typing-session-card" data-typing-app data-mode="@item.Mode" data-words="@item.Words" data-hide-start-when-prepared="true">
         <h2>@item.Words Wörter</h2>
         <div class="typing-target" data-target></div>
         <label>

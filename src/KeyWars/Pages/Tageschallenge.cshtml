@@ -2,22 +2,46 @@
 @model KeyWars.Pages.TageschallengeModel
 @{
     ViewData["Title"] = "Tageschallenge";
+    ViewData["BodyClass"] = "daily-challenge-page";
 }
 
-<section class="page-header">
+<section class="page-header daily-challenge-hero">
     <div>
+        <span class="eyebrow">Tageswertung</span>
         <h1>Tageschallenge</h1>
-        <p class="lead">Der erste gültige Versuch des Tages zählt für deine Tageswertung.</p>
+        <p class="lead">Ein fokussierter Tageslauf mit festem Text. Dein erster gültiger Versuch zählt für die Tageswertung, danach kannst du weiter trainieren.</p>
+        <div class="hero-stat-row" aria-label="Challenge-Regeln">
+            <span><strong>1 Versuch</strong> zählt offiziell</span>
+            <span><strong>@Model.Text.CharacterCount</strong> Zeichen</span>
+            <span><strong>90%+</strong> Zielgenauigkeit</span>
+        </div>
     </div>
 </section>
 
-<section class="card" data-typing-app data-mode="Text" data-text-id="@Model.Text.Id">
-    <h2>@Model.Text.Title</h2>
+<section class="card typing-session-card daily-challenge-card"
+         data-typing-app
+         data-mode="Text"
+         data-text-id="@Model.Text.Id"
+         data-auto-prepare="false"
+         data-start-label="Tageschallenge starten"
+         data-prepared-label="Lauf aktiv"
+         data-finished-label="Nochmal trainieren"
+         data-hide-start-when-prepared="true"
+         data-idle-message="Heute zu schlagen: ein sauberer Lauf mit mindestens 90% Genauigkeit. Starte, wenn du bereit bist.">
+    <div class="daily-challenge-card-head">
+        <div>
+            <span class="eyebrow">Heutiger Text</span>
+            <h2>@Model.Text.Title</h2>
+        </div>
+        <span class="daily-challenge-badge">Bestes Ergebnis zählt</span>
+    </div>
     <div class="typing-target" data-target></div>
-    <label>
+    <label class="typing-input-wrap">
         Eingabe
         <textarea class="typing-input" data-input disabled autocapitalize="off" autocomplete="off" spellcheck="false"></textarea>
     </label>
-    <button type="button" data-start>Starten</button>
+    <div class="form-actions typing-actions">
+        <button type="button" data-start>Tageschallenge starten</button>
+    </div>
     <div data-result></div>
 </section>
