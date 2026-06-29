@@ -1460,7 +1460,14 @@ progress.xp-progress::-moz-progress-bar {
 .form-grid {
   display: grid;
   gap: 14px;
+  min-width: 0;
   max-width: 760px;
+}
+
+form,
+fieldset {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .settings-layout {
@@ -1526,6 +1533,7 @@ progress.xp-progress::-moz-progress-bar {
 label {
   display: grid;
   gap: 6px;
+  min-width: 0;
   font-weight: 650;
 }
 
@@ -1533,6 +1541,8 @@ input,
 textarea,
 select {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 10px 12px;
@@ -2839,6 +2849,9 @@ select:focus-visible {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
   font-weight: 400;
 }
 
@@ -5713,7 +5726,17 @@ body.app-public.auth-exit-page .shell {
   .settings-form,
   .filter-form {
     max-width: none;
+    min-width: 0;
     width: 100%;
+  }
+
+  body.app-authenticated .card,
+  body.app-authenticated .shell > *,
+  body.app-authenticated .form-grid > *,
+  body.app-authenticated fieldset > *,
+  body.app-authenticated label > * {
+    min-width: 0;
+    max-width: 100%;
   }
 
   .button,

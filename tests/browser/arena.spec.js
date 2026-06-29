@@ -48,7 +48,7 @@ async function expectNoHorizontalOverflow(page) {
     return { documentWidth, viewportWidth, offenders };
   });
 
-  expect(overflow.documentWidth, `Overflow durch: ${overflow.offenders.join(", ")}`).toBeLessThanOrEqual(overflow.viewportWidth + 1);
+  expect(overflow.documentWidth, `Overflow auf ${page.url()} durch: ${overflow.offenders.join(", ")}`).toBeLessThanOrEqual(overflow.viewportWidth + 1);
 }
 
 async function expectCompactMobileHeader(page) {
