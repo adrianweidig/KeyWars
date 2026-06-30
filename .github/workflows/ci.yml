@@ -63,7 +63,10 @@ jobs:
       - name: Runtime asset check
         shell: bash
         run: |
-          if grep -RInE --exclude-dir=vendor 'https?://|//cdn|fonts.googleapis|unpkg|jsdelivr' src/KeyWars/Pages src/KeyWars/wwwroot; then
+          matches="$(grep -RInE --exclude-dir=vendor 'https?://|//cdn|fonts.googleapis|unpkg|jsdelivr' src/KeyWars/Pages src/KeyWars/wwwroot \
+            | grep -vE 'xmlns(:xlink)?="http://www\.w3\.org/(2000/svg|1999/xlink)"' || true)"
+          if [ -n "$matches" ]; then
+            printf '%s\n' "$matches"
             echo "External runtime asset reference found"
             exit 1
           fi
