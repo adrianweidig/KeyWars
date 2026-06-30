@@ -897,6 +897,47 @@ a:hover {
   font-size: 0.78rem;
 }
 
+.competition-table th:first-child,
+.competition-table td:first-child,
+.competition-table th:nth-child(3),
+.competition-table td:nth-child(3) {
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
+.competition-table th:first-child,
+.competition-table td:first-child {
+  width: 64px;
+}
+
+@media (min-width: 761px) {
+  .competition-table {
+    table-layout: fixed;
+  }
+
+  .competition-table th:first-child,
+  .competition-table td:first-child {
+    width: 64px;
+  }
+
+  .competition-table th:nth-child(3),
+  .competition-table td:nth-child(3) {
+    width: 92px;
+  }
+
+  .competition-table th:nth-child(4),
+  .competition-table td:nth-child(4) {
+    width: 30%;
+    white-space: nowrap;
+    overflow-wrap: normal;
+  }
+
+  .competition-table th:nth-child(5),
+  .competition-table td:nth-child(5) {
+    width: 24%;
+  }
+}
+
 .competition-table tr.is-current,
 .podium-card.is-current {
   outline: 2px solid rgba(66, 227, 220, 0.42);
@@ -6668,5 +6709,273 @@ body.app-public.auth-exit-page .shell {
 
   .typing-actions button {
     width: 100%;
+  }
+}
+
+.app-authenticated.challenge-play-page .shell {
+  width: min(1160px, 100%);
+}
+
+.challenge-play-header {
+  margin-bottom: 14px;
+  padding: 18px;
+  border-color: rgba(66, 227, 220, 0.22);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.024), rgba(255, 255, 255, 0)),
+    rgba(10, 18, 27, 0.9);
+  box-shadow: none;
+}
+
+.challenge-play-header::after {
+  content: none !important;
+}
+
+.challenge-play-header h1 {
+  font-size: 1.8rem;
+  line-height: 1.12;
+}
+
+.challenge-play-header .lead {
+  max-width: 720px;
+  font-size: 0.96rem;
+}
+
+.challenge-typing-card {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  overflow: hidden;
+}
+
+.challenge-typing-card > label {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+}
+
+.challenge-typing-card > label .typing-input {
+  resize: none;
+}
+
+.challenge-typing-card.typing-finished > .typing-target,
+.challenge-typing-card.typing-finished > .typing-timer,
+.challenge-typing-card.typing-finished > label,
+.challenge-typing-card.typing-finished > [data-start] {
+  display: none;
+}
+
+.challenge-play-page .finish-panel {
+  grid-template-columns: minmax(168px, 0.32fr) minmax(0, 1fr);
+  gap: 12px;
+  margin-top: 0;
+  padding: 12px;
+  border-color: rgba(66, 227, 220, 0.24);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.024), rgba(255, 255, 255, 0)),
+    rgba(10, 18, 27, 0.92);
+}
+
+.challenge-play-page .finish-panel.personal-best {
+  border-color: rgba(242, 184, 75, 0.34);
+  background:
+    linear-gradient(135deg, rgba(242, 184, 75, 0.08), rgba(37, 200, 216, 0.045)),
+    rgba(10, 18, 27, 0.94);
+  box-shadow: inset 0 0 0 1px rgba(242, 184, 75, 0.06);
+}
+
+.challenge-play-page .finish-score {
+  min-height: 118px;
+  padding: 14px;
+  border-color: rgba(169, 185, 204, 0.14);
+  background: rgba(5, 12, 18, 0.52);
+}
+
+.challenge-play-page .finish-score strong {
+  font-size: 2.65rem;
+}
+
+.challenge-play-page .finish-summary {
+  align-content: stretch;
+}
+
+.challenge-play-page .finish-summary p {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.challenge-play-page .result-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.challenge-play-page .result-metrics .metric,
+.challenge-play-page .analysis-grid div {
+  min-width: 0;
+  padding: 9px;
+  border-color: rgba(169, 185, 204, 0.15);
+  background: rgba(11, 24, 37, 0.72);
+}
+
+.challenge-play-page .result-metrics .metric span,
+.challenge-play-page .analysis-grid span {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.challenge-play-page .result-metrics .metric strong,
+.challenge-play-page .analysis-grid strong {
+  overflow-wrap: anywhere;
+  font-size: 1rem;
+  line-height: 1.18;
+}
+
+.challenge-play-page .xp-reveal {
+  grid-template-columns: minmax(96px, 0.2fr) minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px;
+  border-color: rgba(66, 227, 220, 0.2);
+  background: rgba(37, 200, 216, 0.045);
+}
+
+.challenge-play-page .xp-reveal strong {
+  font-size: 1.2rem;
+}
+
+.challenge-play-page .motivation-panel {
+  padding: 12px;
+  border-color: rgba(66, 227, 220, 0.2);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0)),
+    rgba(10, 18, 27, 0.9);
+  box-shadow: none;
+}
+
+.challenge-play-page .motivation-panel.level-up {
+  border-color: rgba(242, 184, 75, 0.32);
+  animation: none;
+}
+
+.challenge-play-page .motivation-burst {
+  width: 112px;
+  opacity: 0.08;
+}
+
+.challenge-play-page .motivation-header {
+  justify-content: flex-start;
+  align-items: flex-start;
+}
+
+.challenge-play-page .motivation-header .xp-chip {
+  margin-left: auto;
+}
+
+.challenge-play-page .motivation-events {
+  grid-template-columns: repeat(auto-fit, minmax(156px, 1fr));
+  gap: 8px;
+}
+
+.challenge-play-page .motivation-event {
+  grid-template-columns: 32px minmax(0, 1fr);
+  align-items: start;
+  min-height: 76px;
+  padding: 8px;
+  background: rgba(13, 27, 40, 0.74);
+}
+
+.challenge-play-page .motivation-event .xp-chip {
+  grid-column: 2;
+  justify-self: start;
+}
+
+.challenge-play-page .motivation-event-icon {
+  width: 32px;
+  height: 32px;
+}
+
+.challenge-play-page .motivation-event-icon .kw-icon {
+  width: 17px;
+  height: 17px;
+}
+
+.challenge-play-page .motivation-event .motivation-event-copy > span {
+  font-size: 0.78rem;
+  line-height: 1.32;
+}
+
+.challenge-play-page .typing-analysis {
+  margin-top: 0;
+  padding: 12px;
+  border-color: rgba(66, 227, 220, 0.2);
+  background: rgba(7, 16, 25, 0.76);
+}
+
+.challenge-play-page .analysis-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.challenge-play-page .typing-analysis h3,
+.challenge-play-page .typing-analysis h4 {
+  margin-bottom: 8px;
+}
+
+.challenge-play-page .typing-analysis h4 {
+  margin-top: 12px;
+}
+
+.challenge-play-page .typing-analysis p,
+.challenge-play-page .typing-analysis li,
+.challenge-play-page .metric-note {
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+@media (max-width: 1023px) {
+  .app-authenticated.challenge-play-page .shell {
+    width: 100% !important;
+    max-width: min(920px, calc(100vw - 28px)) !important;
+  }
+}
+
+@media (max-width: 720px) {
+  .challenge-play-header h1 {
+    font-size: 1.45rem;
+  }
+
+  .challenge-typing-card {
+    padding: 12px;
+  }
+
+  .challenge-play-page .finish-panel,
+  .challenge-play-page .xp-reveal {
+    grid-template-columns: 1fr;
+  }
+
+  .challenge-play-page .finish-score {
+    min-height: 94px;
+  }
+
+  .challenge-play-page .finish-score strong {
+    font-size: 2.25rem;
+  }
+
+  .challenge-play-page .result-metrics,
+  .challenge-play-page .analysis-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .challenge-play-page .motivation-events {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 380px) {
+  .challenge-play-page .result-metrics,
+  .challenge-play-page .analysis-grid,
+  .challenge-play-page .motivation-events {
+    grid-template-columns: 1fr;
   }
 }

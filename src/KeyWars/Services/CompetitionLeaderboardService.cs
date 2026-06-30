@@ -521,7 +521,7 @@ public sealed class CompetitionLeaderboardService(KeyWarsDbContext db, TimeProvi
         Initials = BuildInitials(candidate.DisplayName),
         PrimaryValue = $"{candidate.Wpm:0.0}",
         Context = candidate.ChallengeTitle,
-        Detail = $"{candidate.Accuracy:0.0} % Genauigkeit · Platz {(candidate.Placement?.ToString("N0") ?? "-")}",
+        Detail = $"{candidate.Accuracy:0.0} % Genauigkeit · {FormatChallengePlacement(candidate.Placement)}",
         Score = candidate.Wpm,
         Wpm = candidate.Wpm,
         Accuracy = candidate.Accuracy,
@@ -530,6 +530,9 @@ public sealed class CompetitionLeaderboardService(KeyWarsDbContext db, TimeProvi
         IsCurrentUser = candidate.UserProfileId == currentProfileId,
         IsPrivatePreview = privatePreview
     };
+
+    private static string FormatChallengePlacement(int? placement) =>
+        placement is null ? "Platz offen" : $"Platz {placement.Value:N0}";
 
     private async Task<IReadOnlyDictionary<Guid, int>> ReadRecentXpAsync(HashSet<Guid> profileIds, CompetitionPeriod period, CancellationToken cancellationToken)
     {

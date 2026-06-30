@@ -85,6 +85,28 @@ public sealed class CompetitionLeaderboardServiceTests
         var entry = Assert.Single(result.Board.Entries);
         Assert.Equal(alice.Id, entry.UserProfileId);
         Assert.Equal("Teamrennen", entry.Context);
+        Assert.Contains("Platz 1", entry.Detail);
+        Assert.Same(entry, result.Board.OwnEntry);
+        Assert.Null(result.Board.NextTarget);
+    }
+
+    [Fact]
+    public async Task ChallengeBoardLabelsOpenPlacement()
+    {
+        await using var context = await CompetitionTestContext.CreateAsync();
+        var alice = context.AddProfile("alice", "Alice Alpha");
+        var text = context.AddText("Challenge-Text", ratingEligible: true);
+        var challenge = context.AddChallenge(text.Id, alice.Id, "Offenes Teamrennen");
+        context.AddChallengeResult(challenge.Id, alice.Id, 95, 100, ParticipantStatus.Finished, placement: null);
+        await context.Db.SaveChangesAsync();
+
+        var result = await context.Service.GetAsync(alice, new LeaderboardQuery(CompetitionBoardKind.Challenge, CompetitionPeriod.Day, TrainingMode.Sprint60, null));
+
+        var entry = Assert.Single(result.Board.Entries);
+        Assert.Contains("Platz offen", entry.Detail);
+        Assert.DoesNotContain("Platz -", entry.Detail);
+        Assert.Equal(1, result.Board.OwnEntry?.Rank);
+        Assert.Null(result.Board.NextTarget);
     }
 
     [Fact]
@@ -252,7 +274,7 @@ public sealed class CompetitionLeaderboardServiceTests
             return challenge;
         }
 
-        public void AddChallengeResult(Guid challengeId, Guid profileId, double wpm, double accuracy, ParticipantStatus status)
+        public void AddChallengeResult(Guid challengeId, Guid profileId, double wpm, double accuracy, ParticipantStatus status, int? placement = 1)
         {
             var round = Db.ChangeTracker.Entries<ChallengeRound>().Single(entry => entry.Entity.ChallengeId == challengeId).Entity;
             Db.ChallengeRoundResults.Add(new ChallengeRoundResult
@@ -260,7 +282,7 @@ public sealed class CompetitionLeaderboardServiceTests
                 ChallengeRoundId = round.Id,
                 UserProfileId = profileId,
                 Status = status,
-                Placement = status == ParticipantStatus.Finished ? 1 : null,
+                Placement = status == ParticipantStatus.Finished ? placement : null,
                 DurationMilliseconds = 60_000,
                 Wpm = wpm,
                 Accuracy = accuracy,

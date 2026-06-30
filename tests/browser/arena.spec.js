@@ -445,6 +445,51 @@ test("Challenge-Spiel bleibt nach vorbereiteter Runde und Reload spielbar", asyn
     await expect(page.locator("[data-input]")).toBeEnabled({ timeout: 15_000 });
     await expect(page.locator("[data-target]")).not.toContainText("konnte nicht vorbereitet werden");
     await expectNoHorizontalOverflow(page);
+
+    const target = (await page.locator("[data-target]").textContent()).trim();
+    await page.setViewportSize({ width: 462, height: 720 });
+    await page.locator("[data-input]").fill(target);
+    await expect(page.locator(".finish-panel")).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator(".xp-reveal")).toBeVisible();
+    await expect(page.locator(".typing-analysis")).toBeVisible();
+    await expect(page.locator(".challenge-typing-card.typing-finished > .typing-target")).toBeHidden();
+    await expect(page.locator(".challenge-typing-card.typing-finished > .typing-timer")).toBeHidden();
+    await expect(page.locator(".challenge-typing-card.typing-finished > label")).toBeHidden();
+    await expect(page.locator(".challenge-typing-card.typing-finished > [data-start]")).toBeHidden();
+    await expectNoHorizontalOverflow(page);
+
+    const challengeLayout = await page.evaluate(() => {
+      const viewportWidth = document.documentElement.clientWidth;
+      const card = document.querySelector(".challenge-typing-card")?.getBoundingClientRect();
+      const metricColumns = getComputedStyle(document.querySelector(".challenge-play-page .result-metrics")).gridTemplateColumns
+        .split(" ")
+        .filter(Boolean)
+        .length;
+      const motivationEvents = document.querySelector(".challenge-play-page .motivation-events");
+      const motivationColumns = motivationEvents
+        ? getComputedStyle(motivationEvents).gridTemplateColumns.split(" ").filter(Boolean).length
+        : 0;
+
+      return {
+        cardRight: Math.round(card?.right ?? 0),
+        viewportWidth,
+        metricColumns,
+        motivationColumns
+      };
+    });
+    expect(challengeLayout.cardRight).toBeLessThanOrEqual(challengeLayout.viewportWidth);
+    expect(challengeLayout.metricColumns).toBe(2);
+    expect(challengeLayout.motivationColumns).toBeLessThanOrEqual(2);
+
+    await page.goto("/ranglisten?board=challenge&period=day");
+    await expect(page.getByRole("heading", { name: "Challenge-Bestleistungen" })).toBeVisible();
+    await expect(page.locator(".podium-card")).toHaveCount(1);
+    await expect(page.locator(".competition-table tbody tr")).toHaveCount(1);
+    await expect(page.locator(".competition-table")).toContainText("Platz offen");
+    await expect(page.locator(".competition-side")).toContainText("Top halten");
+    await expect(page.locator(".competition-side")).toContainText("Du führst dieses Board");
+    await expect(page.locator(".competition-side")).not.toContainText("Bestwert setzen");
+    await expectNoHorizontalOverflow(page);
   } finally {
     await partnerContext.close();
   }

@@ -11,7 +11,7 @@
     var query = Model.Overview.Query;
     var board = Model.Overview.Board;
     var podium = board.Entries.Take(3).ToList();
-    var rows = board.Entries.Skip(3).ToList();
+    var rows = board.Entries.ToList();
     var ownPositionLabel = board.OwnEntry is null
         ? "Noch nicht gewertet"
         : board.OwnEntry.IsPrivatePreview
@@ -231,12 +231,20 @@
 
         <section class="competition-card">
             <h2>Nächstes Ziel</h2>
-            @if (board.NextTarget is null)
+            @if (board.OwnEntry is null)
             {
                 <div class="target-rank">
                     <span>Fokus</span>
                     <strong>Bestwert setzen</strong>
                     <p>Greife dieses Board mit einer gültigen Runde ab 90 % Genauigkeit an.</p>
+                </div>
+            }
+            else if (board.NextTarget is null)
+            {
+                <div class="target-rank">
+                    <span>Top halten</span>
+                    <strong>Du führst dieses Board</strong>
+                    <p>Verbessere deinen eigenen Wert, um den Vorsprung auszubauen.</p>
                 </div>
             }
             else

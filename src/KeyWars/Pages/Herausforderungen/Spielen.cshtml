@@ -2,16 +2,17 @@
 @model KeyWars.Pages.Herausforderungen.SpielenModel
 @{
     ViewData["Title"] = "Herausforderung spielen";
+    ViewData["BodyClass"] = "challenge-play-page";
 }
 
-<section class="page-header">
+<section class="page-header challenge-play-header">
     <div>
         <h1>@Model.CurrentChallenge.Title</h1>
         <p class="lead">Ein offizieller Challenge-Versuch kann nicht freiwillig neu gestartet werden.</p>
     </div>
 </section>
 
-<section class="card typing-session-card" data-typing-app data-mode="Text" data-text-id="@Model.Text.Id" data-challenge-id="@Model.CurrentChallenge.Id" data-hide-start-when-prepared="true">
+<section class="card typing-session-card challenge-typing-card" data-typing-app data-mode="Text" data-text-id="@Model.Text.Id" data-challenge-id="@Model.CurrentChallenge.Id" data-hide-start-when-prepared="true">
     <div class="typing-target" data-target></div>
     <label>
         Eingabe
