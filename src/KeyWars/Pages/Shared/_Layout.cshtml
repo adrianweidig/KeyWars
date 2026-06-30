@@ -45,7 +45,7 @@
                     <span>KeyWars</span>
                 </a>
                 <div class="app-tools">
-                    <button type="button" class="icon-button" title="Designmodus" aria-label="Designmodus">@UiIcons.Svg("spark")</button>
+                    <button type="button" class="icon-button" data-design-mode-toggle title="Designmodus" aria-label="Designmodus" aria-pressed="false">@UiIcons.Svg("spark")</button>
                     <a class="profile-menu" asp-page="/Profil/Index">
                         <span>Mein Profil</span>
                         @UiIcons.Svg("chevron")
@@ -118,7 +118,7 @@
                     <div class="xp-value"><strong>@layoutProfile.ExperiencePoints.ToString("N0")</strong> / @xpTotal.ToString("N0") XP</div>
                     <div class="next-rank"><span>Nächster Rang</span><span class="rank-token">@UiIcons.Svg("award", "kw-icon")<strong>@(layoutProfile.Level + 1)</strong></span></div>
                     <div class="app-tools">
-                        <button type="button" class="icon-button" title="Designmodus" aria-label="Designmodus">@UiIcons.Svg("spark")</button>
+                        <button type="button" class="icon-button" data-design-mode-toggle title="Designmodus" aria-label="Designmodus" aria-pressed="false">@UiIcons.Svg("spark")</button>
                         <a class="profile-menu" asp-page="/Profil/Index">
                             <span>Mein Profil</span>
                             @UiIcons.Svg("chevron")

@@ -230,6 +230,59 @@ test("Dashboard und Einstellungen rendern im echten Browser", async ({ page }) =
   await expect(page.locator("html")).toHaveAttribute("lang", "de");
 });
 
+test("Designmodus-Button toggelt sichtbaren Shell-Zustand", async ({ page }) => {
+  await login(page, "browser.design");
+
+  const designButton = page.locator(".desktop-topbar [data-design-mode-toggle]");
+  await expect(designButton).toBeVisible();
+  await expect(designButton).toHaveAttribute("aria-pressed", "false");
+  await expect(page.locator("body")).not.toHaveClass(/app-design-mode/);
+
+  await designButton.click();
+  await expect(designButton).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("body")).toHaveClass(/app-design-mode/);
+  await expect(designButton).toHaveCSS("color", "rgb(4, 16, 25)");
+
+  await page.reload();
+  await expect(page.locator("body")).toHaveClass(/app-design-mode/);
+  await expect(page.locator(".desktop-topbar [data-design-mode-toggle]")).toHaveAttribute("aria-pressed", "true");
+
+  await page.locator(".desktop-topbar [data-design-mode-toggle]").click();
+  await expect(page.locator("body")).not.toHaveClass(/app-design-mode/);
+  await expect(page.locator(".desktop-topbar [data-design-mode-toggle]")).toHaveAttribute("aria-pressed", "false");
+});
+
+test("Sidebar-Navigation hält lange Labels im aktiven Button", async ({ page }) => {
+  await login(page, "browser.sidebar.nav");
+  await page.goto("/herausforderungen");
+  await expect(page.getByRole("heading", { name: "Herausforderungen" })).toBeVisible();
+
+  const metrics = await page.locator(".desktop-sidebar").evaluate((sidebar) => {
+    const activeLink = sidebar.querySelector(".sidebar-nav a.active");
+    const label = activeLink?.querySelector("span");
+    if (!(activeLink instanceof HTMLElement) || !(label instanceof HTMLElement)) {
+      throw new Error("Aktiver Sidebar-Link fehlt.");
+    }
+
+    const sidebarBounds = sidebar.getBoundingClientRect();
+    const linkBounds = activeLink.getBoundingClientRect();
+    return {
+      labelText: label.textContent?.trim(),
+      labelClientWidth: Math.ceil(label.clientWidth),
+      labelScrollWidth: Math.ceil(label.scrollWidth),
+      linkClientWidth: Math.ceil(activeLink.clientWidth),
+      linkScrollWidth: Math.ceil(activeLink.scrollWidth),
+      linkRight: Math.ceil(linkBounds.right),
+      sidebarRight: Math.floor(sidebarBounds.right)
+    };
+  });
+
+  expect(metrics.labelText).toBe("Herausforderungen");
+  expect(metrics.labelScrollWidth, "Label wird innerhalb des aktiven Sidebar-Buttons abgeschnitten.").toBeLessThanOrEqual(metrics.labelClientWidth + 1);
+  expect(metrics.linkScrollWidth, "Aktiver Sidebar-Button hat lokalen Horizontal-Overflow.").toBeLessThanOrEqual(metrics.linkClientWidth + 1);
+  expect(metrics.linkRight, "Aktiver Sidebar-Button läuft über die Sidebar-Kante.").toBeLessThanOrEqual(metrics.sidebarRight - 12);
+});
+
 test("Offline-Visuals zeigen Achievement-Katalog und Mission-Icons", async ({ page }) => {
   await login(page, "browser.visual.assets");
 
@@ -452,10 +505,24 @@ test("Spielseite zeigt Sofortrunde und Modi sauber auf Desktop und Mobile", asyn
   await expect(page.locator(".play-text-card").first()).toBeVisible();
   await expectNoHorizontalOverflow(page);
 
-  const desktopPosition = await page.locator(".play-quickstart").evaluate((quickstart) => {
+  const desktopPosition = await page.evaluate(() => {
+    const quickstart = document.querySelector(".play-quickstart");
+    const heroCopy = document.querySelector(".play-hero-copy");
+    if (!quickstart) {
+      throw new Error("Sofortrunde fehlt.");
+    }
+
     const bounds = quickstart.getBoundingClientRect();
-    return { top: Math.round(bounds.top), viewportHeight: window.innerHeight };
+    const after = heroCopy ? getComputedStyle(heroCopy, "::after") : null;
+    return {
+      top: Math.round(bounds.top),
+      pseudoDisplay: after?.display ?? "absent",
+      pseudoContent: after?.content ?? "absent",
+      viewportHeight: window.innerHeight
+    };
   });
+  expect(["absent", "none"]).toContain(desktopPosition.pseudoDisplay);
+  expect(["absent", "none"]).toContain(desktopPosition.pseudoContent);
   expect(desktopPosition.top).toBeLessThan(desktopPosition.viewportHeight);
 
   await page.setViewportSize({ width: 390, height: 844 });
@@ -492,6 +559,27 @@ test("Wettbewerbsseite bleibt responsiv und respektiert Ranglisten-Sichtbarkeit"
   await expect(page.locator(".competition-tabs a")).toHaveCount(5);
   await expect(page.getByRole("link", { name: "Selbst antreten" })).toHaveAttribute("href", /\/spielen\/sprint$/);
   await expectNoHorizontalOverflow(page);
+  const desktopHero = await page.evaluate(() => {
+    const intro = document.querySelector(".competition-hero > div:first-child");
+    const hero = document.querySelector(".competition-hero");
+    if (!intro || !hero) {
+      throw new Error("Wettbewerb-Hero fehlt.");
+    }
+
+    const introBounds = intro.getBoundingClientRect();
+    const after = getComputedStyle(intro, "::after");
+    return {
+      heroBottom: Math.round(hero.getBoundingClientRect().bottom),
+      introHeight: Math.round(introBounds.height),
+      pseudoDisplay: after.display,
+      pseudoContent: after.content,
+      viewportHeight: window.innerHeight
+    };
+  });
+  expect(desktopHero.introHeight, "Wettbewerb-Hero wirkt wie ein leerer Großblock.").toBeLessThanOrEqual(230);
+  expect(desktopHero.pseudoDisplay).toBe("none");
+  expect(desktopHero.pseudoContent).toBe("none");
+  expect(desktopHero.heroBottom).toBeLessThan(desktopHero.viewportHeight * 0.7);
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/ranglisten?board=sprint&period=day&mode=sprint60");

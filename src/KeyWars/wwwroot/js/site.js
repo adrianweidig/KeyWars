@@ -80,6 +80,50 @@ function attachSubmitGuards() {
   });
 }
 
+function attachDesignMode() {
+  const toggles = document.querySelectorAll("[data-design-mode-toggle]");
+  if (toggles.length === 0) {
+    return;
+  }
+
+  const storageKey = "keywars.designMode";
+  const readStoredMode = () => {
+    try {
+      return window.localStorage?.getItem(storageKey) === "enabled";
+    } catch {
+      return false;
+    }
+  };
+  const storeMode = (enabled) => {
+    try {
+      if (enabled) {
+        window.localStorage?.setItem(storageKey, "enabled");
+      } else {
+        window.localStorage?.removeItem(storageKey);
+      }
+    } catch {
+      // Storage can be unavailable in restricted browser contexts.
+    }
+  };
+  const renderMode = (enabled) => {
+    document.body.classList.toggle("app-design-mode", enabled);
+    toggles.forEach((toggle) => {
+      toggle.setAttribute("aria-pressed", enabled ? "true" : "false");
+      toggle.classList.toggle("active", enabled);
+      toggle.title = enabled ? "Designmodus deaktivieren" : "Designmodus";
+    });
+  };
+
+  renderMode(readStoredMode());
+  toggles.forEach((toggle) => {
+    toggle.addEventListener("click", () => {
+      const enabled = !document.body.classList.contains("app-design-mode");
+      renderMode(enabled);
+      storeMode(enabled);
+    });
+  });
+}
+
 function attachMobileMenu() {
   const toggles = document.querySelectorAll("[data-mobile-menu-toggle]");
   if (toggles.length === 0) {
@@ -175,4 +219,5 @@ attachRoomCodeInputs();
 attachCopyButtons();
 attachShareButtons();
 attachSubmitGuards();
+attachDesignMode();
 attachMobileMenu();
