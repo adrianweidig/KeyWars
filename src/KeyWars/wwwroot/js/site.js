@@ -145,6 +145,106 @@ function attachMobileMenu() {
   });
 }
 
+const overflowTitleSelector = [
+  "[data-full-text]",
+  "[data-overflow-title]",
+  ".sidebar-nav a",
+  ".sidebar-nav a span",
+  ".mobile-bottom-nav a",
+  ".mobile-bottom-nav a span",
+  ".profile-menu",
+  ".quickstart-card",
+  ".quickstart-card strong",
+  ".quickstart-card small",
+  ".quest-card strong",
+  ".quest-card p",
+  ".result-row strong",
+  ".result-row small",
+  ".leaderboard-row span",
+  ".mini-podium-player strong",
+  ".race-lane-meta span",
+  ".live-typing-meta strong",
+  ".motivation-event-copy strong",
+  ".motivation-event-copy span",
+  ".table th",
+  ".table td",
+  ".badge",
+  ".pill"
+].join(",");
+
+function normalizeTooltipText(value) {
+  return (value || "").replace(/\s+/g, " ").trim();
+}
+
+function hasVisualOverflow(element) {
+  return element.scrollWidth > element.clientWidth + 1 || element.scrollHeight > element.clientHeight + 1;
+}
+
+function applyOverflowTitles(root = document) {
+  const elements = root instanceof Element
+    ? [root, ...root.querySelectorAll(overflowTitleSelector)]
+    : [...root.querySelectorAll(overflowTitleSelector)];
+
+  elements.forEach((element) => {
+    if (!(element instanceof HTMLElement)) {
+      return;
+    }
+
+    const authoredTitle = element.getAttribute("title");
+    if (authoredTitle && element.dataset.autoTitle !== "true") {
+      return;
+    }
+
+    const text = normalizeTooltipText(element.dataset.fullText || element.textContent);
+    if (!text) {
+      if (element.dataset.autoTitle === "true") {
+        element.removeAttribute("title");
+        delete element.dataset.autoTitle;
+      }
+      return;
+    }
+
+    if (element.dataset.fullText || element.dataset.overflowTitle === "always" || hasVisualOverflow(element)) {
+      element.title = text;
+      element.dataset.autoTitle = "true";
+    } else if (element.dataset.autoTitle === "true") {
+      element.removeAttribute("title");
+      delete element.dataset.autoTitle;
+    }
+  });
+}
+
+function attachOverflowTitles() {
+  if (!document.body) {
+    return;
+  }
+
+  let scheduled = false;
+  const schedule = () => {
+    if (scheduled) {
+      return;
+    }
+
+    scheduled = true;
+    window.requestAnimationFrame(() => {
+      scheduled = false;
+      applyOverflowTitles();
+    });
+  };
+
+  applyOverflowTitles();
+  window.addEventListener("resize", schedule);
+
+  const observer = new MutationObserver(schedule);
+  observer.observe(document.body, {
+    subtree: true,
+    childList: true,
+    characterData: true,
+    attributes: true,
+    attributeFilter: ["class", "style", "data-full-text", "data-overflow-title"]
+  });
+}
+
 function attachArenaCreateForms() {
   document.querySelectorAll("[data-arena-create-form]").forEach((form) => {
     const select = form.querySelector("[data-arena-text-select]");
@@ -221,3 +321,4 @@ attachShareButtons();
 attachSubmitGuards();
 attachDesignMode();
 attachMobileMenu();
+attachOverflowTitles();

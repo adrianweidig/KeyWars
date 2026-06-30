@@ -268,6 +268,8 @@ test("Sidebar-Navigation hält lange Labels im aktiven Button", async ({ page })
     const linkBounds = activeLink.getBoundingClientRect();
     return {
       labelText: label.textContent?.trim(),
+      linkTitle: activeLink.getAttribute("title"),
+      labelTitle: label.getAttribute("title"),
       labelClientWidth: Math.ceil(label.clientWidth),
       labelScrollWidth: Math.ceil(label.scrollWidth),
       linkClientWidth: Math.ceil(activeLink.clientWidth),
@@ -278,9 +280,49 @@ test("Sidebar-Navigation hält lange Labels im aktiven Button", async ({ page })
   });
 
   expect(metrics.labelText).toBe("Herausforderungen");
+  expect(metrics.linkTitle).toBe("Herausforderungen");
   expect(metrics.labelScrollWidth, "Label wird innerhalb des aktiven Sidebar-Buttons abgeschnitten.").toBeLessThanOrEqual(metrics.labelClientWidth + 1);
   expect(metrics.linkScrollWidth, "Aktiver Sidebar-Button hat lokalen Horizontal-Overflow.").toBeLessThanOrEqual(metrics.linkClientWidth + 1);
   expect(metrics.linkRight, "Aktiver Sidebar-Button läuft über die Sidebar-Kante.").toBeLessThanOrEqual(metrics.sidebarRight - 12);
+});
+
+test("Quickstart-Karten nutzen volle Hover-Texte ohne Pfeilzeichen", async ({ page }) => {
+  await login(page, "browser.quickstart.hover");
+  await expect(page.locator(".quickstart-panel")).toBeVisible();
+
+  const audit = await page.locator(".quickstart-panel").evaluate((panel) => {
+    const cards = [...panel.querySelectorAll(".quickstart-card")].map((card) => {
+      const title = card.querySelector("strong");
+      const subtitle = card.querySelector("small");
+      return {
+        titleText: title?.textContent?.trim(),
+        subtitleText: subtitle?.textContent?.trim(),
+        hoverText: card.getAttribute("title"),
+        hasArrowSlot: Boolean(card.querySelector(".quickstart-arrow")),
+        rawText: card.textContent?.replace(/\s+/g, " ").trim(),
+        titleClientWidth: Math.ceil(title?.clientWidth ?? 0),
+        titleScrollWidth: Math.ceil(title?.scrollWidth ?? 0),
+        titleClientHeight: Math.ceil(title?.clientHeight ?? 0),
+        subtitleClientWidth: Math.ceil(subtitle?.clientWidth ?? 0),
+        subtitleScrollWidth: Math.ceil(subtitle?.scrollWidth ?? 0)
+      };
+    });
+
+    return cards;
+  });
+
+  expect(audit).toHaveLength(6);
+  expect(audit.map((card) => card.titleText)).toContain("Herausforderung");
+  expect(audit.every((card) => card.hoverText?.includes(card.titleText))).toBe(true);
+  expect(audit.every((card) => card.hasArrowSlot)).toBe(false);
+  expect(audit.every((card) => !/[›>]/u.test(card.rawText || ""))).toBe(true);
+  for (const card of audit) {
+    expect(card.titleScrollWidth, `${card.titleText} ist im Quickstart-Titel abgeschnitten.`).toBeLessThanOrEqual(card.titleClientWidth + 1);
+    expect(card.titleClientHeight, `${card.titleText} bricht im Quickstart-Titel unruhig um.`).toBeLessThanOrEqual(24);
+    expect(card.subtitleScrollWidth, `${card.subtitleText} ist im Quickstart-Untertitel abgeschnitten.`).toBeLessThanOrEqual(card.subtitleClientWidth + 1);
+  }
+
+  await expectNoHorizontalOverflow(page);
 });
 
 test("Offline-Visuals zeigen Achievement-Katalog und Mission-Icons", async ({ page }) => {

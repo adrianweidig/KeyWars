@@ -4669,8 +4669,14 @@ body.app-design-mode [data-design-mode-toggle] {
 }
 
 .sidebar-profile-arrow {
+  display: inline-grid;
+  place-items: center;
   color: var(--app-muted);
-  font-size: 1.4rem;
+}
+
+.sidebar-profile-arrow .kw-icon {
+  width: 16px;
+  height: 16px;
 }
 
 .sidebar-xp-progress {
@@ -4858,6 +4864,12 @@ body.app-design-mode [data-design-mode-toggle] {
   color: var(--text);
   border-color: var(--app-border-strong);
   text-decoration: none;
+}
+
+.profile-menu .app-icon {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
 }
 
 .app-tools .logout button,
@@ -5359,18 +5371,17 @@ body.app-design-mode [data-design-mode-toggle] {
 
 .quickstart-grid {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 12px;
 }
 
 .quickstart-card {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  grid-template-rows: auto auto;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: 2px 12px;
+  gap: 12px;
   min-height: 94px;
-  padding: 13px;
+  padding: 13px 14px;
   border: 1px solid var(--app-border);
   border-radius: 10px;
   color: var(--text);
@@ -5387,31 +5398,32 @@ body.app-design-mode [data-design-mode-toggle] {
 }
 
 .quickstart-card .quickstart-icon {
-  grid-row: 1 / 3;
+  grid-column: 1;
+  grid-row: 1;
 }
 
-.quickstart-arrow {
-  grid-row: 1 / 3;
+.quickstart-copy {
   display: grid;
-  place-items: center;
-  color: var(--app-muted);
-}
-
-.quickstart-arrow .kw-icon {
-  width: 15px;
-  height: 15px;
+  gap: 4px;
+  min-width: 0;
+  align-content: center;
 }
 
 .quickstart-card strong,
 .quickstart-card small {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: normal;
+  white-space: normal;
+}
+
+.quickstart-card strong {
+  line-height: 1.18;
 }
 
 .quickstart-card small {
   color: var(--app-muted);
+  line-height: 1.28;
 }
 
 .play-command-grid {

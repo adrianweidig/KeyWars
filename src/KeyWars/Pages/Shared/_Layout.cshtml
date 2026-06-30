@@ -46,9 +46,9 @@
                 </a>
                 <div class="app-tools">
                     <button type="button" class="icon-button" data-design-mode-toggle title="Designmodus" aria-label="Designmodus" aria-pressed="false">@UiIcons.Svg("spark")</button>
-                    <a class="profile-menu" asp-page="/Profil/Index">
+                    <a class="profile-menu" asp-page="/Profil/Index" title="Mein Profil" data-full-text="Mein Profil">
                         <span>Mein Profil</span>
-                        @UiIcons.Svg("chevron")
+                        @UiIcons.Svg("chevron-right")
                     </a>
                     <form class="logout" asp-page="/Abmelden" method="post">
                         <button type="submit" title="Abmelden" aria-label="Abmelden">@UiIcons.Svg("logout")</button>
@@ -62,14 +62,14 @@
                     <span>KeyWars</span>
                 </a>
                 <nav class="sidebar-nav">
-                    <a class="@(isStart ? "active" : "")" asp-page="/Index">@UiIcons.Svg("home")<span>Start</span></a>
-                    <a class="@(isActive("/Spielen") ? "active" : "")" asp-page="/Spielen/Index">@UiIcons.Svg("play")<span>Spielen</span></a>
-                    <a class="@(isActive("/Ranglisten") ? "active" : "")" asp-page="/Ranglisten">@UiIcons.Svg("trophy")<span>Wettbewerb</span></a>
-                    <a class="@(isActive("/Arena") ? "active" : "")" asp-page="/Arena/Index">@UiIcons.Svg("arena")<span>Arena</span></a>
-                    <a class="@(isActive("/Herausforderungen") ? "active" : "")" asp-page="/Herausforderungen/Index">@UiIcons.Svg("challenge")<span>Herausforderungen</span></a>
-                    <a class="@(isActive("/Texte") ? "active" : "")" asp-page="/Texte/Index">@UiIcons.Svg("texts")<span>Texte</span></a>
-                    <a class="@(isActive("/Profil") ? "active" : "")" asp-page="/Profil/Index">@UiIcons.Svg("profile")<span>Profil</span></a>
-                    <a class="@(currentPage.Equals("/Profil/Einstellungen", StringComparison.OrdinalIgnoreCase) ? "active" : "")" asp-page="/Profil/Einstellungen">@UiIcons.Svg("settings")<span>Einstellungen</span></a>
+                    <a class="@(isStart ? "active" : "")" asp-page="/Index" title="Start" data-full-text="Start">@UiIcons.Svg("home")<span>Start</span></a>
+                    <a class="@(isActive("/Spielen") ? "active" : "")" asp-page="/Spielen/Index" title="Spielen" data-full-text="Spielen">@UiIcons.Svg("play")<span>Spielen</span></a>
+                    <a class="@(isActive("/Ranglisten") ? "active" : "")" asp-page="/Ranglisten" title="Wettbewerb" data-full-text="Wettbewerb">@UiIcons.Svg("trophy")<span>Wettbewerb</span></a>
+                    <a class="@(isActive("/Arena") ? "active" : "")" asp-page="/Arena/Index" title="Arena" data-full-text="Arena">@UiIcons.Svg("arena")<span>Arena</span></a>
+                    <a class="@(isActive("/Herausforderungen") ? "active" : "")" asp-page="/Herausforderungen/Index" title="Herausforderungen" data-full-text="Herausforderungen">@UiIcons.Svg("challenge")<span>Herausforderungen</span></a>
+                    <a class="@(isActive("/Texte") ? "active" : "")" asp-page="/Texte/Index" title="Texte" data-full-text="Texte">@UiIcons.Svg("texts")<span>Texte</span></a>
+                    <a class="@(isActive("/Profil") ? "active" : "")" asp-page="/Profil/Index" title="Profil" data-full-text="Profil">@UiIcons.Svg("profile")<span>Profil</span></a>
+                    <a class="@(currentPage.Equals("/Profil/Einstellungen", StringComparison.OrdinalIgnoreCase) ? "active" : "")" asp-page="/Profil/Einstellungen" title="Einstellungen" data-full-text="Einstellungen">@UiIcons.Svg("settings")<span>Einstellungen</span></a>
                 </nav>
                 <a class="sidebar-profile" asp-page="/Profil/Index" title="@displayName">
                     <span class="user-avatar" aria-hidden="true">@Initials(displayName)</span>
@@ -77,7 +77,7 @@
                         <strong>@displayName</strong>
                         <small>Level @layoutProfile!.Level</small>
                     </span>
-                    <span class="sidebar-profile-arrow" aria-hidden="true">›</span>
+                    <span class="sidebar-profile-arrow" aria-hidden="true">@UiIcons.Svg("chevron-right", "kw-icon")</span>
                     <progress class="sidebar-xp-progress" value="@((layoutProgress?.ProgressPercent ?? 0).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture))" max="100" aria-label="Profil-Fortschritt">@((layoutProgress?.ProgressPercent ?? 0).ToString("0.#")) %</progress>
                 </a>
             </aside>
@@ -86,22 +86,22 @@
                 <a class="brand app-brand" asp-page="/Index" aria-label="KeyWars Startseite">
                     <span>KeyWars</span>
                 </a>
-                <button type="button" class="mobile-menu-button" data-mobile-menu-toggle aria-label="Navigation anzeigen">@UiIcons.Svg("menu")</button>
+                <button type="button" class="mobile-menu-button" data-mobile-menu-toggle title="Navigation anzeigen" aria-label="Navigation anzeigen">@UiIcons.Svg("menu")</button>
             </header>
 
             <div class="mobile-menu-panel" data-mobile-menu>
                 <div class="mobile-menu-head">
                     <span>Navigation</span>
-                    <button type="button" class="mobile-menu-button" data-mobile-menu-toggle aria-label="Navigation schließen">@UiIcons.Svg("close")</button>
+                    <button type="button" class="mobile-menu-button" data-mobile-menu-toggle title="Navigation schließen" aria-label="Navigation schließen">@UiIcons.Svg("close")</button>
                 </div>
                 <nav class="sidebar-nav">
-                    <a class="@(isStart ? "active" : "")" asp-page="/Index">@UiIcons.Svg("home")<span>Start</span></a>
-                    <a class="@(isActive("/Spielen") ? "active" : "")" asp-page="/Spielen/Index">@UiIcons.Svg("play")<span>Spielen</span></a>
-                    <a class="@(isActive("/Ranglisten") ? "active" : "")" asp-page="/Ranglisten">@UiIcons.Svg("trophy")<span>Wettbewerb</span></a>
-                    <a class="@(isActive("/Arena") ? "active" : "")" asp-page="/Arena/Index">@UiIcons.Svg("arena")<span>Arena</span></a>
-                    <a class="@(isActive("/Herausforderungen") ? "active" : "")" asp-page="/Herausforderungen/Index">@UiIcons.Svg("challenge")<span>Herausforderungen</span></a>
-                    <a class="@(isActive("/Texte") ? "active" : "")" asp-page="/Texte/Index">@UiIcons.Svg("texts")<span>Texte</span></a>
-                    <a class="@(isActive("/Profil") ? "active" : "")" asp-page="/Profil/Index">@UiIcons.Svg("profile")<span>Profil</span></a>
+                    <a class="@(isStart ? "active" : "")" asp-page="/Index" title="Start" data-full-text="Start">@UiIcons.Svg("home")<span>Start</span></a>
+                    <a class="@(isActive("/Spielen") ? "active" : "")" asp-page="/Spielen/Index" title="Spielen" data-full-text="Spielen">@UiIcons.Svg("play")<span>Spielen</span></a>
+                    <a class="@(isActive("/Ranglisten") ? "active" : "")" asp-page="/Ranglisten" title="Wettbewerb" data-full-text="Wettbewerb">@UiIcons.Svg("trophy")<span>Wettbewerb</span></a>
+                    <a class="@(isActive("/Arena") ? "active" : "")" asp-page="/Arena/Index" title="Arena" data-full-text="Arena">@UiIcons.Svg("arena")<span>Arena</span></a>
+                    <a class="@(isActive("/Herausforderungen") ? "active" : "")" asp-page="/Herausforderungen/Index" title="Herausforderungen" data-full-text="Herausforderungen">@UiIcons.Svg("challenge")<span>Herausforderungen</span></a>
+                    <a class="@(isActive("/Texte") ? "active" : "")" asp-page="/Texte/Index" title="Texte" data-full-text="Texte">@UiIcons.Svg("texts")<span>Texte</span></a>
+                    <a class="@(isActive("/Profil") ? "active" : "")" asp-page="/Profil/Index" title="Profil" data-full-text="Profil">@UiIcons.Svg("profile")<span>Profil</span></a>
                 </nav>
             </div>
             <button type="button" class="mobile-menu-scrim" data-mobile-menu-toggle aria-label="Navigation schließen"></button>
@@ -119,9 +119,9 @@
                     <div class="next-rank"><span>Nächster Rang</span><span class="rank-token">@UiIcons.Svg("award", "kw-icon")<strong>@(layoutProfile.Level + 1)</strong></span></div>
                     <div class="app-tools">
                         <button type="button" class="icon-button" data-design-mode-toggle title="Designmodus" aria-label="Designmodus" aria-pressed="false">@UiIcons.Svg("spark")</button>
-                        <a class="profile-menu" asp-page="/Profil/Index">
+                        <a class="profile-menu" asp-page="/Profil/Index" title="Mein Profil" data-full-text="Mein Profil">
                             <span>Mein Profil</span>
-                            @UiIcons.Svg("chevron")
+                            @UiIcons.Svg("chevron-right")
                         </a>
                         <form class="logout" asp-page="/Abmelden" method="post">
                             <button type="submit" title="Abmelden" aria-label="Abmelden">@UiIcons.Svg("logout")</button>
@@ -138,11 +138,11 @@
         @if (showAuthenticatedShell)
         {
             <nav class="mobile-bottom-nav" aria-label="Schnellnavigation">
-                <a class="@(isStart ? "active" : "")" asp-page="/Index">@UiIcons.Svg("home")<span>Start</span></a>
-                <a class="@(isActive("/Spielen") ? "active" : "")" asp-page="/Spielen/Index">@UiIcons.Svg("play")<span>Spielen</span></a>
-                <a class="@(isActive("/Ranglisten") ? "active" : "")" asp-page="/Ranglisten">@UiIcons.Svg("trophy")<span>Wettbewerb</span></a>
-                <a class="@(isActive("/Arena") ? "active" : "")" asp-page="/Arena/Index">@UiIcons.Svg("arena")<span>Arena</span></a>
-                <a class="@(isActive("/Profil") ? "active" : "")" asp-page="/Profil/Index">@UiIcons.Svg("profile")<span>Profil</span></a>
+                <a class="@(isStart ? "active" : "")" asp-page="/Index" title="Start" data-full-text="Start">@UiIcons.Svg("home")<span>Start</span></a>
+                <a class="@(isActive("/Spielen") ? "active" : "")" asp-page="/Spielen/Index" title="Spielen" data-full-text="Spielen">@UiIcons.Svg("play")<span>Spielen</span></a>
+                <a class="@(isActive("/Ranglisten") ? "active" : "")" asp-page="/Ranglisten" title="Wettbewerb" data-full-text="Wettbewerb">@UiIcons.Svg("trophy")<span>Wettbewerb</span></a>
+                <a class="@(isActive("/Arena") ? "active" : "")" asp-page="/Arena/Index" title="Arena" data-full-text="Arena">@UiIcons.Svg("arena")<span>Arena</span></a>
+                <a class="@(isActive("/Profil") ? "active" : "")" asp-page="/Profil/Index" title="Profil" data-full-text="Profil">@UiIcons.Svg("profile")<span>Profil</span></a>
             </nav>
         }
     </div>
