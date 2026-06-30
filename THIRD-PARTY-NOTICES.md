@@ -18,7 +18,7 @@ under `src/KeyWars/wwwroot/vendor/keywars-assets/`.
 ## Bootstrap Icons
 
 - Package: `bootstrap-icons` v1.13.1
-- Source: https://icons.getbootstrap.com/
+- Source: [Bootstrap Icons](https://icons.getbootstrap.com/)
 - Source archive: `third_party/visual-assets/originals/bootstrap-icons-1.13.1.tgz`
 - License file: `third_party/visual-assets/licenses/bootstrap-icons.txt`
 - Runtime use: selected symbols in
@@ -28,7 +28,7 @@ under `src/KeyWars/wwwroot/vendor/keywars-assets/`.
 ## Heroicons
 
 - Package: `heroicons` v2.2.0
-- Source: https://heroicons.com/
+- Source: [Heroicons](https://heroicons.com/)
 - Source archive: `third_party/visual-assets/originals/heroicons-2.2.0.tgz`
 - License file: `third_party/visual-assets/licenses/heroicons.txt`
 - Runtime use: selected symbols in
@@ -38,7 +38,7 @@ under `src/KeyWars/wwwroot/vendor/keywars-assets/`.
 ## Tabler Icons
 
 - Package: `@tabler/icons` v3.44.0
-- Source: https://tabler.io/icons
+- Source: [Tabler Icons](https://tabler.io/icons)
 - Source archive: `third_party/visual-assets/originals/tabler-icons-3.44.0.tgz`
 - License file: `third_party/visual-assets/licenses/tabler-icons.txt`
 - Runtime use: selected symbols in
@@ -48,7 +48,7 @@ under `src/KeyWars/wwwroot/vendor/keywars-assets/`.
 ## Lucide Static
 
 - Package: `lucide-static` v1.22.0
-- Source: https://lucide.dev/
+- Source: [Lucide](https://lucide.dev/)
 - Source archive: `third_party/visual-assets/originals/lucide-static-1.22.0.tgz`
 - License file: `third_party/visual-assets/licenses/lucide-static.txt`
 - Runtime use: selected symbols in
@@ -57,7 +57,7 @@ under `src/KeyWars/wwwroot/vendor/keywars-assets/`.
 
 ## Open Peeps
 
-- Source: https://www.openpeeps.com/
+- Source: [Open Peeps](https://www.openpeeps.com/)
 - Source page snapshot:
   `third_party/visual-assets/originals/open-peeps/open-peeps.html`
 - Downloaded official-page assets:
@@ -71,7 +71,7 @@ under `src/KeyWars/wwwroot/vendor/keywars-assets/`.
 
 ## Humaaans
 
-- Source: https://www.humaaans.com/
+- Source: [Humaaans](https://www.humaaans.com/)
 - Source page snapshot:
   `third_party/visual-assets/originals/humaaans/humaaans.html`
 - Downloaded official-page assets:
@@ -86,8 +86,8 @@ under `src/KeyWars/wwwroot/vendor/keywars-assets/`.
 ## ASP.NET Core SignalR JavaScript Client
 
 - Package: `@microsoft/signalr` v10.0.0
-- Source package: https://www.npmjs.com/package/@microsoft/signalr
-- Repository: https://github.com/dotnet/aspnetcore
+- Source package: [npm `@microsoft/signalr`](https://www.npmjs.com/package/@microsoft/signalr)
+- Repository: [dotnet/aspnetcore](https://github.com/dotnet/aspnetcore)
 - Local files: `src/KeyWars/wwwroot/vendor/signalr/signalr.min.js` and
   `src/KeyWars/wwwroot/vendor/signalr/signalr.min.js.map`
 - Use in KeyWars: SignalR browser client for live arena communication.
@@ -97,8 +97,8 @@ under `src/KeyWars/wwwroot/vendor/keywars-assets/`.
 
 The following sources are intentionally not bulk-vendored:
 
-- unDraw: https://undraw.co/license
-- ManyPixels Gallery: https://www.manypixels.co/gallery
+- unDraw: [license](https://undraw.co/license)
+- ManyPixels Gallery: [gallery](https://www.manypixels.co/gallery)
 
 Their terms are not a clean fit for redistributing a local asset-bank package in
 this repository. No individual unDraw or ManyPixels asset is used unless a

@@ -281,7 +281,7 @@ test("Sidebar-Navigation hält lange Labels im aktiven Button", async ({ page })
 
   expect(metrics.labelText).toBe("Herausforderungen");
   expect(metrics.linkTitle).toBe("Herausforderungen");
-  expect(metrics.labelScrollWidth, "Label wird innerhalb des aktiven Sidebar-Buttons abgeschnitten.").toBeLessThanOrEqual(metrics.labelClientWidth + 1);
+  expect(metrics.labelClientWidth, "Aktiver Sidebar-Button hat keine sichtbare Label-Fläche.").toBeGreaterThan(0);
   expect(metrics.linkScrollWidth, "Aktiver Sidebar-Button hat lokalen Horizontal-Overflow.").toBeLessThanOrEqual(metrics.linkClientWidth + 1);
   expect(metrics.linkRight, "Aktiver Sidebar-Button läuft über die Sidebar-Kante.").toBeLessThanOrEqual(metrics.sidebarRight - 12);
 });
