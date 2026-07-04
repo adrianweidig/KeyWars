@@ -29,7 +29,6 @@ $env:KEYWARS__DATA__DIRECTORY=Join-Path $env:TEMP ('keywars-load-' + [guid]::New
 $env:KEYWARS__LIVE__COUNTDOWN_SECONDS='1'
 $env:Logging__LogLevel__Default='Warning'
 $env:Logging__LogLevel__Microsoft='Warning'
-$env:PATH='C:\Users\adrian.TOP\.local\nodejs\node-v24.16.0-win-x64;' + $env:PATH
 node tests\browser\start-keywars.mjs 5191
 ```
 

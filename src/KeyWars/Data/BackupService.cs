@@ -15,8 +15,8 @@ public sealed class BackupService(IConfiguration configuration, IHostEnvironment
         var sourcePath = DataPaths.DatabasePath(dataDirectory);
         var targetPath = Path.Combine(dataDirectory, "backups", $"keywars-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}.db");
 
-        await using var source = new SqliteConnection($"Data Source={sourcePath}");
-        await using var target = new SqliteConnection($"Data Source={targetPath}");
+        await using var source = new SqliteConnection(BuildConnectionString(sourcePath));
+        await using var target = new SqliteConnection(BuildConnectionString(targetPath));
         await source.OpenAsync(cancellationToken);
         await target.OpenAsync(cancellationToken);
         source.BackupDatabase(target);
@@ -42,8 +42,8 @@ public sealed class BackupService(IConfiguration configuration, IHostEnvironment
 
         await VerifyIntegrityAsync(fullBackupPath, cancellationToken);
         var targetPath = DataPaths.DatabasePath(dataDirectory);
-        await using var source = new SqliteConnection($"Data Source={fullBackupPath}");
-        await using var target = new SqliteConnection($"Data Source={targetPath}");
+        await using var source = new SqliteConnection(BuildConnectionString(fullBackupPath));
+        await using var target = new SqliteConnection(BuildConnectionString(targetPath));
         await source.OpenAsync(cancellationToken);
         await target.OpenAsync(cancellationToken);
         source.BackupDatabase(target);
@@ -52,7 +52,7 @@ public sealed class BackupService(IConfiguration configuration, IHostEnvironment
 
     private static async Task VerifyIntegrityAsync(string databasePath, CancellationToken cancellationToken)
     {
-        await using var connection = new SqliteConnection($"Data Source={databasePath};Mode=ReadOnly");
+        await using var connection = new SqliteConnection(BuildConnectionString(databasePath, SqliteOpenMode.ReadOnly));
         await connection.OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = "PRAGMA integrity_check;";
@@ -61,5 +61,20 @@ public sealed class BackupService(IConfiguration configuration, IHostEnvironment
         {
             throw new InvalidOperationException("Das Backup hat die SQLite-Integritätsprüfung nicht bestanden.");
         }
+    }
+
+    private static string BuildConnectionString(string databasePath, SqliteOpenMode? mode = null)
+    {
+        var builder = new SqliteConnectionStringBuilder
+        {
+            DataSource = databasePath,
+            Pooling = false
+        };
+        if (mode is { } openMode)
+        {
+            builder.Mode = openMode;
+        }
+
+        return builder.ToString();
     }
 }

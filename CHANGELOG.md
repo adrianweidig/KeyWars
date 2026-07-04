@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.2.13 - 2026-07-04
+
+- Hardened SQLite backup and restore connection strings so maintenance commands
+  handle data and backup paths with connection-string separator characters.
+- Added integration coverage for backup and restore paths with semicolons.
+- Removed an obsolete visual requirements work note and cleaned user-facing
+  documentation wording.
+
 ## v0.2.7 - 2026-06-29
 
 - Made the visual asset manifest rebuild deterministic so
