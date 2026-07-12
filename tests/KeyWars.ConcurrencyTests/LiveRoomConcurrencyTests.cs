@@ -188,6 +188,196 @@ public sealed class LiveRoomConcurrencyTests
         Assert.Equal(LiveRoomPhase.SeriesResults, final.Phase);
         Assert.True(final.Finished);
         Assert.NotNull(final.FinishedAt);
+        Assert.Equal(CompletionState.Pending, final.PersistenceState);
+
+        sink.States[room.RoomId] = CompletionState.Persisted;
+        Assert.Equal(CompletionState.Persisted, manager.Snapshot(room.RoomId).PersistenceState);
+    }
+
+    [Fact]
+    public void ParticipantWhoLeftBeforeStartDoesNotBlockOrEnterCompletion()
+    {
+        var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-06-18T12:00:00Z"));
+        var sink = new RecordingCompletionSink();
+        var manager = CreateManager(new LiveOptions { CountdownSeconds = 1, ReconnectGraceSeconds = 0 }, time, sink);
+        var first = Guid.CreateVersion7();
+        var second = Guid.CreateVersion7();
+        var departed = Guid.CreateVersion7();
+        var room = manager.CreateRoom(new CreateLiveRoomRequest(first, "A", "Raum", "Text", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 8));
+        manager.Join(room.RoomId, second, "B");
+        manager.Join(room.RoomId, departed, "C");
+        manager.Disconnect(room.RoomId, departed);
+        manager.Snapshot(room.RoomId);
+        manager.SetReady(room.RoomId, first, true);
+        manager.SetReady(room.RoomId, second, true);
+        manager.Start(room.RoomId, first);
+        time.Advance(TimeSpan.FromSeconds(1));
+
+        manager.Finish(room.RoomId, first, "Text", 0, 0);
+        var completed = manager.Finish(room.RoomId, second, "Text", 0, 0);
+
+        Assert.True(completed.Finished);
+        var record = Assert.Single(sink.Records);
+        Assert.Equal(
+            new[] { first, second }.Order().ToArray(),
+            record.Participants.Select(item => item.UserProfileId).Order().ToArray());
+        Assert.DoesNotContain(record.Participants, item => item.UserProfileId == departed);
+    }
+
+    [Fact]
+    public void PrivacyRemovalExcludesProfileFromFutureCompletionAndReadyTransition()
+    {
+        var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-06-18T12:00:00Z"));
+        var sink = new RecordingCompletionSink();
+        var manager = CreateManager(new LiveOptions { CountdownSeconds = 1 }, time, sink);
+        var first = Guid.CreateVersion7();
+        var second = Guid.CreateVersion7();
+        var room = manager.CreateRoom(new CreateLiveRoomRequest(first, "A", "Raum", "Text", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 8));
+        manager.Join(room.RoomId, second, "B");
+        manager.SetReady(room.RoomId, first, true);
+        manager.SetReady(room.RoomId, second, true);
+        manager.Start(room.RoomId, first);
+        time.Advance(TimeSpan.FromSeconds(1));
+        manager.Snapshot(room.RoomId);
+
+        manager.RemoveProfile(first);
+        var completed = manager.Finish(room.RoomId, second, "Text", 0, 0);
+
+        Assert.True(completed.Finished);
+        var record = Assert.Single(sink.Records);
+        Assert.DoesNotContain(record.Participants, item => item.UserProfileId == first);
+        Assert.Single(record.Participants, item => item.UserProfileId == second);
+    }
+
+    [Fact]
+    public void RemovedLobbyProfileCannotBecomeReadyAgain()
+    {
+        var manager = CreateManager();
+        var profileId = Guid.CreateVersion7();
+        var room = manager.CreateRoom(new CreateLiveRoomRequest(profileId, "A", "Raum", "Text", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 8));
+
+        manager.RemoveProfile(profileId);
+
+        Assert.Throws<InvalidOperationException>(() => manager.SetReady(room.RoomId, profileId, true));
+        Assert.Equal(ParticipantStatus.LeftBeforeStart, manager.Snapshot(room.RoomId).Participants.Single().Status);
+    }
+
+    [Fact]
+    public void PrivacyRemovalDoesNotExcludeProfileFromRoomsItNeverJoined()
+    {
+        var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-06-18T12:00:00Z"));
+        var sink = new RecordingCompletionSink();
+        var manager = CreateManager(new LiveOptions { CountdownSeconds = 1 }, time, sink);
+        var host = Guid.CreateVersion7();
+        var profileId = Guid.CreateVersion7();
+        var room = manager.CreateRoom(new CreateLiveRoomRequest(host, "A", "Raum", "Text", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 8));
+
+        manager.RemoveProfile(profileId);
+        manager.Join(room.RoomId, profileId, "B");
+        manager.SetReady(room.RoomId, host, true);
+        manager.SetReady(room.RoomId, profileId, true);
+        manager.Start(room.RoomId, host);
+        time.Advance(TimeSpan.FromSeconds(1));
+        manager.Finish(room.RoomId, host, "Text", 0, 0);
+        manager.Finish(room.RoomId, profileId, "Text", 0, 0);
+
+        Assert.Contains(
+            Assert.Single(sink.Records).Participants,
+            participant => participant.UserProfileId == profileId);
+    }
+
+    [Fact]
+    public void RemovingEveryRunningParticipantAbortsRoomWithoutPersistence()
+    {
+        var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-06-18T12:00:00Z"));
+        var sink = new RecordingCompletionSink();
+        var manager = CreateManager(new LiveOptions { CountdownSeconds = 1 }, time, sink);
+        var first = Guid.CreateVersion7();
+        var second = Guid.CreateVersion7();
+        var room = manager.CreateRoom(new CreateLiveRoomRequest(first, "A", "Raum", "Text", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 8));
+        manager.Join(room.RoomId, second, "B");
+        manager.SetReady(room.RoomId, first, true);
+        manager.SetReady(room.RoomId, second, true);
+        manager.Start(room.RoomId, first);
+        time.Advance(TimeSpan.FromSeconds(1));
+        manager.Snapshot(room.RoomId);
+
+        manager.RemoveProfile(first);
+        manager.RemoveProfile(second);
+        var aborted = manager.Snapshot(room.RoomId);
+
+        Assert.True(aborted.Finished);
+        Assert.Equal(LiveRoomPhase.Aborted, aborted.Phase);
+        Assert.Equal(CompletionState.AbortedUnconfirmed, aborted.PersistenceState);
+        Assert.Empty(sink.Records);
+    }
+
+    [Fact]
+    public void FailedEnqueueNeverClaimsPendingPersistence()
+    {
+        var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-06-18T12:00:00Z"));
+        var sink = new RecordingCompletionSink { EnqueueState = CompletionState.Failed };
+        var manager = CreateManager(timeProvider: time, completionSink: sink);
+        var first = Guid.CreateVersion7();
+        var second = Guid.CreateVersion7();
+        var room = manager.CreateRoom(new CreateLiveRoomRequest(first, "A", "Raum", "Text", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 8));
+        manager.Join(room.RoomId, second, "B");
+        manager.SetReady(room.RoomId, first, true);
+        manager.SetReady(room.RoomId, second, true);
+        manager.Start(room.RoomId, first);
+        time.Advance(TimeSpan.FromSeconds(3));
+
+        manager.Finish(room.RoomId, first, "Text", 0, 0);
+        var final = manager.Finish(room.RoomId, second, "Text", 0, 0);
+
+        Assert.Equal(CompletionState.Failed, final.PersistenceState);
+        Assert.NotEqual(CompletionState.Pending, manager.Snapshot(room.RoomId).PersistenceState);
+        Assert.Single(sink.Records);
+    }
+
+    [Fact]
+    public void SnapshotDuringEnqueueReportsPendingInsteadOfAbortedUnconfirmed()
+    {
+        var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-06-18T12:00:00Z"));
+        LiveRoomManager? manager = null;
+        CompletionState? observed = null;
+        var sink = new RecordingCompletionSink
+        {
+            OnEnqueue = record => observed = manager!.Snapshot(record.Id).PersistenceState
+        };
+        manager = CreateManager(new LiveOptions { CountdownSeconds = 1 }, time, sink);
+        var first = Guid.CreateVersion7();
+        var second = Guid.CreateVersion7();
+        var room = manager.CreateRoom(new CreateLiveRoomRequest(first, "A", "Raum", "Text", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 8));
+        manager.Join(room.RoomId, second, "B");
+        manager.SetReady(room.RoomId, first, true);
+        manager.SetReady(room.RoomId, second, true);
+        manager.Start(room.RoomId, first);
+        time.Advance(TimeSpan.FromSeconds(1));
+        manager.Finish(room.RoomId, first, "Text", 0, 0);
+
+        manager.Finish(room.RoomId, second, "Text", 0, 0);
+
+        Assert.Equal(CompletionState.Pending, observed);
+    }
+
+    [Fact]
+    public void CreateRoomFailsClosedWhenCompletionSinkHasNoCapacity()
+    {
+        var sink = new RecordingCompletionSink { AcceptNewRooms = false };
+        var manager = CreateManager(completionSink: sink);
+
+        var exception = Assert.Throws<InvalidOperationException>(() => manager.CreateRoom(new CreateLiveRoomRequest(
+            Guid.CreateVersion7(),
+            "A",
+            "Raum",
+            "Text",
+            LiveRoomMode.Classic,
+            LiveRoomVisibility.InternalOpen,
+            1,
+            8)));
+
+        Assert.Contains("Ergebnispersistenz", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -590,10 +780,22 @@ public sealed class LiveRoomConcurrencyTests
     private sealed class RecordingCompletionSink : ILiveRoomCompletionSink
     {
         public List<CompletedRoomRecord> Records { get; } = [];
+        public Dictionary<Guid, CompletionState> States { get; } = [];
+        public bool AcceptNewRooms { get; set; } = true;
+        public CompletionState EnqueueState { get; set; } = CompletionState.Pending;
+        public Action<CompletedRoomRecord>? OnEnqueue { get; set; }
 
-        public void Enqueue(CompletedRoomRecord record)
+        public CompletionReceipt Enqueue(CompletedRoomRecord record)
         {
+            OnEnqueue?.Invoke(record);
             Records.Add(record);
+            States[record.Id] = EnqueueState;
+            return new CompletionReceipt(record.Id, record.IdempotencyKey, EnqueueState);
         }
+
+        public CompletionStatusSnapshot GetStatus(Guid roomId) => new(
+            States.GetValueOrDefault(roomId, CompletionState.AbortedUnconfirmed));
+
+        public bool CanAcceptNewRoom(int currentRoomCount) => AcceptNewRooms;
     }
 }

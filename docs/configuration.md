@@ -28,6 +28,19 @@ wird der Doppelunterstrich verwendet, zum Beispiel
 In der Umgebung `Development` wird der lokale Test-Login aktiv. In allen
 anderen Umgebungen wird ausschließlich LDAP/LDAPS verwendet.
 
+## Reverse Proxy
+
+| Variable | Standard | Verbraucher | Regel |
+| --- | --- | --- | --- |
+| `KEYWARS__PROXY__KNOWN_PROXIES` | leer | Forwarded-Headers-Middleware | Semikolonliste exakter vertrauenswürdiger Proxy-IP-Adressen |
+| `KEYWARS__PROXY__KNOWN_NETWORKS` | leer | Forwarded-Headers-Middleware | Semikolonliste minimaler vertrauenswürdiger Proxy-Netze in CIDR-Notation |
+
+Sobald mindestens eine Liste konfiguriert ist, vertraut KeyWars nur den dort
+genannten IP-Adressen und Netzen. Ungültige IP- oder CIDR-Einträge verhindern
+den Start. Ohne explizite Liste gelten ausschließlich die Loopback-Defaults von
+ASP.NET Core. `X-Forwarded-For` und `X-Forwarded-Proto` werden höchstens über
+einen Proxy-Hop ausgewertet.
+
 ## Live-Arena
 
 | Variable | Standard | Verbraucher | Regel |
@@ -40,7 +53,8 @@ anderen Umgebungen wird ausschließlich LDAP/LDAPS verwendet.
 | `KEYWARS__LIVE__COUNTDOWN_SECONDS` | `3` | `LiveRoomManager` | 1 bis 10 Sekunden |
 | `KEYWARS__LIVE__RECONNECT_GRACE_SECONDS` | `30` | `LiveRoomManager` | 0 bis 300 Sekunden |
 | `KEYWARS__LIVE__ROOM_COMMAND_QUEUE_CAPACITY` | `4096` | `LiveProgressBroadcaster` | Pending-Kapazität für koaleszierte Progress-Deltas |
-| `KEYWARS__LIVE__COMPLETION_QUEUE_CAPACITY` | `4096` | `LiveRoomCompletionQueue` | begrenzte Queue für Arena-Abschlussjobs |
+| `KEYWARS__LIVE__COMPLETION_QUEUE_CAPACITY` | `4096` | `LiveRoomCompletionQueue` | begrenzte Queue für Arena-Abschlussjobs; mindestens so groß wie `MAX_CONCURRENT_ROOMS` |
+| `KEYWARS__LIVE__COMPLETION_DRAIN_TIMEOUT_SECONDS` | `10` | `ProfilePrivacyService` | 1 bis 300 Sekunden für den profilbezogenen Drain vor Reset/Löschung |
 | `KEYWARS__LIVE__COMPLETED_ROOM_RETENTION_MINUTES` | `60` | `LiveRoomManager` | Cleanup-Retention |
 | `KEYWARS__LIVE__LOBBY_ROOM_RETENTION_MINUTES` | `720` | `LiveRoomManager` | Cleanup-Retention |
 

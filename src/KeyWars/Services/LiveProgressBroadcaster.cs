@@ -144,7 +144,7 @@ public sealed class LiveProgressBroadcaster(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Arena-Progress-Broadcast für Raum {RoomId} ist fehlgeschlagen.", roomId);
+            logger.LogError(ex, "Ein Arena-Progress-Broadcast ist fehlgeschlagen.");
         }
     }
 

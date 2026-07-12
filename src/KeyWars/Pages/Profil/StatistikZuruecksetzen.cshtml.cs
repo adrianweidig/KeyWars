@@ -29,7 +29,16 @@ public sealed class StatistikZuruecksetzenModel(CurrentUser currentUser, Profile
             return Page();
         }
 
-        await privacy.ResetStatisticsAsync(profile.Id, cancellationToken);
+        try
+        {
+            await privacy.ResetStatisticsAsync(profile.Id, cancellationToken);
+        }
+        catch (ProfileOperationException exception)
+        {
+            ModelState.AddModelError(string.Empty, exception.Message);
+            return Page();
+        }
+
         return RedirectToPage("/Profil/Index");
     }
 

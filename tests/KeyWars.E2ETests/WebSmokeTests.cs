@@ -1,4 +1,6 @@
 using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using KeyWars.Data;
 using KeyWars.Domain;
@@ -17,6 +19,193 @@ public sealed partial class WebSmokeTests : IClassFixture<KeyWarsWebFactory>
     public WebSmokeTests(KeyWarsWebFactory factory)
     {
         this.factory = factory;
+    }
+
+    [Fact]
+    public async Task HttpsResponsesAndCookiesUseHardenedHeaderContract()
+    {
+        var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false,
+            BaseAddress = new Uri("https://localhost")
+        });
+
+        var health = await client.GetAsync("/health/live");
+        var login = await LoginAsync(client);
+
+        Assert.Equal("max-age=31536000; includeSubDomains", health.Headers.GetValues("Strict-Transport-Security").Single());
+        Assert.Contains("form-action 'self'", health.Headers.GetValues("Content-Security-Policy").Single(), StringComparison.Ordinal);
+        Assert.Equal("DENY", health.Headers.GetValues("X-Frame-Options").Single());
+        Assert.Equal("nosniff", health.Headers.GetValues("X-Content-Type-Options").Single());
+        var authCookie = login.Headers.GetValues("Set-Cookie").Single(value => value.StartsWith("KeyWars.Dev.Auth=", StringComparison.Ordinal));
+        Assert.Contains("httponly", authCookie, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("secure", authCookie, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("samesite=lax", authCookie, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ArenaPersistenceStatusPrefersSummaryAndReturnsOnlyState()
+    {
+        using var isolatedFactory = new KeyWarsWebFactory();
+        var client = isolatedFactory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        await LoginAsync(client);
+        var roomId = Guid.CreateVersion7();
+        await using (var scope = isolatedFactory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<KeyWarsDbContext>();
+            var profileId = await db.UserProfiles
+                .Where(profile => profile.SamAccountName == "max.mustermann" && !profile.Deleted)
+                .Select(profile => profile.Id)
+                .SingleAsync();
+            db.LiveRoomSummaries.Add(new LiveRoomSummary
+            {
+                Id = roomId,
+                IdempotencyKey = $"{roomId:N}:1:1",
+                CreatorProfileId = profileId,
+                RoomCode = "ABC234",
+                Mode = LiveRoomMode.Classic,
+                Visibility = LiveRoomVisibility.InternalOpen,
+                RoundCount = 1,
+                StartedAt = DateTimeOffset.UtcNow.AddSeconds(-10),
+                FinishedAt = DateTimeOffset.UtcNow
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var persistedResponse = await client.GetAsync($"/api/arena/{roomId}/speicherstatus");
+        using var persisted = JsonDocument.Parse(await persistedResponse.Content.ReadAsStringAsync());
+        var unknownResponse = await client.GetAsync($"/api/arena/{Guid.CreateVersion7()}/speicherstatus");
+        using var unknown = JsonDocument.Parse(await unknownResponse.Content.ReadAsStringAsync());
+
+        Assert.Equal(HttpStatusCode.OK, persistedResponse.StatusCode);
+        Assert.Equal(["state"], persisted.RootElement.EnumerateObject().Select(property => property.Name).ToArray());
+        Assert.Equal(nameof(CompletionState.Persisted), persisted.RootElement.GetProperty("state").GetString());
+        Assert.Equal(HttpStatusCode.OK, unknownResponse.StatusCode);
+        Assert.Equal(["state"], unknown.RootElement.EnumerateObject().Select(property => property.Name).ToArray());
+        Assert.Equal(nameof(CompletionState.AbortedUnconfirmed), unknown.RootElement.GetProperty("state").GetString());
+    }
+
+    [Fact]
+    public async Task EarlyPartialSprintReturnsTypedProblemWithoutMutation()
+    {
+        using var isolatedFactory = new KeyWarsWebFactory();
+        var client = isolatedFactory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        await LoginAsync(client);
+
+        var startResponse = await client.PostAsJsonAsync("/api/spielen/start", new
+        {
+            mode = "Sprint60",
+            sprintSeconds = 15,
+            wordCount = 120
+        });
+        startResponse.EnsureSuccessStatusCode();
+        using var start = JsonDocument.Parse(await startResponse.Content.ReadAsStringAsync());
+        var attemptId = start.RootElement.GetProperty("id").GetGuid();
+        var nonce = start.RootElement.GetProperty("nonce").GetString();
+        var text = start.RootElement.GetProperty("text").GetString()!;
+
+        var beginResponse = await client.PostAsJsonAsync("/api/spielen/begin", new { attemptId, nonce });
+        beginResponse.EnsureSuccessStatusCode();
+        using var begin = JsonDocument.Parse(await beginResponse.Content.ReadAsStringAsync());
+        Assert.Equal(60, Math.Round((begin.RootElement.GetProperty("endsAt").GetDateTimeOffset() - begin.RootElement.GetProperty("startedAt").GetDateTimeOffset()).TotalSeconds));
+        Assert.True(begin.RootElement.TryGetProperty("serverNow", out _));
+
+        var finishResponse = await client.PostAsJsonAsync("/api/spielen/abschliessen", new
+        {
+            attemptId,
+            nonce,
+            input = text[..Math.Min(10, text.Length)],
+            backspaces = 0,
+            focusLosses = 0,
+            clientDurationMilliseconds = 10
+        });
+        using var problem = JsonDocument.Parse(await finishResponse.Content.ReadAsStringAsync());
+
+        Assert.Equal(HttpStatusCode.Conflict, finishResponse.StatusCode);
+        Assert.Equal("application/problem+json", finishResponse.Content.Headers.ContentType?.MediaType);
+        Assert.Equal(AttemptErrorCodes.StillRunning, problem.RootElement.GetProperty("code").GetString());
+        Assert.True(problem.RootElement.GetProperty("retryAfterMs").GetInt32() > 0);
+    }
+
+    [Fact]
+    public async Task IncompatibleAttemptTargetReturnsTypedBadRequest()
+    {
+        using var isolatedFactory = new KeyWarsWebFactory();
+        var client = isolatedFactory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        await LoginAsync(client);
+
+        var response = await client.PostAsJsonAsync("/api/spielen/start", new
+        {
+            mode = "Words100",
+            sprintSeconds = 0,
+            wordCount = 10
+        });
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+        Assert.Equal(AttemptErrorCodes.InvalidRequest, problem.RootElement.GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task ChallengeConflictReturnsTypedProblemDetails()
+    {
+        using var isolatedFactory = new KeyWarsWebFactory();
+        var client = isolatedFactory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        await LoginAsync(client);
+        Guid challengeId;
+        await using (var scope = isolatedFactory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<KeyWarsDbContext>();
+            var invitee = await db.UserProfiles.SingleAsync(item => item.SamAccountName == "max.mustermann");
+            var creator = new UserProfile
+            {
+                DisplayName = "Challenge Creator",
+                SamAccountName = "challenge.creator",
+                DirectoryObjectGuid = Guid.CreateVersion7().ToString(),
+                DirectorySid = $"S-1-5-21-{Guid.CreateVersion7():N}"
+            };
+            var text = new TrainingText
+            {
+                OwnerProfileId = creator.Id,
+                Title = "API Challenge",
+                Body = "API Challenge",
+                Visibility = TrainingTextVisibility.Organization,
+                CharacterCount = TypingEngine.SplitGraphemes("API Challenge").Count
+            };
+            var challenge = new Challenge
+            {
+                CreatorProfileId = creator.Id,
+                TrainingTextId = text.Id,
+                Title = "API Challenge",
+                ExpiresAt = DateTimeOffset.UtcNow.AddDays(1)
+            };
+            db.UserProfiles.Add(creator);
+            db.TrainingTexts.Add(text);
+            db.Challenges.Add(challenge);
+            db.ChallengeRounds.Add(new ChallengeRound { ChallengeId = challenge.Id });
+            db.ChallengeParticipants.Add(new ChallengeParticipant
+            {
+                ChallengeId = challenge.Id,
+                UserProfileId = creator.Id,
+                Status = ParticipantStatus.Joined
+            });
+            db.ChallengeParticipants.Add(new ChallengeParticipant
+            {
+                ChallengeId = challenge.Id,
+                UserProfileId = invitee.Id,
+                Status = ParticipantStatus.Invited
+            });
+            await db.SaveChangesAsync();
+            challengeId = challenge.Id;
+        }
+
+        var response = await client.PostAsJsonAsync($"/api/herausforderungen/{challengeId}/start", new { });
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+        Assert.Equal(ChallengeErrorCodes.Conflict, problem.RootElement.GetProperty("code").GetString());
     }
 
     [Fact]
@@ -353,6 +542,77 @@ public sealed partial class WebSmokeTests : IClassFixture<KeyWarsWebFactory>
         Assert.Equal("/anmelden", acceptedDelete.Headers.Location?.ToString());
         await db.Entry(profile).ReloadAsync();
         Assert.True(profile.Deleted);
+    }
+
+    [Fact]
+    public async Task DeletedProfileRevokesOtherSessionAndFreshLoginCreatesNewProfile()
+    {
+        using var isolatedFactory = new KeyWarsWebFactory();
+        var deletingClient = isolatedFactory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var otherSession = isolatedFactory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        await LoginAsync(deletingClient);
+        await LoginAsync(otherSession);
+
+        Guid deletedProfileId;
+        await using (var scope = isolatedFactory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<KeyWarsDbContext>();
+            deletedProfileId = await db.UserProfiles
+                .Where(profile => profile.SamAccountName == "max.mustermann" && !profile.Deleted)
+                .Select(profile => profile.Id)
+                .SingleAsync();
+        }
+
+        var deletePage = await deletingClient.GetStringAsync("/profil/loeschen");
+        var deleteToken = AntiForgeryRegex().Match(deletePage).Groups["token"].Value;
+        var deleted = await deletingClient.PostAsync("/profil/loeschen", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["Input.Confirmation"] = "max.mustermann",
+            ["__RequestVerificationToken"] = deleteToken
+        }));
+
+        Assert.Equal(HttpStatusCode.Redirect, deleted.StatusCode);
+        var rejectedOldSession = await otherSession.GetAsync("/");
+        Assert.Equal(HttpStatusCode.Redirect, rejectedOldSession.StatusCode);
+        Assert.Equal("/anmelden?ReturnUrl=%2F", rejectedOldSession.Headers.Location?.ToString());
+
+        var relogin = await LoginAsync(otherSession);
+        Assert.Equal(HttpStatusCode.Redirect, relogin.StatusCode);
+        Assert.Equal("/", relogin.Headers.Location?.ToString());
+
+        await using var verificationScope = isolatedFactory.Services.CreateAsyncScope();
+        var verificationDb = verificationScope.ServiceProvider.GetRequiredService<KeyWarsDbContext>();
+        var deletedProfile = await verificationDb.UserProfiles.SingleAsync(profile => profile.Id == deletedProfileId);
+        var replacement = await verificationDb.UserProfiles.SingleAsync(profile =>
+            profile.SamAccountName == "max.mustermann" && !profile.Deleted);
+        Assert.True(deletedProfile.Deleted);
+        Assert.NotEqual(deletedProfileId, replacement.Id);
+    }
+
+    [Fact]
+    public async Task TemporaryProfileGateRejectsRequestWithoutRevokingCookie()
+    {
+        using var isolatedFactory = new KeyWarsWebFactory();
+        var client = isolatedFactory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        await LoginAsync(client);
+        await using var scope = isolatedFactory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<KeyWarsDbContext>();
+        var profileId = await db.UserProfiles
+            .Where(profile => profile.SamAccountName == "max.mustermann" && !profile.Deleted)
+            .Select(profile => profile.Id)
+            .SingleAsync();
+        var gate = scope.ServiceProvider.GetRequiredService<ProfileAccessGate>();
+        Assert.True(gate.TryBeginOperation(profileId));
+
+        var blocked = await client.GetAsync("/profil");
+
+        Assert.Equal(HttpStatusCode.Conflict, blocked.StatusCode);
+        using var problem = JsonDocument.Parse(await blocked.Content.ReadAsStringAsync());
+        Assert.Equal("profile_operation_in_progress", problem.RootElement.GetProperty("code").GetString());
+
+        gate.CompleteOperation(profileId);
+        var recovered = await client.GetAsync("/");
+        Assert.Equal(HttpStatusCode.OK, recovered.StatusCode);
     }
 
     [Fact]

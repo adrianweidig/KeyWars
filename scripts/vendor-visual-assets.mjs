@@ -128,6 +128,7 @@ const iconAliases = [
   ["graph-up-arrow", ["chart-line", "graph-up-arrow", "trending-up"]],
   ["magic", ["wand", "magic", "sparkles"]],
   ["sun", ["sun"]],
+  ["moon", ["moon"]],
   ["bell", ["bell"]],
   ["hexagon", ["hexagon"]],
   ["quest-rounds", ["repeat", "rotate-clockwise", "arrow-repeat"]],

@@ -1,5 +1,7 @@
+using System.Net;
 using KeyWars.Auth;
 using KeyWars.Services;
+using Microsoft.AspNetCore.HttpOverrides;
 
 namespace KeyWars.Infrastructure;
 
@@ -42,6 +44,47 @@ public static class ConfigurationAliases
         return options;
     }
 
+    public static ForwardedHeadersOptions GetForwardedHeaders(IConfiguration configuration)
+    {
+        var options = new ForwardedHeadersOptions
+        {
+            ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
+            ForwardLimit = 1
+        };
+        var knownProxiesValue = configuration["KEYWARS:PROXY:KNOWN_PROXIES"];
+        var knownNetworksValue = configuration["KEYWARS:PROXY:KNOWN_NETWORKS"];
+        if (string.IsNullOrWhiteSpace(knownProxiesValue) && string.IsNullOrWhiteSpace(knownNetworksValue))
+        {
+            return options;
+        }
+
+        options.KnownProxies.Clear();
+        options.KnownIPNetworks.Clear();
+        foreach (var value in SplitProxyEntries(knownProxiesValue, "KEYWARS__PROXY__KNOWN_PROXIES"))
+        {
+            if (!IPAddress.TryParse(value, out var address))
+            {
+                throw new InvalidOperationException(
+                    $"KEYWARS__PROXY__KNOWN_PROXIES enthält eine ungültige IP-Adresse: {value}");
+            }
+
+            options.KnownProxies.Add(address);
+        }
+
+        foreach (var value in SplitProxyEntries(knownNetworksValue, "KEYWARS__PROXY__KNOWN_NETWORKS"))
+        {
+            if (!System.Net.IPNetwork.TryParse(value, out var network))
+            {
+                throw new InvalidOperationException(
+                    $"KEYWARS__PROXY__KNOWN_NETWORKS enthält ein ungültiges CIDR-Netz: {value}");
+            }
+
+            options.KnownIPNetworks.Add(network);
+        }
+
+        return options;
+    }
+
     public static void BindLive(IConfiguration configuration, LiveOptions options)
     {
         var section = configuration.GetSection("KEYWARS:LIVE");
@@ -55,6 +98,7 @@ public static class ConfigurationAliases
         SetInt(section, "RECONNECT_GRACE_SECONDS", value => options.ReconnectGraceSeconds = value);
         SetInt(section, "ROOM_COMMAND_QUEUE_CAPACITY", value => options.RoomCommandQueueCapacity = value);
         SetInt(section, "COMPLETION_QUEUE_CAPACITY", value => options.CompletionQueueCapacity = value);
+        SetInt(section, "COMPLETION_DRAIN_TIMEOUT_SECONDS", value => options.CompletionDrainTimeoutSeconds = value);
         SetInt(section, "COMPLETED_ROOM_RETENTION_MINUTES", value => options.CompletedRoomRetentionMinutes = value);
         SetInt(section, "LOBBY_ROOM_RETENTION_MINUTES", value => options.LobbyRoomRetentionMinutes = value);
     }
@@ -99,5 +143,18 @@ public static class ConfigurationAliases
         {
             set(value);
         }
+    }
+
+    private static string[] SplitProxyEntries(string? value, string key)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return [];
+        }
+
+        var entries = value.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return entries.Length > 0
+            ? entries
+            : throw new InvalidOperationException($"{key} enthält keinen gültigen Eintrag.");
     }
 }

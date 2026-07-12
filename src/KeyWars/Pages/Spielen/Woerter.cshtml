@@ -17,7 +17,7 @@
 {
     <article class="card typing-session-card" data-typing-app data-mode="@item.Mode" data-words="@item.Words" data-hide-start-when-prepared="true">
         <h2>@item.Words Wörter</h2>
-        <div class="typing-target" data-target></div>
+        <div class="typing-target" data-target tabindex="0" role="region" aria-label="Zieltext des Wörtertrainings"></div>
         <label>
             Eingabe
             <textarea class="typing-input" data-input disabled autocapitalize="off" autocomplete="off" spellcheck="false"></textarea>

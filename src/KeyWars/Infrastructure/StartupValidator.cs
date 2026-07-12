@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using KeyWars.Data;
 
 namespace KeyWars.Infrastructure;
@@ -56,6 +58,20 @@ public static class StartupValidator
         if (!string.IsNullOrWhiteSpace(caCertificatePath) && !File.Exists(caCertificatePath))
         {
             throw new InvalidOperationException($"KEYWARS__LDAP__CA_CERTIFICATE_PATH wurde nicht gefunden: {caCertificatePath}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(caCertificatePath))
+        {
+            try
+            {
+                using var certificate = X509CertificateLoader.LoadCertificateFromFile(caCertificatePath);
+            }
+            catch (Exception exception) when (exception is CryptographicException or IOException or UnauthorizedAccessException)
+            {
+                throw new InvalidOperationException(
+                    $"KEYWARS__LDAP__CA_CERTIFICATE_PATH enthält kein lesbares X.509-Zertifikat: {caCertificatePath}",
+                    exception);
+            }
         }
 
         foreach (var value in urls.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))

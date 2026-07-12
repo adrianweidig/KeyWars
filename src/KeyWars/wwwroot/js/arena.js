@@ -1,3 +1,8 @@
+import { resetTypingScroll, scrollCurrentCharacterIntoView } from "./typing-scroll.js";
+
+const persistencePollDelays = [250, 500, 1000, 2000, 3000, 5000];
+const terminalPersistenceStates = new Set(["Persisted", "Failed", "AbortedUnconfirmed"]);
+
 export function attachArenaPages() {
   document.querySelectorAll("[data-arena-room]").forEach((root) => {
     const roomId = root.dataset.roomId;
@@ -16,6 +21,7 @@ export function attachArenaPages() {
     const rosterSummaryLabel = root.querySelector("[data-arena-roster-summary]");
     const spectatorSummary = root.querySelector("[data-arena-spectator-summary]");
     const connectionQuality = root.querySelector("[data-arena-connection-quality]");
+    const persistenceStatus = root.querySelector("[data-arena-persistence-status]");
     const hiddenCountLabel = root.querySelector("[data-arena-hidden-count]");
     const windowNote = root.querySelector("[data-arena-window-note]");
     const phaseSteps = [...root.querySelectorAll(".arena-phase-steps li")];
@@ -56,6 +62,33 @@ export function attachArenaPages() {
     let readyPending = false;
     let startPending = false;
     let unavailable = false;
+    let lastRenderedTargetText = null;
+    let connectionStatus = "disconnected";
+    let persistencePollTimer = 0;
+    let persistencePollAttempt = 0;
+    let persistencePollController = null;
+    let persistencePollExhausted = false;
+    let disposed = false;
+    let persistenceState = normalizePersistenceState(root.dataset.persistenceState) || "Inactive";
+    let restoreInputFocusAfterReconnect = false;
+    let ignoreNextInputBlur = false;
+
+    const setInputDisabled = (disabled) => {
+      if (!input) {
+        return;
+      }
+
+      if (disabled && !input.disabled && document.activeElement === input) {
+        ignoreNextInputBlur = true;
+      }
+
+      input.disabled = disabled;
+      if (ignoreNextInputBlur) {
+        window.queueMicrotask(() => {
+          ignoreNextInputBlur = false;
+        });
+      }
+    };
 
     const renderTarget = () => {
       if (!snapshot || !target || !input) {
@@ -63,9 +96,13 @@ export function attachArenaPages() {
       }
 
       const typed = splitGraphemes(input.value);
-      const expected = splitGraphemes(snapshot.targetText || "");
+      const targetText = snapshot.targetText || "";
+      const targetChanged = targetText !== lastRenderedTargetText;
+      const expected = splitGraphemes(targetText);
       if (expected.length === 0) {
         target.replaceChildren(textSpan("Der Text wird zum Start freigegeben.", "muted"));
+        resetTypingScroll(target);
+        lastRenderedTargetText = targetText;
         return;
       }
 
@@ -76,6 +113,12 @@ export function attachArenaPages() {
 
         return index === typed.length ? "current" : "";
       });
+      if (targetChanged) {
+        resetTypingScroll(target);
+      }
+
+      scrollCurrentCharacterIntoView(target);
+      lastRenderedTargetText = targetText;
     };
 
     const rankedParticipants = () => [...(snapshot?.participants || [])].sort((left, right) => {
@@ -256,7 +299,6 @@ export function attachArenaPages() {
       setText(modeLabel, modeTitle(mode));
       setText(rosterSummaryLabel, rosterSummary(ranked.length, visible.length));
       setText(spectatorSummary, "Zuschauer: Rolle vorbereitet");
-      setText(connectionQuality, "Verbindung: aktiv");
       setText(hiddenCountLabel, hiddenParticipantsText(hidden));
       setText(windowNote, hiddenParticipantsText(hidden));
       setHidden(hiddenCountLabel, hidden === 0);
@@ -343,6 +385,8 @@ export function attachArenaPages() {
       const preview = document.createElement("div");
       preview.className = "live-typing-preview";
       preview.dataset.livePreview = "";
+      preview.tabIndex = 0;
+      preview.setAttribute("role", "region");
       row.append(meta, preview);
       return row;
     };
@@ -371,6 +415,9 @@ export function attachArenaPages() {
       }
 
       if (preview) {
+        preview.tabIndex = 0;
+        preview.setAttribute("role", "region");
+        preview.setAttribute("aria-label", `${participant.displayName}: Live-Textfortschritt`);
         renderTypingPreview(preview, participant);
       }
     };
@@ -380,6 +427,7 @@ export function attachArenaPages() {
       const states = String(participant?.typedTextPreview || "");
       if (expected.length === 0) {
         container.replaceChildren(textSpan("Der Text wird zum Start freigegeben.", "muted"));
+        resetTypingScroll(container);
         return;
       }
 
@@ -396,6 +444,7 @@ export function attachArenaPages() {
 
         return "pending";
       });
+      scrollCurrentCharacterIntoView(container);
     };
 
     const triggerRankBoost = () => {
@@ -480,7 +529,7 @@ export function attachArenaPages() {
       });
     };
 
-    const renderLiveTypingBoard = () => {
+    const renderLiveTypingBoard = (changedParticipantIds = null) => {
       if (!snapshot || !liveBoard) {
         return;
       }
@@ -491,8 +540,12 @@ export function attachArenaPages() {
       renderRosterMode(ranked, visible);
       visible.forEach((participant) => {
         expectedIds.add(participant.profileId);
-        const row = liveBoard.querySelector(`[data-live-participant-id="${participant.profileId}"]`) || liveTypingRow(participant);
-        updateLiveTypingRow(row, participant);
+        const existingRow = liveBoard.querySelector(`[data-live-participant-id="${participant.profileId}"]`);
+        const row = existingRow || liveTypingRow(participant);
+        if (!existingRow || changedParticipantIds === null || changedParticipantIds.has(participant.profileId)) {
+          updateLiveTypingRow(row, participant);
+        }
+
         liveBoard.append(row);
       });
 
@@ -530,8 +583,10 @@ export function attachArenaPages() {
       const terminal = rankedParticipants()
         .filter((participant) => ["Finished", "Dnf"].includes(participant.status))
         .slice(0, 3);
+      const persistenceState = persistenceStateFor(snapshot);
       podium.classList.toggle("is-hidden", !snapshot.finished && terminal.length === 0);
-      podium.replaceChildren(element("h2", "Podium"), ...terminal.map((participant) => {
+      podium.dataset.persistenceState = persistenceState;
+      podium.replaceChildren(element("h2", podiumTitle(persistenceState)), ...terminal.map((participant) => {
         const row = document.createElement("div");
         row.className = "podium-row";
         row.dataset.podiumParticipantId = participant.profileId;
@@ -573,7 +628,30 @@ export function attachArenaPages() {
     };
 
     const renderState = () => {
+      const connected = connectionStatus === "connected";
+      const readyButton = readyForm?.querySelector("button");
+      const startButton = startForm?.querySelector("button");
       if (!snapshot) {
+        setInputDisabled(true);
+        if (readyButton) {
+          readyButton.disabled = true;
+        }
+
+        if (startButton) {
+          startButton.disabled = true;
+        }
+
+        if (dnfButton) {
+          dnfButton.disabled = true;
+        }
+
+        if (leaveButton) {
+          leaveButton.disabled = true;
+        }
+
+        reactionPanel?.querySelectorAll("button").forEach((button) => {
+          button.disabled = true;
+        });
         return;
       }
 
@@ -584,29 +662,33 @@ export function attachArenaPages() {
         state.textContent = phaseLabel(snapshot.phase);
       }
 
-      if (input) {
-        input.disabled = !running || finishedLocally || !snapshot.targetText;
-      }
+      setInputDisabled(!connected || !running || finishedLocally || !snapshot.targetText);
 
       if (dnfButton) {
-        dnfButton.disabled = !running || finishedLocally;
+        dnfButton.disabled = !connected || !running || finishedLocally;
         setHidden(dnfButton, !running);
       }
 
       const current = snapshot.participants?.find((participant) => participant.profileId === currentProfileId);
-      const readyButton = readyForm?.querySelector("button");
       setHidden(readyForm, !lobby);
       if (readyButton) {
         readyButton.textContent = readyPending ? "Wird gespeichert..." : current?.ready ? "Nicht bereit" : "Bereit";
-        readyButton.disabled = readyPending || !snapshot || !lobby;
+        readyButton.disabled = !connected || readyPending || !snapshot || !lobby;
       }
 
-      const startButton = startForm?.querySelector("button");
       setHidden(startForm, !lobby);
       if (startButton) {
         startButton.textContent = startPending ? "Startet..." : "Starten";
-        startButton.disabled = startPending || !snapshot || !lobby;
+        startButton.disabled = !connected || startPending || !snapshot || !lobby;
       }
+
+      if (leaveButton) {
+        leaveButton.disabled = !connected;
+      }
+
+      reactionPanel?.querySelectorAll("button").forEach((button) => {
+        button.disabled = !connected;
+      });
 
       renderTimer();
     };
@@ -694,12 +776,126 @@ export function attachArenaPages() {
       tick();
     };
 
+    const setConnectionStatus = (nextStatus) => {
+      connectionStatus = nextStatus;
+      root.dataset.connectionState = nextStatus;
+      setStatusText(connectionQuality, connectionStatusText(nextStatus));
+      renderState();
+    };
+
+    const stopPersistencePolling = () => {
+      window.clearTimeout(persistencePollTimer);
+      persistencePollTimer = 0;
+      persistencePollController?.abort();
+      persistencePollController = null;
+    };
+
+    const currentPersistenceState = () => snapshot ? persistenceStateFor(snapshot) : persistenceState;
+
+    const renderPersistenceStatus = (schedulePoll = true) => {
+      if (snapshot) {
+        persistenceState = persistenceStateFor(snapshot);
+      }
+
+      root.dataset.persistenceState = persistenceState;
+      root.dataset.persistencePollExhausted = persistencePollExhausted ? "true" : "false";
+      if (persistenceStatus) {
+        setHidden(persistenceStatus, persistenceState === "Inactive");
+        setStatusText(persistenceStatus, persistenceStatusText(persistenceState, persistencePollExhausted));
+      }
+
+      if (terminalPersistenceStates.has(persistenceState)) {
+        stopPersistencePolling();
+      } else if (schedulePoll && isPendingPersistenceState(persistenceState)) {
+        schedulePersistencePoll();
+      }
+    };
+
+    const pollPersistenceStatus = async () => {
+      if (disposed || unavailable || !isPendingPersistenceState(currentPersistenceState())) {
+        return;
+      }
+
+      persistencePollAttempt += 1;
+      persistencePollController = new AbortController();
+      const requestController = persistencePollController;
+      const requestTimeout = window.setTimeout(() => requestController.abort(), 4000);
+      try {
+        const response = await window.fetch(`/api/arena/${encodeURIComponent(roomId)}/speicherstatus`, {
+          credentials: "same-origin",
+          headers: { Accept: "application/json" },
+          signal: requestController.signal
+        });
+        if (!response.ok) {
+          throw new Error(`Speicherstatus nicht verfügbar (${response.status}).`);
+        }
+
+        const payload = camelize(await response.json());
+        const nextState = normalizePersistenceState(payload.state);
+        const currentState = currentPersistenceState();
+        if (nextState && !terminalPersistenceStates.has(currentState)) {
+          persistenceState = nextState === "FinishedPending" ? "Pending" : nextState;
+          if (snapshot?.finished) {
+            snapshot.persistenceState = persistenceState;
+          }
+        }
+      } catch (error) {
+        if (error?.name !== "AbortError") {
+          console.warn("Arena-Speicherstatus konnte nicht abgefragt werden.", error);
+        }
+      } finally {
+        window.clearTimeout(requestTimeout);
+        if (persistencePollController === requestController) {
+          persistencePollController = null;
+        }
+      }
+
+      renderPodium();
+      renderPersistenceStatus(false);
+      if (!disposed && isPendingPersistenceState(currentPersistenceState())) {
+        schedulePersistencePoll();
+      }
+    };
+
+    const schedulePersistencePoll = () => {
+      if (disposed || unavailable || persistencePollTimer || persistencePollController ||
+          !isPendingPersistenceState(currentPersistenceState())) {
+        return;
+      }
+
+      if (persistencePollAttempt >= persistencePollDelays.length) {
+        persistencePollExhausted = true;
+        renderPersistenceStatus(false);
+        return;
+      }
+
+      const delay = persistencePollDelays[persistencePollAttempt];
+      persistencePollTimer = window.setTimeout(() => {
+        persistencePollTimer = 0;
+        void pollPersistenceStatus();
+      }, delay);
+    };
+
     const applySnapshot = (next) => {
       if (!next || unavailable) {
         return;
       }
 
-      snapshot = camelize(next);
+      const previousPersistenceState = currentPersistenceState();
+      const incoming = camelize(next);
+      if (incoming.finished && terminalPersistenceStates.has(previousPersistenceState) &&
+          !terminalPersistenceStates.has(persistenceStateFor(incoming))) {
+        incoming.persistenceState = previousPersistenceState;
+      }
+
+      snapshot = incoming;
+      persistenceState = persistenceStateFor(snapshot);
+      const currentParticipant = snapshot.participants?.find((participant) => participant.profileId === currentProfileId);
+      const serverSequence = Number(currentParticipant?.sequence);
+      if (Number.isSafeInteger(serverSequence) && serverSequence >= 0) {
+        sequence = Math.max(sequence, serverSequence);
+      }
+
       updateClockOffset(snapshot.serverNow);
       renderPhaseFeedback();
       renderTarget();
@@ -709,6 +905,7 @@ export function attachArenaPages() {
       renderHud();
       renderPodium();
       renderState();
+      renderPersistenceStatus();
     };
 
     const handleRoomUnavailable = (message) => {
@@ -718,17 +915,19 @@ export function attachArenaPages() {
 
       unavailable = true;
       clearTimeout(progressTimer);
+      progressTimer = 0;
       clearTimeout(startRefreshTimer);
+      stopPersistencePolling();
       cancelAnimationFrame(timerFrame);
-      if (input) {
-        input.disabled = true;
-      }
+      setInputDisabled(true);
 
       readyForm?.querySelector("button")?.setAttribute("disabled", "disabled");
       startForm?.querySelector("button")?.setAttribute("disabled", "disabled");
       dnfButton?.setAttribute("disabled", "disabled");
       leaveButton?.setAttribute("disabled", "disabled");
-      setText(connectionQuality, "Verbindung: Raum nicht verfügbar");
+      connectionStatus = "disconnected";
+      root.dataset.connectionState = connectionStatus;
+      setStatusText(connectionQuality, "Verbindung: Raum nicht verfügbar");
       showConnectionError(new Error(message || "Der Live-Raum wurde nicht gefunden."));
       window.setTimeout(() => {
         window.location.href = "/arena";
@@ -747,6 +946,7 @@ export function attachArenaPages() {
 
       updateClockOffset(batch.serverNow);
       snapshot.roundVersion = Math.max(snapshot.roundVersion, batch.roomVersion);
+      const changedParticipantIds = new Set();
       batch.deltas.forEach((delta) => {
         const participant = snapshot.participants?.find((item) => item.profileId === delta.participantId);
         if (!participant) {
@@ -758,8 +958,9 @@ export function attachArenaPages() {
         participant.wpm = delta.wpm;
         participant.accuracy = delta.accuracy;
         participant.rankHint = delta.rankHint;
+        changedParticipantIds.add(participant.profileId);
       });
-      renderLiveTypingBoard();
+      renderLiveTypingBoard(changedParticipantIds);
       renderParticipants();
       renderTrack();
       renderHud();
@@ -784,9 +985,7 @@ export function attachArenaPages() {
       }
 
       finishedLocally = true;
-      if (input) {
-        input.disabled = true;
-      }
+      setInputDisabled(true);
 
       try {
         const next = await connection.invoke("Finish", [roomId, input.value, backspaces, focusLosses]);
@@ -804,9 +1003,7 @@ export function attachArenaPages() {
       }
 
       finishedLocally = true;
-      if (input) {
-        input.disabled = true;
-      }
+      setInputDisabled(true);
 
       try {
         const next = await connection.invoke("GiveUp", [roomId]);
@@ -899,7 +1096,14 @@ export function attachArenaPages() {
         backspaces += 1;
       }
     });
-    input?.addEventListener("blur", () => { focusLosses += 1; });
+    input?.addEventListener("blur", () => {
+      if (ignoreNextInputBlur) {
+        ignoreNextInputBlur = false;
+        return;
+      }
+
+      focusLosses += 1;
+    });
     input?.addEventListener("paste", (event) => event.preventDefault());
     input?.addEventListener("drop", (event) => event.preventDefault());
     input?.addEventListener("input", () => {
@@ -914,28 +1118,56 @@ export function attachArenaPages() {
     connection.on("progressChanged", applyProgressBatch);
     connection.on("reactionReceived", renderReaction);
     connection.on("roomUnavailable", handleRoomUnavailable);
+    connection.onReconnecting(() => {
+      window.clearTimeout(progressTimer);
+      progressTimer = 0;
+      restoreInputFocusAfterReconnect = restoreInputFocusAfterReconnect || document.activeElement === input;
+      setConnectionStatus("reconnecting");
+    });
     connection.onReconnect(async () => {
       try {
-        setText(connectionQuality, "Verbindung: neu verbunden");
         applySnapshot(await connection.invoke("JoinRoom", [roomId]));
+        setConnectionStatus("connected");
+        if (restoreInputFocusAfterReconnect && input && !input.disabled) {
+          input.focus({ preventScroll: true });
+        }
+
+        restoreInputFocusAfterReconnect = false;
       } catch (error) {
-        setText(connectionQuality, "Verbindung: Fehler");
+        restoreInputFocusAfterReconnect = false;
+        setConnectionStatus("disconnected");
+        showConnectionError(error);
+      }
+    });
+    connection.onDisconnected((error) => {
+      if (disposed || unavailable) {
+        return;
+      }
+
+      restoreInputFocusAfterReconnect = false;
+      setConnectionStatus("disconnected");
+      if (error) {
         showConnectionError(error);
       }
     });
 
+    renderState();
+    renderPersistenceStatus();
+
     connection.start()
       .then(() => {
-        setText(connectionQuality, "Verbindung: aktiv");
+        setConnectionStatus("connected");
         return connection.invoke("JoinRoom", [roomId]);
       })
       .then(applySnapshot)
       .catch((error) => {
-        setText(connectionQuality, "Verbindung: Fehler");
+        setConnectionStatus("disconnected");
         showConnectionError(error);
       });
 
     window.addEventListener("pagehide", () => {
+      disposed = true;
+      stopPersistencePolling();
       if (connection.isConnected()) {
         connection.invoke("LeaveRoom", [roomId]).catch(() => {});
       }
@@ -949,7 +1181,9 @@ class SignalRConnection {
       throw new Error("Der lokale SignalR-Client wurde nicht geladen.");
     }
 
+    this.reconnectingHandlers = [];
     this.reconnectHandlers = [];
+    this.disconnectedHandlers = [];
     this.connection = new window.signalR.HubConnectionBuilder()
       .withUrl(path)
       .withAutomaticReconnect([0, 1000, 2500, 5000, 10000])
@@ -957,13 +1191,14 @@ class SignalRConnection {
       .build();
     this.connection.serverTimeoutInMilliseconds = 30000;
     this.connection.keepAliveIntervalInMilliseconds = 10000;
-    this.connection.onreconnected(() => {
-      this.reconnectHandlers.forEach((handler) => handler());
+    this.connection.onreconnecting((error) => {
+      this.reconnectingHandlers.forEach((handler) => handler(error));
+    });
+    this.connection.onreconnected((connectionId) => {
+      this.reconnectHandlers.forEach((handler) => handler(connectionId));
     });
     this.connection.onclose((error) => {
-      if (error) {
-        showConnectionError(error);
-      }
+      this.disconnectedHandlers.forEach((handler) => handler(error));
     });
   }
 
@@ -973,6 +1208,14 @@ class SignalRConnection {
 
   onReconnect(handler) {
     this.reconnectHandlers.push(handler);
+  }
+
+  onReconnecting(handler) {
+    this.reconnectingHandlers.push(handler);
+  }
+
+  onDisconnected(handler) {
+    this.disconnectedHandlers.push(handler);
   }
 
   async start() {
@@ -1033,6 +1276,12 @@ function setText(node, text) {
   }
 }
 
+function setStatusText(node, text) {
+  if (node && node.textContent !== text) {
+    node.textContent = text;
+  }
+}
+
 function setHidden(node, hidden) {
   if (node) {
     node.classList.toggle("is-hidden", hidden);
@@ -1089,6 +1338,68 @@ function phaseLabel(phase) {
     Closed: "Geschlossen",
     Aborted: "Abgebrochen"
   }[phase] || "Arena";
+}
+
+function normalizePersistenceState(value) {
+  const normalized = String(value || "").toLowerCase();
+  return {
+    inactive: "Inactive",
+    running: "Running",
+    finishedpending: "FinishedPending",
+    pending: "Pending",
+    persisted: "Persisted",
+    failed: "Failed",
+    abortedunconfirmed: "AbortedUnconfirmed"
+  }[normalized] || null;
+}
+
+function persistenceStateFor(currentSnapshot) {
+  if (!currentSnapshot) {
+    return "Inactive";
+  }
+
+  if (!currentSnapshot.finished) {
+    return currentSnapshot.phase === "Running" ? "Running" : "Inactive";
+  }
+
+  return normalizePersistenceState(currentSnapshot.persistenceState) || "FinishedPending";
+}
+
+function isPendingPersistenceState(state) {
+  return state === "Pending" || state === "FinishedPending";
+}
+
+function persistenceStatusText(state, pollingExhausted = false) {
+  const text = {
+    Running: "Ergebnisstatus: Rennen läuft.",
+    FinishedPending: "Ergebnis vorläufig: Speicherung läuft. Rating und XP werden erst nach Bestätigung angezeigt.",
+    Pending: "Ergebnis vorläufig: Speicherung läuft. Rating und XP werden erst nach Bestätigung angezeigt.",
+    Persisted: "Ergebnis gespeichert. Rating und XP sind bestätigt.",
+    Failed: "Speicherung fehlgeschlagen. Rating und XP wurden nicht vergeben.",
+    AbortedUnconfirmed: "Ergebnis nach Serverabbruch unbestätigt. Rating und XP wurden nicht vergeben."
+  }[state] || "";
+  if (pollingExhausted && isPendingPersistenceState(state)) {
+    return `${text} Automatische Prüfung beendet; lade die Seite für einen neuen Status neu.`;
+  }
+
+  return text;
+}
+
+function podiumTitle(state) {
+  return {
+    Pending: "Podium (vorläufig)",
+    FinishedPending: "Podium (vorläufig)",
+    Failed: "Podium (Speicherung fehlgeschlagen)",
+    AbortedUnconfirmed: "Podium (unbestätigt)"
+  }[state] || "Podium";
+}
+
+function connectionStatusText(state) {
+  return {
+    connected: "Verbindung: aktiv",
+    reconnecting: "Verbindung: wird wiederhergestellt",
+    disconnected: "Verbindung: getrennt"
+  }[state] || "Verbindung: getrennt";
 }
 
 function formatDuration(milliseconds) {

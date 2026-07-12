@@ -51,6 +51,7 @@ public static class UiIcons
         ["graph-up-arrow"] = "graph-up-arrow",
         ["magic"] = "magic",
         ["sun"] = "sun",
+        ["moon"] = "moon",
         ["bell"] = "bell",
         ["quest-rounds"] = "quest-rounds",
         ["quest-accuracy"] = "quest-accuracy",

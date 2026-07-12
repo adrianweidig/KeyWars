@@ -8,14 +8,20 @@ AD- oder LDAP-Quelle bleibt führend für Identität und Login.
 Der Profilexport enthält nur Daten des angemeldeten Profils:
 
 - Profilstammdaten und KeyWars-Einstellungen;
-- Tippversuche;
+- Tippversuche und Fehlerauswertung;
 - Reward-Ledger, Missionen und Erfolge;
 - Schwächenbeobachtungen;
-- eigene Texte und Sammlungen;
-- eigene Challenge-Teilnahmen und Rundenergebnisse;
-- eigene Live-Arena-Ergebniszeilen.
+- eigene Texte, Sammlungen und deren Zusammenstellung;
+- erstellte Challenges, zugehörige Runden, eigene Challenge-Teilnahmen,
+  Bindungen und Rundenergebnisse;
+- erstellte Live-Räume und eigene Live-Arena-Ergebniszeilen.
 
-Der Export enthält eine Versionsnummer und einen Erstellzeitpunkt.
+Der Export enthält eine Versionsnummer und einen Erstellzeitpunkt. Das aktuelle
+Format ist Version 2. Interne Wiederholungs- und Idempotenzwerte wie
+`TypingAttempt.Nonce`, `ChallengeAttemptBinding.BindingToken` und
+`LiveRoomSummary.IdempotencyKey` werden nicht ausgegeben. Ein automatisierter
+Inventartest erzwingt bei neuen Datenbanktabellen eine bewusste
+Exportentscheidung.
 
 ## Statistik Zurücksetzen
 
@@ -28,6 +34,10 @@ Missionen, Erfolge und Schwächenbeobachtungen. XP, Level, Serie, Saisonpunkte,
 Arena-Rating und gewertete Matchanzahl werden auf Startwerte gesetzt.
 
 AD-Identität, Profilangaben, eigene Texte und Sammlungen bleiben erhalten.
+Vor dem Reset sperrt KeyWars neue Profilaktionen, wartet auf bereits laufende
+Aktionen, bricht aktive Tippversuche ab, entfernt das Profil aus Live-Räumen und
+wartet auf zugehörige Arena-Persistenz. Ein nicht sicher abschließbarer Arena-Job
+bricht den Statistik-Reset mit einem wiederholbaren Konflikt ab.
 
 ## Profil Löschen
 
@@ -39,6 +49,12 @@ Die Profil-Löschung pseudonymisiert das lokale Profil und meldet die Sitzung
 ab. Directory-Identifier, Namen, E-Mail, Abteilung, Titel und Motto werden
 entfernt oder durch einen gelöschten Profilbezeichner ersetzt. Ranglisten-,
 Ghost- und Challenge-Freigaben werden deaktiviert.
+
+Wie beim Statistik-Reset werden zuerst laufende Profilaktionen, Tippversuche,
+Live-Räume und Arena-Persistenz synchronisiert. Erst danach beginnt die
+Pseudonymisierungstransaktion. Nach erfolgreicher Löschung sperren sowohl ein
+prozesslokaler Tombstone als auch das persistierte `Deleted`-Merkmal alte
+Sitzungen.
 
 Private Texte werden geleert und eigene Sammlungen entfernt. Aktive
 Challenge-Teilnahmen werden abgelehnt. Aktive Live-Arena-Teilnahmen werden aus

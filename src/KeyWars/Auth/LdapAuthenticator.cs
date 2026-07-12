@@ -30,8 +30,8 @@ public sealed class LdapAuthenticator(IOptions<LdapOptions> options, ILogger<Lda
         }
 
         var ldapOptions = options.Value;
-        var bindName = NormalizeBindName(username, ldapOptions);
-        var userSearchName = ExtractSearchName(username, ldapOptions);
+        var bindName = LdapSecurity.NormalizeBindName(username, ldapOptions);
+        var userSearchName = LdapSecurity.ExtractSearchName(username);
         var urls = ldapOptions.Urls.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         if (urls.Length == 0)
         {
@@ -57,11 +57,17 @@ public sealed class LdapAuthenticator(IOptions<LdapOptions> options, ILogger<Lda
             }
             catch (LdapException ex)
             {
-                logger.LogWarning(ex, "LDAP-Anmeldung gegen {Host} ist fehlgeschlagen.", url.Host);
+                logger.LogWarning(
+                    "LDAP-Anmeldung gegen {Host} ist fehlgeschlagen ({FailureKind}).",
+                    url.Host,
+                    LdapSecurity.ClassifyFailure(ex));
             }
             catch (DirectoryOperationException ex)
             {
-                logger.LogWarning(ex, "LDAP-Suche gegen {Host} ist fehlgeschlagen.", url.Host);
+                logger.LogWarning(
+                    "LDAP-Suche gegen {Host} ist fehlgeschlagen ({FailureKind}).",
+                    url.Host,
+                    LdapSecurity.ClassifyFailure(ex));
             }
         }
 
@@ -108,7 +114,8 @@ public sealed class LdapAuthenticator(IOptions<LdapOptions> options, ILogger<Lda
         await Task.Run(connection.Bind, cancellationToken);
 
         var searchBase = string.IsNullOrWhiteSpace(ldapOptions.UserBaseDn) ? ldapOptions.BaseDn : ldapOptions.UserBaseDn;
-        var filter = $"(&(|(userPrincipalName={EscapeFilter(userSearchName)})(sAMAccountName={EscapeFilter(userSearchName)}))(objectClass=user))";
+        var escapedSearchName = LdapSecurity.EscapeFilter(userSearchName);
+        var filter = $"(&(|(userPrincipalName={escapedSearchName})(sAMAccountName={escapedSearchName}))(objectClass=user))";
         var request = new SearchRequest(searchBase, filter, SearchScope.Subtree, Attributes)
         {
             SizeLimit = 2,
@@ -155,43 +162,6 @@ public sealed class LdapAuthenticator(IOptions<LdapOptions> options, ILogger<Lda
     {
         var userAccountControl = GetString(entry, "userAccountControl");
         return int.TryParse(userAccountControl, out var flags) && (flags & 0x0002) != 0;
-    }
-
-    private static string NormalizeBindName(string username, LdapOptions options)
-    {
-        var trimmed = username.Trim();
-        if (trimmed.Contains('@', StringComparison.Ordinal) || trimmed.Contains('\\', StringComparison.Ordinal))
-        {
-            return trimmed;
-        }
-
-        return $"{trimmed}@{options.UpnSuffix}";
-    }
-
-    private static string ExtractSearchName(string username, LdapOptions options)
-    {
-        var trimmed = username.Trim();
-        if (trimmed.Contains('\\', StringComparison.Ordinal))
-        {
-            return trimmed[(trimmed.IndexOf('\\', StringComparison.Ordinal) + 1)..];
-        }
-
-        if (trimmed.EndsWith($"@{options.UpnSuffix}", StringComparison.OrdinalIgnoreCase))
-        {
-            return trimmed;
-        }
-
-        return trimmed;
-    }
-
-    private static string EscapeFilter(string value)
-    {
-        return value
-            .Replace("\\", "\\5c", StringComparison.Ordinal)
-            .Replace("*", "\\2a", StringComparison.Ordinal)
-            .Replace("(", "\\28", StringComparison.Ordinal)
-            .Replace(")", "\\29", StringComparison.Ordinal)
-            .Replace("\0", "\\00", StringComparison.Ordinal);
     }
 
     private static string? GetString(SearchResultEntry entry, string attributeName)
@@ -277,27 +247,6 @@ public sealed class LdapAuthenticator(IOptions<LdapOptions> options, ILogger<Lda
 
     private static bool CertificateMatchesHost(X509Certificate2 certificate, string host)
     {
-        var normalizedHost = host.Trim().TrimEnd('.');
-        var dnsName = certificate.GetNameInfo(X509NameType.DnsName, forIssuer: false);
-        var simpleName = certificate.GetNameInfo(X509NameType.SimpleName, forIssuer: false);
-        return HostMatchesPattern(dnsName, normalizedHost) || HostMatchesPattern(simpleName, normalizedHost);
-    }
-
-    private static bool HostMatchesPattern(string pattern, string host)
-    {
-        if (string.IsNullOrWhiteSpace(pattern) || string.IsNullOrWhiteSpace(host))
-        {
-            return false;
-        }
-
-        var normalizedPattern = pattern.Trim().TrimEnd('.');
-        if (normalizedPattern.StartsWith("*.", StringComparison.Ordinal))
-        {
-            var suffix = normalizedPattern[1..];
-            return host.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)
-                && host.Count(character => character == '.') == suffix.Count(character => character == '.');
-        }
-
-        return string.Equals(normalizedPattern, host, StringComparison.OrdinalIgnoreCase);
+        return LdapSecurity.CertificateMatchesHost(certificate, host);
     }
 }

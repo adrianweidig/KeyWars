@@ -21,8 +21,10 @@ public sealed class LiveRoomCompletionQueueTests
         var roomId = Guid.CreateVersion7();
         var record = CreateRecord(roomId, first, second);
 
-        context.Queue.Enqueue(record);
-        context.Queue.Enqueue(record);
+        var firstReceipt = context.Queue.Enqueue(record);
+        var duplicateReceipt = context.Queue.Enqueue(record);
+        Assert.Equal(CompletionState.Pending, firstReceipt.State);
+        Assert.Equal(firstReceipt, duplicateReceipt);
         await context.Queue.FlushAsync(CancellationToken.None);
 
         await using var scope = context.Services.CreateAsyncScope();
@@ -52,6 +54,8 @@ public sealed class LiveRoomCompletionQueueTests
         Assert.Equal(2, await db.RewardLedgerEntries.CountAsync(item => item.Source == "arena"));
         Assert.Equal(2, await db.GamificationEvents.CountAsync(item => item.Type == GamificationEventType.ArenaResult));
         Assert.Contains(await db.Missions.ToListAsync(), item => item.UserProfileId == first && item.Key == "daily-arena-or-team" && item.Completed);
+        Assert.Equal(CompletionState.Persisted, context.Queue.GetStatus(roomId).State);
+        Assert.Equal(0, context.Queue.PendingCount);
     }
 
     [Fact]
@@ -126,8 +130,130 @@ public sealed class LiveRoomCompletionQueueTests
         await using var scope = context.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<KeyWarsDbContext>();
         Assert.Equal(2, context.WriterAttempts);
+        Assert.Equal(1, context.Queue.RetryAttempts);
         Assert.Equal(1, await db.LiveRoomSummaries.CountAsync());
         Assert.Equal(2, await db.LiveRoomParticipantSummaries.CountAsync());
+    }
+
+    [Fact]
+    public async Task PermanentFailureRemainsFailedWithoutRatingOrRewards()
+    {
+        await using var context = await CompletionTestContext.CreateAsync(permanentFailure: true);
+        var roomId = Guid.CreateVersion7();
+        var record = CreateRecord(roomId, context.FirstProfileId, context.SecondProfileId);
+
+        var receipt = context.Queue.Enqueue(record);
+        await context.Queue.FlushAsync(CancellationToken.None);
+        await context.Queue.FlushAsync(CancellationToken.None);
+        var drain = await context.Queue.DrainProfileAsync(context.FirstProfileId);
+
+        Assert.Equal(CompletionState.Pending, receipt.State);
+        Assert.Equal(CompletionState.Failed, context.Queue.GetStatus(roomId).State);
+        Assert.Equal(CompletionDrainStatus.Failed, drain.Status);
+        Assert.Equal(1, context.Queue.FailedRecordCount);
+        Assert.Equal(1, context.Queue.GetMetrics().FailedCompletions);
+        Assert.Equal(3, context.WriterAttempts);
+
+        await using var scope = context.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<KeyWarsDbContext>();
+        Assert.Empty(await db.LiveRoomSummaries.ToListAsync());
+        Assert.Empty(await db.LiveRoomParticipantSummaries.ToListAsync());
+        Assert.Empty(await db.RewardLedgerEntries.ToListAsync());
+        Assert.All(await db.UserProfiles.ToListAsync(), profile =>
+        {
+            Assert.Equal(1000, profile.ArenaRating);
+            Assert.Equal(0, profile.RatedMatchCount);
+        });
+    }
+
+    [Fact]
+    public async Task DrainTimesOutWhileRelatedCompletionIsPending()
+    {
+        await using var context = await CompletionTestContext.CreateAsync();
+        var record = CreateRecord(Guid.CreateVersion7(), context.FirstProfileId, context.SecondProfileId);
+        context.Queue.Enqueue(record);
+
+        var result = await context.Queue.DrainProfileAsync(
+            context.FirstProfileId,
+            TimeSpan.FromMilliseconds(20),
+            CancellationToken.None);
+
+        Assert.Equal(CompletionDrainStatus.Timeout, result.Status);
+        Assert.Equal(1, result.PendingJobs);
+    }
+
+    [Fact]
+    public async Task DrainWaitsForRuntimePersistenceAndReturnsSuccess()
+    {
+        var queue = new LiveRoomCompletionQueue(
+            Options.Create(new LiveOptions { MaxConcurrentRooms = 1, CompletionQueueCapacity = 1 }),
+            new NoopCompletionWriter(),
+            NullLogger<LiveRoomCompletionQueue>.Instance);
+        var first = Guid.CreateVersion7();
+        var second = Guid.CreateVersion7();
+        var roomId = Guid.CreateVersion7();
+        var record = CreateRecord(roomId, first, second);
+        await queue.StartAsync(CancellationToken.None);
+        queue.Enqueue(record);
+
+        var result = await queue.DrainProfileAsync(
+            first,
+            TimeSpan.FromSeconds(5),
+            CancellationToken.None);
+
+        Assert.Equal(CompletionDrainStatus.Success, result.Status);
+        Assert.Equal(CompletionState.Persisted, queue.GetStatus(roomId).State);
+        await queue.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public void FullQueueReturnsFailedReceiptAndDoesNotReportPending()
+    {
+        var queue = new LiveRoomCompletionQueue(
+            Options.Create(new LiveOptions { MaxConcurrentRooms = 1, CompletionQueueCapacity = 1 }),
+            new NoopCompletionWriter(),
+            NullLogger<LiveRoomCompletionQueue>.Instance);
+        var first = Guid.CreateVersion7();
+        var second = Guid.CreateVersion7();
+        var firstRecord = CreateRecord(Guid.CreateVersion7(), first, second);
+        var rejectedRecord = CreateRecord(Guid.CreateVersion7(), first, second);
+
+        var pending = queue.Enqueue(firstRecord);
+        var rejected = queue.Enqueue(rejectedRecord);
+
+        Assert.Equal(CompletionState.Pending, pending.State);
+        Assert.Equal(CompletionState.Failed, rejected.State);
+        Assert.Equal(CompletionState.Failed, queue.GetStatus(rejectedRecord.Id).State);
+        Assert.Equal(1, queue.PendingCount);
+        Assert.Equal(1, queue.FailedRecordCount);
+        Assert.False(queue.CanAcceptNewRoom(0));
+    }
+
+    [Fact]
+    public void QueueRejectsCapacityBelowMaximumConcurrentRooms()
+    {
+        var exception = Assert.Throws<OptionsValidationException>(() => new LiveRoomCompletionQueue(
+            Options.Create(new LiveOptions { MaxConcurrentRooms = 2, CompletionQueueCapacity = 1 }),
+            new NoopCompletionWriter(),
+            NullLogger<LiveRoomCompletionQueue>.Instance));
+
+        Assert.Contains("mindestens MaxConcurrentRooms", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void QueueRejectsInvalidProfileDrainTimeout()
+    {
+        var exception = Assert.Throws<OptionsValidationException>(() => new LiveRoomCompletionQueue(
+            Options.Create(new LiveOptions
+            {
+                MaxConcurrentRooms = 1,
+                CompletionQueueCapacity = 1,
+                CompletionDrainTimeoutSeconds = 0
+            }),
+            new NoopCompletionWriter(),
+            NullLogger<LiveRoomCompletionQueue>.Instance));
+
+        Assert.Contains("CompletionDrainTimeoutSeconds", exception.Message, StringComparison.Ordinal);
     }
 
     private static CompletedRoomRecord CreateRecord(Guid roomId, Guid first, Guid second, bool abortedByServer = false)
@@ -173,22 +299,22 @@ public sealed class LiveRoomCompletionQueueTests
 
         private FlakyCompletionWriter? flakyWriter;
 
-        public static async Task<CompletionTestContext> CreateAsync(bool transientFailureOnFirstWrite = false)
+        public static async Task<CompletionTestContext> CreateAsync(bool transientFailureOnFirstWrite = false, bool permanentFailure = false)
         {
             var connection = new SqliteConnection("Data Source=:memory:");
             await connection.OpenAsync();
             var services = new ServiceCollection();
             services.AddDbContext<KeyWarsDbContext>(options => options.UseSqlite(connection));
-            services.AddSingleton(Options.Create(new LiveOptions { CompletionQueueCapacity = 16 }));
+            services.AddSingleton(Options.Create(new LiveOptions { MaxConcurrentRooms = 16, CompletionQueueCapacity = 16 }));
             services.AddSingleton<TimeProvider>(TimeProvider.System);
             services.AddScoped<MotivationService>();
             services.AddSingleton<SqliteLiveRoomCompletionWriter>();
             FlakyCompletionWriter? flakyWriter = null;
-            if (transientFailureOnFirstWrite)
+            if (transientFailureOnFirstWrite || permanentFailure)
             {
                 services.AddSingleton<ILiveRoomCompletionWriter>(provider =>
                 {
-                    flakyWriter = new FlakyCompletionWriter(provider.GetRequiredService<SqliteLiveRoomCompletionWriter>());
+                    flakyWriter = new FlakyCompletionWriter(provider.GetRequiredService<SqliteLiveRoomCompletionWriter>(), permanentFailure);
                     return flakyWriter;
                 });
             }
@@ -242,16 +368,21 @@ public sealed class LiveRoomCompletionQueueTests
         }
     }
 
-    private sealed class FlakyCompletionWriter(SqliteLiveRoomCompletionWriter inner) : ILiveRoomCompletionWriter
+    private sealed class FlakyCompletionWriter(SqliteLiveRoomCompletionWriter inner, bool permanentFailure) : ILiveRoomCompletionWriter
     {
         public int Attempts { get; private set; }
 
         public Task PersistAsync(CompletedRoomRecord record, CancellationToken cancellationToken)
         {
             Attempts++;
-            return Attempts == 1
+            return permanentFailure || Attempts == 1
                 ? Task.FromException(new SqliteException("database is locked", 5))
                 : inner.PersistAsync(record, cancellationToken);
         }
+    }
+
+    private sealed class NoopCompletionWriter : ILiveRoomCompletionWriter
+    {
+        public Task PersistAsync(CompletedRoomRecord record, CancellationToken cancellationToken) => Task.CompletedTask;
     }
 }

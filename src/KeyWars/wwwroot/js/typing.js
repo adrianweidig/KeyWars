@@ -1,3 +1,5 @@
+import { resetTypingScroll, scrollCurrentCharacterIntoView } from "./typing-scroll.js";
+
 export function attachTypingApps() {
   document.querySelectorAll("[data-typing-app]").forEach((root) => {
     const target = root.querySelector("[data-target]");
@@ -29,6 +31,7 @@ export function attachTypingApps() {
 
     let session = null;
     let startedAt = null;
+    let deadlineAt = null;
     let timerFrame = 0;
     let backspaces = 0;
     let focusLosses = 0;
@@ -68,6 +71,7 @@ export function attachTypingApps() {
 
         return index === typed.length ? "current" : "";
       });
+      scrollCurrentCharacterIntoView(target);
     };
 
     const formatDuration = (milliseconds) => {
@@ -83,9 +87,10 @@ export function attachTypingApps() {
         return;
       }
 
-      const elapsed = performance.now() - startedAt;
+      const now = performance.now();
+      const elapsed = now - startedAt;
       if (isTimed()) {
-        const remaining = (timedSeconds() * 1000) - elapsed;
+        const remaining = deadlineAt === null ? (timedSeconds() * 1000) - elapsed : deadlineAt - now;
         timerValue.textContent = formatDuration(remaining);
         timerLabel.textContent = "verbleibend";
         if (remaining <= 0) {
@@ -106,6 +111,7 @@ export function attachTypingApps() {
       }
 
       startedAt = performance.now();
+      deadlineAt = isTimed() ? startedAt + (timedSeconds() * 1000) : null;
       lastWordBoundaryAt = startedAt;
       root.classList.remove("typing-prepared");
       root.classList.add("typing-running");
@@ -116,6 +122,7 @@ export function attachTypingApps() {
     const resetTimer = () => {
       cancelAnimationFrame(timerFrame);
       startedAt = null;
+      deadlineAt = null;
       timerValue.textContent = "Bereit";
       timerLabel.textContent = isTimed() ? `${timedSeconds()} s ab Eingabe` : "Start bei Eingabe";
     };
@@ -138,8 +145,14 @@ export function attachTypingApps() {
             throw new Error("begin failed");
           }
 
-          await response.json();
+          const data = await response.json();
           serverStarted = true;
+          if (data.endsAt && data.serverNow) {
+            const serverRemaining = Date.parse(data.endsAt) - Date.parse(data.serverNow);
+            if (Number.isFinite(serverRemaining)) {
+              deadlineAt = performance.now() + Math.max(0, serverRemaining);
+            }
+          }
           return true;
         }).finally(() => {
           beginPromise = null;
@@ -356,13 +369,35 @@ export function attachTypingApps() {
         wordDurationsMilliseconds
       };
       const endpoint = challengeId ? `/api/herausforderungen/${challengeId}/abschliessen` : "/api/spielen/abschliessen";
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload)
-      });
+      let response;
+      try {
+        response = await postFinishWithRetry(endpoint, payload);
+      } catch {
+        result.textContent = "Der Versuch konnte nicht gespeichert werden. Die Verbindung wird beim nächsten Abschluss sicher erneut geprüft.";
+        finishing = false;
+        finished = false;
+        input.disabled = false;
+        root.classList.remove("typing-finished");
+        root.classList.add("typing-running");
+        return;
+      }
+
       if (!response.ok) {
-        result.textContent = "Der Versuch konnte nicht gespeichert werden.";
+        const problem = await readProblem(response);
+        if (response.status === 409 && problem.code === "attempt_still_running") {
+          const retryAfterMs = Math.max(1, Number(problem.retryAfterMs) || 250);
+          deadlineAt = performance.now() + retryAfterMs;
+          result.textContent = `Der Sprint läuft serverseitig noch ${Math.ceil(retryAfterMs / 1000)} s.`;
+          finishing = false;
+          finished = false;
+          input.disabled = false;
+          root.classList.remove("typing-finished");
+          root.classList.add("typing-running");
+          timerFrame = requestAnimationFrame(updateTimer);
+          return;
+        }
+
+        result.textContent = problem.title || "Der Versuch konnte nicht gespeichert werden.";
         finishing = false;
         finished = false;
         input.disabled = false;
@@ -487,6 +522,7 @@ export function attachTypingApps() {
       startButton.disabled = challengeId;
       startButton.textContent = preparedStartLabel;
       render();
+      resetTypingScroll(target);
     };
 
     startButton.addEventListener("click", async () => {
@@ -530,6 +566,39 @@ export function attachTypingApps() {
       renderIdle();
     }
   });
+}
+
+async function postFinishWithRetry(endpoint, payload) {
+  let lastError;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (response.status < 500 || attempt > 0) {
+        return response;
+      }
+    } catch (error) {
+      lastError = error;
+      if (attempt > 0) {
+        throw error;
+      }
+    }
+
+    await new Promise((resolve) => window.setTimeout(resolve, 250));
+  }
+
+  throw lastError || new Error("Finish fehlgeschlagen.");
+}
+
+async function readProblem(response) {
+  try {
+    return await response.json();
+  } catch {
+    return {};
+  }
 }
 
 function sprintSecondsFromMode(mode) {

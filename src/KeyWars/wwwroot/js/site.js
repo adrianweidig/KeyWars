@@ -80,69 +80,90 @@ function attachSubmitGuards() {
   });
 }
 
-function attachDesignMode() {
-  const toggles = document.querySelectorAll("[data-design-mode-toggle]");
-  if (toggles.length === 0) {
+function attachThemeToggle() {
+  const toggles = document.querySelectorAll("[data-theme-toggle]");
+  const theme = window.keyWarsTheme;
+  if (toggles.length === 0 || !theme) {
     return;
   }
 
-  const storageKey = "keywars.designMode";
-  const readStoredMode = () => {
-    try {
-      return window.localStorage?.getItem(storageKey) === "enabled";
-    } catch {
-      return false;
+  const root = document.documentElement;
+  const renderTheme = (theme, persist = false) => {
+    const currentTheme = window.keyWarsTheme.applyTheme(theme);
+    const nextTheme = currentTheme === "dark" ? "light" : "dark";
+    const nextLabel = nextTheme === "light" ? "Helles Design aktivieren" : "Dunkles Design aktivieren";
+    const currentLabel = currentTheme === "light" ? "Helles Design" : "Dunkles Design";
+
+    if (persist) {
+      window.keyWarsTheme.storeTheme(currentTheme);
     }
-  };
-  const storeMode = (enabled) => {
-    try {
-      if (enabled) {
-        window.localStorage?.setItem(storageKey, "enabled");
-      } else {
-        window.localStorage?.removeItem(storageKey);
-      }
-    } catch {
-      // Storage can be unavailable in restricted browser contexts.
-    }
-  };
-  const renderMode = (enabled) => {
-    document.body.classList.toggle("app-design-mode", enabled);
+
     toggles.forEach((toggle) => {
-      toggle.setAttribute("aria-pressed", enabled ? "true" : "false");
-      toggle.classList.toggle("active", enabled);
-      toggle.title = enabled ? "Designmodus deaktivieren" : "Designmodus";
+      toggle.setAttribute("aria-pressed", currentTheme === "light" ? "true" : "false");
+      toggle.classList.toggle("active", currentTheme === "light");
+      toggle.dataset.theme = currentTheme;
+      toggle.title = nextLabel;
+      toggle.setAttribute("aria-label", `${nextLabel} (aktuell ${currentLabel})`);
     });
   };
 
-  renderMode(readStoredMode());
+  renderTheme(theme.readStoredTheme() || root.dataset.theme || theme.readSystemTheme());
   toggles.forEach((toggle) => {
     toggle.addEventListener("click", () => {
-      const enabled = !document.body.classList.contains("app-design-mode");
-      renderMode(enabled);
-      storeMode(enabled);
+      renderTheme(theme.normalizeTheme(root.dataset.theme) === "dark" ? "light" : "dark", true);
     });
+  });
+
+  const media = window.matchMedia?.("(prefers-color-scheme: light)");
+  media?.addEventListener?.("change", () => {
+    if (!theme.readStoredTheme()) {
+      renderTheme(theme.readSystemTheme());
+    }
   });
 }
 
 function attachMobileMenu() {
   const toggles = document.querySelectorAll("[data-mobile-menu-toggle]");
-  if (toggles.length === 0) {
+  const panel = document.querySelector("[data-mobile-menu]");
+  if (toggles.length === 0 || !panel) {
     return;
   }
 
-  const closeMenu = () => document.body.classList.remove("mobile-menu-open");
-  const toggleMenu = () => document.body.classList.toggle("mobile-menu-open");
+  const opener = document.querySelector("[data-mobile-menu-opener]");
+  const renderMenu = (open, restoreFocus = false) => {
+    document.body.classList.toggle("mobile-menu-open", open);
+    panel.setAttribute("aria-hidden", open ? "false" : "true");
+    panel.inert = !open;
+    toggles.forEach((toggle) => {
+      if (toggle.hasAttribute("aria-expanded")) {
+        toggle.setAttribute("aria-expanded", open ? "true" : "false");
+      }
+    });
+
+    if (open) {
+      panel.querySelector("button, a")?.focus({ preventScroll: true });
+    } else if (restoreFocus) {
+      opener?.focus({ preventScroll: true });
+    }
+  };
+
+  const closeMenu = (restoreFocus = false) => renderMenu(false, restoreFocus);
   toggles.forEach((toggle) => {
-    toggle.addEventListener("click", toggleMenu);
+    toggle.addEventListener("click", () => {
+      const open = !document.body.classList.contains("mobile-menu-open");
+      renderMenu(open, !open);
+    });
   });
   document.querySelectorAll("[data-mobile-menu] a").forEach((link) => {
-    link.addEventListener("click", closeMenu);
+    link.addEventListener("click", () => closeMenu());
   });
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") {
-      closeMenu();
+    if (event.key === "Escape" && document.body.classList.contains("mobile-menu-open")) {
+      closeMenu(true);
     }
   });
+
+  renderMenu(false);
 }
 
 const overflowTitleSelector = [
@@ -319,6 +340,6 @@ attachRoomCodeInputs();
 attachCopyButtons();
 attachShareButtons();
 attachSubmitGuards();
-attachDesignMode();
+attachThemeToggle();
 attachMobileMenu();
 attachOverflowTitles();

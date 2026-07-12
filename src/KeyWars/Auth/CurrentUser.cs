@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using KeyWars.Data;
 using KeyWars.Domain;
+using KeyWars.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace KeyWars.Auth;
@@ -10,7 +11,7 @@ public static class KeyWarsClaims
     public const string ProfileId = "keywars:profile-id";
 }
 
-public sealed class CurrentUser(KeyWarsDbContext db)
+public sealed class CurrentUser(KeyWarsDbContext db, ProfileAccessGate? accessGate = null)
 {
     public Guid? GetProfileId(ClaimsPrincipal principal)
     {
@@ -26,7 +27,13 @@ public sealed class CurrentUser(KeyWarsDbContext db)
             return null;
         }
 
-        return await db.UserProfiles.SingleOrDefaultAsync(profile => profile.Id == profileId && !profile.Deleted, cancellationToken);
+        if (accessGate?.IsBlocked(profileId.Value) == true)
+        {
+            return null;
+        }
+
+        var profile = await db.UserProfiles.SingleOrDefaultAsync(profile => profile.Id == profileId && !profile.Deleted, cancellationToken);
+        return accessGate?.IsBlocked(profileId.Value) == true ? null : profile;
     }
 
     public async Task<UserProfile> RequireProfileAsync(ClaimsPrincipal principal, CancellationToken cancellationToken = default)

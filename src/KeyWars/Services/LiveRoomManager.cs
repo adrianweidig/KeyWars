@@ -41,7 +41,8 @@ public sealed record LiveRoomSnapshot(
     DateTimeOffset? StartedAt,
     DateTimeOffset? FinishedAt,
     string? CloseReason,
-    IReadOnlyList<LiveParticipantSnapshot> Participants);
+    IReadOnlyList<LiveParticipantSnapshot> Participants,
+    CompletionState? PersistenceState = null);
 
 public sealed record LiveProgressResult(
     LiveProgressDelta? Delta,
@@ -87,6 +88,11 @@ public sealed class LiveRoomManager(
         CleanupExpiredRooms(now);
         lock (createGate)
         {
+            if (completionSink is not null && !completionSink.CanAcceptNewRoom(rooms.Count))
+            {
+                throw new InvalidOperationException("Die Arena nimmt vorübergehend keine neuen Räume an, weil die Ergebnispersistenz ausgelastet ist.");
+            }
+
             if (rooms.Count >= options.Value.MaxConcurrentRooms)
             {
                 throw new InvalidOperationException("Die maximale Anzahl gleichzeitiger Live-Räume ist erreicht.");
@@ -164,14 +170,18 @@ public sealed class LiveRoomManager(
             }
 
             var participant = RequireParticipant(room, profileId);
+            if (!IsLobbyActive(participant))
+            {
+                throw new InvalidOperationException("Dieses Profil nimmt nicht mehr aktiv an der Lobby teil.");
+            }
+
             participant.Ready = ready;
             participant.Status = ready ? ParticipantStatus.Ready : ParticipantStatus.Joined;
             participant.DisconnectedAt = null;
             snapshot = SnapshotUnlocked(room, now);
         }
 
-        QueuePersistence(completed);
-        return snapshot;
+        return QueuePersistence(completed, snapshot);
     }
 
     public LiveRoomSnapshot Start(Guid roomId, Guid profileId)
@@ -216,8 +226,7 @@ public sealed class LiveRoomManager(
             }
         }
 
-        QueuePersistence(completed);
-        return snapshot;
+        return QueuePersistence(completed, snapshot);
     }
 
     public LiveRoomSnapshot SubmitProgress(Guid roomId, Guid profileId, int sequence, string input)
@@ -280,8 +289,7 @@ public sealed class LiveRoomManager(
             }
         }
 
-        QueuePersistence(completed);
-        return snapshot;
+        return QueuePersistence(completed, snapshot);
     }
 
     public LiveRoomSnapshot GiveUp(Guid roomId, Guid profileId)
@@ -321,8 +329,7 @@ public sealed class LiveRoomManager(
             }
         }
 
-        QueuePersistence(completed);
-        return snapshot;
+        return QueuePersistence(completed, snapshot);
     }
 
     public LiveRoomSnapshot Disconnect(Guid roomId, Guid profileId)
@@ -351,8 +358,7 @@ public sealed class LiveRoomManager(
             snapshot = SnapshotUnlocked(room, now);
         }
 
-        QueuePersistence(completed);
-        return snapshot;
+        return QueuePersistence(completed, snapshot);
     }
 
     public LiveRoomSnapshot Snapshot(Guid roomId)
@@ -368,8 +374,7 @@ public sealed class LiveRoomManager(
             snapshot = SnapshotUnlocked(room, now);
         }
 
-        QueuePersistence(completed);
-        return snapshot;
+        return QueuePersistence(completed, snapshot);
     }
 
     public void Sweep()
@@ -385,8 +390,13 @@ public sealed class LiveRoomManager(
             CompletedRoomRecord? completed = null;
             lock (room.Gate)
             {
-                if (!room.Participants.TryGetValue(profileId, out var participant) ||
-                    participant.Status is ParticipantStatus.Finished or ParticipantStatus.Dnf or ParticipantStatus.LeftBeforeStart)
+                if (!room.Participants.TryGetValue(profileId, out var participant))
+                {
+                    continue;
+                }
+
+                room.ExcludedProfileIds.Add(profileId);
+                if (participant.Status is ParticipantStatus.Finished or ParticipantStatus.Dnf or ParticipantStatus.LeftBeforeStart)
                 {
                     continue;
                 }
@@ -424,7 +434,7 @@ public sealed class LiveRoomManager(
             CompletedRoomRecord? completed = null;
             lock (room.Gate)
             {
-                if (room.Finished || room.PersistenceQueued || room.Phase is not (LiveRoomPhase.Countdown or LiveRoomPhase.Running))
+                if (room.Finished || room.Phase is not (LiveRoomPhase.Countdown or LiveRoomPhase.Running))
                 {
                     continue;
                 }
@@ -451,7 +461,7 @@ public sealed class LiveRoomManager(
                 room.PhaseChangedAt = now;
                 room.CloseReason = "Der Server wurde beendet; diese Runde wurde ohne Rating abgebrochen.";
                 room.RoundVersion++;
-                room.PersistenceQueued = true;
+                room.PersistenceState = CompletionState.Pending;
                 completed = BuildPersistenceRecord(room);
                 abortedRooms++;
             }
@@ -512,8 +522,7 @@ public sealed class LiveRoomManager(
             }
         }
 
-        QueuePersistence(completed);
-        return snapshot;
+        return QueuePersistence(completed, snapshot);
     }
 
     private LiveProgressResult SubmitProgressCore(Guid roomId, Guid profileId, int sequence, string input, bool includeSnapshot)
@@ -559,7 +568,15 @@ public sealed class LiveRoomManager(
             }
         }
 
-        QueuePersistence(completed);
+        if (completed is not null && snapshot is not null)
+        {
+            snapshot = QueuePersistence(completed, snapshot);
+        }
+        else
+        {
+            QueuePersistence(completed);
+        }
+
         return new LiveProgressResult(delta, snapshot);
     }
 
@@ -640,7 +657,23 @@ public sealed class LiveRoomManager(
             return null;
         }
 
-        var terminal = room.Participants.Values.All(item => item.Status is ParticipantStatus.Finished or ParticipantStatus.Dnf);
+        var competingParticipants = room.Participants.Values
+            .Where(item => !room.ExcludedProfileIds.Contains(item.ProfileId) && item.Status != ParticipantStatus.LeftBeforeStart)
+            .ToArray();
+        if (competingParticipants.Length == 0)
+        {
+            room.Finished = true;
+            room.FinishedAt = now;
+            room.RoundEndsAt = now;
+            room.Phase = LiveRoomPhase.Aborted;
+            room.PhaseChangedAt = now;
+            room.CloseReason = "Der Raum wurde beendet, weil keine wertbaren Teilnehmenden mehr vorhanden sind.";
+            room.RoundVersion++;
+            room.PersistenceState = CompletionState.AbortedUnconfirmed;
+            return null;
+        }
+
+        var terminal = competingParticipants.All(item => item.Status is ParticipantStatus.Finished or ParticipantStatus.Dnf);
         if (!terminal)
         {
             return null;
@@ -652,12 +685,7 @@ public sealed class LiveRoomManager(
         room.Phase = LiveRoomPhase.SeriesResults;
         room.PhaseChangedAt = now;
         room.RoundVersion++;
-        if (room.PersistenceQueued)
-        {
-            return null;
-        }
-
-        room.PersistenceQueued = true;
+        room.PersistenceState = CompletionState.Pending;
         return BuildPersistenceRecord(room);
     }
 
@@ -692,7 +720,9 @@ public sealed class LiveRoomManager(
     private static void ApplyPlacements(LiveRoomState room)
     {
         var ranked = RaceRanking.RankClassic(room.Participants.Values
-            .Where(item => item.Status is ParticipantStatus.Finished or ParticipantStatus.Dnf)
+            .Where(item =>
+                !room.ExcludedProfileIds.Contains(item.ProfileId) &&
+                item.Status is ParticipantStatus.Finished or ParticipantStatus.Dnf)
             .Select(item => new RaceResult(
                 item.ProfileId,
                 item.Status,
@@ -730,9 +760,28 @@ public sealed class LiveRoomManager(
         }
     }
 
-    private static LiveRoomSnapshot SnapshotUnlocked(LiveRoomState room, DateTimeOffset now)
+    private LiveRoomSnapshot SnapshotUnlocked(LiveRoomState room, DateTimeOffset now)
     {
         var exposeTargetText = room.Phase is LiveRoomPhase.Running or LiveRoomPhase.RoundResults or LiveRoomPhase.SeriesResults or LiveRoomPhase.Closed;
+        var persistenceState = room.PersistenceState;
+        if (room.Finished &&
+            persistenceState == CompletionState.Pending &&
+            room.CompletionReceipt is not null &&
+            completionSink is not null)
+        {
+            persistenceState = completionSink.GetStatus(room.Id).State;
+            room.PersistenceState = persistenceState;
+            if (room.CompletionReceipt is not null)
+            {
+                room.CompletionReceipt = room.CompletionReceipt with { State = persistenceState.Value };
+            }
+        }
+
+        if (room.Finished)
+        {
+            persistenceState ??= CompletionState.AbortedUnconfirmed;
+        }
+
         return new LiveRoomSnapshot(
             room.Id,
             room.CreatorProfileId,
@@ -772,7 +821,8 @@ public sealed class LiveRoomManager(
                     item.Placement,
                     item.DurationMilliseconds,
                     item.Accuracy))
-                .ToList());
+                .ToList(),
+            persistenceState);
     }
 
     private static int ValidateRoundCount(int roundCount)
@@ -930,7 +980,11 @@ public sealed class LiveRoomManager(
         room.CreatedAt,
         room.StartedAt,
         room.FinishedAt,
-        room.Participants.Values.Select(item => new CompletedParticipantRecord(
+        room.Participants.Values
+            .Where(item =>
+                !room.ExcludedProfileIds.Contains(item.ProfileId) &&
+                item.Status != ParticipantStatus.LeftBeforeStart)
+            .Select(item => new CompletedParticipantRecord(
             item.ProfileId,
             item.Status,
             item.Placement,
@@ -938,21 +992,50 @@ public sealed class LiveRoomManager(
             item.Wpm,
             item.Accuracy)).ToList());
 
-    private void QueuePersistence(CompletedRoomRecord? record)
+    private LiveRoomSnapshot QueuePersistence(CompletedRoomRecord? record, LiveRoomSnapshot snapshot)
     {
-        if (record is null || completionSink is null)
+        var state = QueuePersistence(record);
+        return record is null ? snapshot : snapshot with { PersistenceState = state };
+    }
+
+    private CompletionState? QueuePersistence(CompletedRoomRecord? record)
+    {
+        if (record is null)
         {
-            return;
+            return null;
         }
 
+        if (rooms.TryGetValue(record.Id, out var room))
+        {
+            lock (room.Gate)
+            {
+                record = record with
+                {
+                    Participants = record.Participants
+                        .Where(participant => !room.ExcludedProfileIds.Contains(participant.UserProfileId))
+                        .ToArray()
+                };
+                var receipt = EnqueueCompletion(record);
+                room.CompletionReceipt = receipt;
+                room.PersistenceState = receipt.State;
+                return receipt.State;
+            }
+        }
+
+        return EnqueueCompletion(record).State;
+    }
+
+    private CompletionReceipt EnqueueCompletion(CompletedRoomRecord record)
+    {
         try
         {
-            completionSink.Enqueue(record);
+            return completionSink?.Enqueue(record)
+                ?? new CompletionReceipt(record.Id, record.IdempotencyKey, CompletionState.AbortedUnconfirmed);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Live-Raum {RoomId} konnte nicht für die Persistenz eingereiht werden.", record.Id);
-            throw new InvalidOperationException("Das Arena-Ergebnis konnte nicht zur Speicherung vorgemerkt werden.", ex);
+            logger.LogError(ex, "Ein Arena-Ergebnis konnte nicht für die Persistenz eingereiht werden.");
+            return new CompletionReceipt(record.Id, record.IdempotencyKey, CompletionState.Failed);
         }
     }
 }
@@ -983,6 +1066,7 @@ internal sealed class LiveRoomState(
     public DateTimeOffset CreatedAt { get; } = createdAt;
     public object Gate { get; } = new();
     public Dictionary<Guid, LiveParticipantState> Participants { get; } = [];
+    public HashSet<Guid> ExcludedProfileIds { get; } = [];
     public LiveRoomPhase Phase { get; set; } = LiveRoomPhase.Lobby;
     public int CurrentRound { get; set; } = 1;
     public int RoundVersion { get; set; } = 1;
@@ -993,7 +1077,8 @@ internal sealed class LiveRoomState(
     public string? CloseReason { get; set; }
     public bool Started { get; set; }
     public bool Finished { get; set; }
-    public bool PersistenceQueued { get; set; }
+    public CompletionReceipt? CompletionReceipt { get; set; }
+    public CompletionState? PersistenceState { get; set; }
     public DateTimeOffset? StartedAt { get; set; }
     public DateTimeOffset? FinishedAt { get; set; }
 }

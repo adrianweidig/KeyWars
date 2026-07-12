@@ -12,6 +12,11 @@ public sealed class SecurityHeadersMiddleware(RequestDelegate next)
             headers.TryAdd("X-Frame-Options", "DENY");
             headers.TryAdd("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()");
             headers.TryAdd("Content-Security-Policy", BuildContentSecurityPolicy(context.Request));
+            if (context.Request.IsHttps)
+            {
+                headers.TryAdd("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+            }
+
             if (context.User.Identity?.IsAuthenticated == true)
             {
                 headers.CacheControl = "no-store";
@@ -29,7 +34,7 @@ public sealed class SecurityHeadersMiddleware(RequestDelegate next)
         var connectSource = string.IsNullOrWhiteSpace(websocketSource)
             ? "'self'"
             : $"'self' {websocketSource}";
-        return $"default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; img-src 'self' data:; script-src 'self'; style-src 'self'; connect-src {connectSource}";
+        return $"default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; img-src 'self' data:; script-src 'self'; style-src 'self'; connect-src {connectSource}";
     }
 
     private static string BuildWebSocketSource(HttpRequest request)

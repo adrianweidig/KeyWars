@@ -14,10 +14,10 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Localization;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
-using System.Net;
 
 if (args is ["healthcheck", ..])
 {
@@ -66,6 +66,9 @@ builder.Services.AddDataProtection()
     .SetApplicationName("KeyWars");
 
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<DatabaseRuntimeLock>();
+builder.Services.AddSingleton<ProfileAccessGate>();
+builder.Services.AddSingleton<ProfileAccessHubFilter>();
 builder.Services.AddScoped<CurrentUser>();
 builder.Services.AddScoped<ProfileProvisioner>();
 builder.Services.AddScoped<TextLibraryService>();
@@ -118,6 +121,32 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         options.AccessDeniedPath = "/anmelden";
         options.Events = new CookieAuthenticationEvents
         {
+            OnValidatePrincipal = async context =>
+            {
+                var profileIdValue = context.Principal?.FindFirstValue(KeyWarsClaims.ProfileId);
+                if (!Guid.TryParse(profileIdValue, out var profileId))
+                {
+                    context.RejectPrincipal();
+                    await context.HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+                    return;
+                }
+
+                var accessGate = context.HttpContext.RequestServices.GetRequiredService<ProfileAccessGate>();
+                var profileIsValid = accessGate.GetState(profileId) != ProfileAccessState.Deleted;
+                if (profileIsValid)
+                {
+                    var db = context.HttpContext.RequestServices.GetRequiredService<KeyWarsDbContext>();
+                    profileIsValid = await db.UserProfiles
+                        .AsNoTracking()
+                        .AnyAsync(profile => profile.Id == profileId && !profile.Deleted, context.HttpContext.RequestAborted);
+                }
+
+                if (!profileIsValid)
+                {
+                    context.RejectPrincipal();
+                    await context.HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+                }
+            },
             OnRedirectToLogin = context =>
             {
                 var returnUrl = Uri.EscapeDataString(context.Request.PathBase + context.Request.Path + context.Request.QueryString);
@@ -202,6 +231,7 @@ builder.Services.AddSignalR(options =>
 {
     options.MaximumReceiveMessageSize = 16 * 1024;
     options.EnableDetailedErrors = builder.Environment.IsDevelopment();
+    options.AddFilter(typeof(ProfileAccessHubFilter));
 })
     .AddJsonProtocol(options =>
     {
@@ -209,34 +239,21 @@ builder.Services.AddSignalR(options =>
     })
     .AddMessagePackProtocol();
 
+var forwardedHeaders = ConfigurationAliases.GetForwardedHeaders(builder.Configuration);
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
-    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
-    options.ForwardLimit = 1;
-    var knownProxies = builder.Configuration["KEYWARS:PROXY:KNOWN_PROXIES"];
-    if (!string.IsNullOrWhiteSpace(knownProxies))
+    options.ForwardedHeaders = forwardedHeaders.ForwardedHeaders;
+    options.ForwardLimit = forwardedHeaders.ForwardLimit;
+    options.KnownProxies.Clear();
+    foreach (var address in forwardedHeaders.KnownProxies)
     {
-        options.KnownProxies.Clear();
-        foreach (var value in knownProxies.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            if (IPAddress.TryParse(value, out var address))
-            {
-                options.KnownProxies.Add(address);
-            }
-        }
+        options.KnownProxies.Add(address);
     }
 
-    var knownNetworks = builder.Configuration["KEYWARS:PROXY:KNOWN_NETWORKS"];
-    if (!string.IsNullOrWhiteSpace(knownNetworks))
+    options.KnownIPNetworks.Clear();
+    foreach (var network in forwardedHeaders.KnownIPNetworks)
     {
-        options.KnownIPNetworks.Clear();
-        foreach (var value in knownNetworks.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            if (System.Net.IPNetwork.TryParse(value, out var network))
-            {
-                options.KnownIPNetworks.Add(network);
-            }
-        }
+        options.KnownIPNetworks.Add(network);
     }
 });
 
@@ -245,7 +262,6 @@ var app = builder.Build();
 if (args is ["maintenance", "backup", ..])
 {
     await using var scope = app.Services.CreateAsyncScope();
-    await scope.ServiceProvider.GetRequiredService<DatabaseInitializer>().InitializeAsync();
     var backup = await scope.ServiceProvider.GetRequiredService<BackupService>().CreateBackupAsync();
     Console.WriteLine(backup);
     return 0;
@@ -259,6 +275,8 @@ if (args is ["maintenance", "restore", var backupPath, ..])
     return 0;
 }
 
+using var databaseRuntimeLease = app.Services.GetRequiredService<DatabaseRuntimeLock>().Acquire("webhost");
+
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error");
@@ -270,6 +288,7 @@ app.UseMiddleware<SecurityHeadersMiddleware>();
 app.UseStaticFiles();
 app.UseRouting();
 app.UseAuthentication();
+app.UseMiddleware<ProfileAccessMiddleware>();
 app.UseRateLimiter();
 app.UseAuthorization();
 
@@ -279,12 +298,22 @@ app.MapGet("/health/ready", async (KeyWarsDbContext db, CancellationToken cancel
     await db.Database.ExecuteSqlRawAsync("SELECT 1;", cancellationToken);
     return Results.Ok(new { status = "ok" });
 }).AllowAnonymous();
-app.MapGet("/health/arena-persistence", (LiveRoomCompletionQueue queue) => Results.Ok(new
+app.MapGet("/health/arena-persistence", (LiveRoomCompletionQueue queue) =>
 {
-    pendingJobs = queue.PendingCount,
-    capacity = queue.Capacity,
-    failedAttempts = queue.FailedAttempts
-})).AllowAnonymous();
+    var metrics = queue.GetMetrics();
+    return Results.Ok(new
+    {
+        metrics.PendingJobs,
+        queue.Capacity,
+        failedAttempts = queue.FailedAttempts,
+        metrics.FailedRecords,
+        metrics.RetryAttempts,
+        metrics.PersistedCompletions,
+        metrics.FailedCompletions,
+        metrics.AbortedUnconfirmedCompletions,
+        metrics.AveragePersistenceDurationMilliseconds
+    });
+}).AllowAnonymous();
 app.MapGet("/health/arena-progress", (LiveProgressBroadcaster progress) => Results.Ok(progress.Snapshot())).AllowAnonymous();
 
 app.MapKeyWarsApi();

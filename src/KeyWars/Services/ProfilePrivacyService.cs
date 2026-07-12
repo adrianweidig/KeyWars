@@ -1,14 +1,73 @@
 using KeyWars.Data;
 using KeyWars.Domain;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace KeyWars.Services;
+
+public sealed record TypingAttemptExport(
+    Guid Id,
+    Guid UserProfileId,
+    Guid? TrainingTextId,
+    TrainingMode Mode,
+    AttemptPhase Phase,
+    string StandardTextKey,
+    string TextHash,
+    DateTimeOffset PreparedAt,
+    DateTimeOffset StartedAt,
+    DateTimeOffset? FinishedAt,
+    int DurationMilliseconds,
+    int ClientDurationMilliseconds,
+    int CorrectCharacters,
+    int IncorrectCharacters,
+    int Backspaces,
+    int FocusLosses,
+    int TotalCharacters,
+    double Wpm,
+    double RawWpm,
+    double CharactersPerMinute,
+    double Accuracy,
+    double Consistency,
+    int ConsistencySampleCount,
+    double MeanWordMilliseconds,
+    double WordTimingVariation,
+    bool Completed,
+    bool Official,
+    bool LeaderboardEligible,
+    bool ExperienceAwarded,
+    DateTimeOffset CreatedAt);
+
+public sealed record ChallengeAttemptBindingExport(
+    Guid Id,
+    Guid ChallengeId,
+    Guid ChallengeRoundId,
+    Guid UserProfileId,
+    Guid TypingAttemptId,
+    string TextSnapshotHash,
+    TrainingMode Mode,
+    bool Consumed,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? ConsumedAt);
+
+public sealed record LiveRoomSummaryExport(
+    Guid Id,
+    int RoundNumber,
+    int RoundVersion,
+    Guid CreatorProfileId,
+    string RoomCode,
+    LiveRoomMode Mode,
+    LiveRoomVisibility Visibility,
+    int RoundCount,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? StartedAt,
+    DateTimeOffset? FinishedAt,
+    bool AbortedByServer);
 
 public sealed record ProfileExportPayload(
     int Version,
     DateTimeOffset GeneratedAt,
     UserProfile Profile,
-    IReadOnlyList<TypingAttempt> Attempts,
+    IReadOnlyList<TypingAttemptExport> Attempts,
     IReadOnlyList<TypingAttemptError> AttemptErrors,
     IReadOnlyList<RewardLedgerEntry> RewardLedger,
     IReadOnlyList<Mission> Missions,
@@ -17,20 +76,136 @@ public sealed record ProfileExportPayload(
     IReadOnlyList<WeaknessObservation> WeaknessObservations,
     IReadOnlyList<TrainingText> OwnedTexts,
     IReadOnlyList<TextCollection> OwnedCollections,
+    IReadOnlyList<TextCollectionItem> OwnedCollectionItems,
+    IReadOnlyList<Challenge> CreatedChallenges,
+    IReadOnlyList<ChallengeRound> ChallengeRounds,
     IReadOnlyList<ChallengeParticipant> ChallengeParticipations,
     IReadOnlyList<ChallengeRoundResult> ChallengeRoundResults,
+    IReadOnlyList<ChallengeAttemptBindingExport> ChallengeAttemptBindings,
+    IReadOnlyList<LiveRoomSummaryExport> CreatedLiveRooms,
     IReadOnlyList<LiveRoomParticipantSummary> LiveRoomResults);
 
-public sealed class ProfilePrivacyService(KeyWarsDbContext db, LiveRoomManager liveRooms, TimeProvider timeProvider)
+public sealed class ProfilePrivacyService(
+    KeyWarsDbContext db,
+    LiveRoomManager liveRooms,
+    LiveRoomCompletionQueue liveRoomCompletions,
+    AttemptSessionStore attemptSessions,
+    ProfileAccessGate accessGate,
+    TimeProvider timeProvider)
 {
     public async Task<ProfileExportPayload> BuildExportAsync(Guid profileId, CancellationToken cancellationToken = default)
     {
         var profile = await db.UserProfiles.SingleAsync(item => item.Id == profileId && !item.Deleted, cancellationToken);
+        var attempts = await db.TypingAttempts
+            .Where(item => item.UserProfileId == profileId)
+            .Select(item => new TypingAttemptExport(
+                item.Id,
+                item.UserProfileId,
+                item.TrainingTextId,
+                item.Mode,
+                item.Phase,
+                item.StandardTextKey,
+                item.TextHash,
+                item.PreparedAt,
+                item.StartedAt,
+                item.FinishedAt,
+                item.DurationMilliseconds,
+                item.ClientDurationMilliseconds,
+                item.CorrectCharacters,
+                item.IncorrectCharacters,
+                item.Backspaces,
+                item.FocusLosses,
+                item.TotalCharacters,
+                item.Wpm,
+                item.RawWpm,
+                item.CharactersPerMinute,
+                item.Accuracy,
+                item.Consistency,
+                item.ConsistencySampleCount,
+                item.MeanWordMilliseconds,
+                item.WordTimingVariation,
+                item.Completed,
+                item.Official,
+                item.LeaderboardEligible,
+                item.ExperienceAwarded,
+                item.CreatedAt))
+            .ToListAsync(cancellationToken);
+        var ownedCollections = await db.TextCollections
+            .Where(item => item.OwnerProfileId == profileId)
+            .ToListAsync(cancellationToken);
+        var ownedCollectionIds = ownedCollections.Select(item => item.Id).ToArray();
+        List<TextCollectionItem> ownedCollectionItems = [];
+        if (ownedCollectionIds.Length > 0)
+        {
+            ownedCollectionItems = await db.TextCollectionItems
+                .Where(item => ownedCollectionIds.Contains(item.TextCollectionId))
+                .ToListAsync(cancellationToken);
+        }
+
+        var createdChallenges = await db.Challenges
+            .Where(item => item.CreatorProfileId == profileId)
+            .ToListAsync(cancellationToken);
+        var challengeParticipations = await db.ChallengeParticipants
+            .Where(item => item.UserProfileId == profileId)
+            .ToListAsync(cancellationToken);
+        var challengeRoundResults = await db.ChallengeRoundResults
+            .Where(item => item.UserProfileId == profileId)
+            .ToListAsync(cancellationToken);
+        var challengeAttemptBindings = await db.ChallengeAttemptBindings
+            .Where(item => item.UserProfileId == profileId)
+            .Select(item => new ChallengeAttemptBindingExport(
+                item.Id,
+                item.ChallengeId,
+                item.ChallengeRoundId,
+                item.UserProfileId,
+                item.TypingAttemptId,
+                item.TextSnapshotHash,
+                item.Mode,
+                item.Consumed,
+                item.CreatedAt,
+                item.ConsumedAt))
+            .ToListAsync(cancellationToken);
+        var relatedChallengeIds = createdChallenges
+            .Select(item => item.Id)
+            .Concat(challengeParticipations.Select(item => item.ChallengeId))
+            .Concat(challengeAttemptBindings.Select(item => item.ChallengeId))
+            .Distinct()
+            .ToArray();
+        var relatedChallengeRoundIds = challengeRoundResults
+            .Select(item => item.ChallengeRoundId)
+            .Concat(challengeAttemptBindings.Select(item => item.ChallengeRoundId))
+            .Distinct()
+            .ToArray();
+        List<ChallengeRound> challengeRounds = [];
+        if (relatedChallengeIds.Length > 0 || relatedChallengeRoundIds.Length > 0)
+        {
+            challengeRounds = await db.ChallengeRounds
+                .Where(item => relatedChallengeIds.Contains(item.ChallengeId) || relatedChallengeRoundIds.Contains(item.Id))
+                .ToListAsync(cancellationToken);
+        }
+
+        var createdLiveRooms = await db.LiveRoomSummaries
+            .Where(item => item.CreatorProfileId == profileId)
+            .Select(item => new LiveRoomSummaryExport(
+                item.Id,
+                item.RoundNumber,
+                item.RoundVersion,
+                item.CreatorProfileId,
+                item.RoomCode,
+                item.Mode,
+                item.Visibility,
+                item.RoundCount,
+                item.CreatedAt,
+                item.StartedAt,
+                item.FinishedAt,
+                item.AbortedByServer))
+            .ToListAsync(cancellationToken);
+
         return new ProfileExportPayload(
-            1,
+            2,
             timeProvider.GetUtcNow(),
             profile,
-            await db.TypingAttempts.Where(item => item.UserProfileId == profileId).ToListAsync(cancellationToken),
+            attempts,
             await db.TypingAttemptErrors.Where(item => item.UserProfileId == profileId).ToListAsync(cancellationToken),
             await db.RewardLedgerEntries.Where(item => item.UserProfileId == profileId).ToListAsync(cancellationToken),
             await db.Missions.Where(item => item.UserProfileId == profileId).ToListAsync(cancellationToken),
@@ -38,67 +213,198 @@ public sealed class ProfilePrivacyService(KeyWarsDbContext db, LiveRoomManager l
             await db.GamificationEvents.Where(item => item.UserProfileId == profileId).ToListAsync(cancellationToken),
             await db.WeaknessObservations.Where(item => item.UserProfileId == profileId).ToListAsync(cancellationToken),
             await db.TrainingTexts.Where(item => item.OwnerProfileId == profileId).ToListAsync(cancellationToken),
-            await db.TextCollections.Where(item => item.OwnerProfileId == profileId).ToListAsync(cancellationToken),
-            await db.ChallengeParticipants.Where(item => item.UserProfileId == profileId).ToListAsync(cancellationToken),
-            await db.ChallengeRoundResults.Where(item => item.UserProfileId == profileId).ToListAsync(cancellationToken),
+            ownedCollections,
+            ownedCollectionItems,
+            createdChallenges,
+            challengeRounds,
+            challengeParticipations,
+            challengeRoundResults,
+            challengeAttemptBindings,
+            createdLiveRooms,
             await db.LiveRoomParticipantSummaries.Where(item => item.UserProfileId == profileId).ToListAsync(cancellationToken));
     }
 
     public async Task ResetStatisticsAsync(Guid profileId, CancellationToken cancellationToken = default)
     {
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var profile = await db.UserProfiles.SingleAsync(item => item.Id == profileId && !item.Deleted, cancellationToken);
-        await DeleteDerivedStatisticsAsync(profileId, cancellationToken);
-        profile.ExperiencePoints = 0;
-        profile.Level = 1;
-        profile.SeasonPoints = 0;
-        profile.CurrentStreakDays = 0;
-        profile.LastActivityDate = null;
-        profile.ArenaRating = 1000;
-        profile.RatedMatchCount = 0;
-        profile.UpdatedAt = timeProvider.GetUtcNow();
-        await db.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
+        await ExecuteExclusiveOperationAsync(profileId, markDeleted: false, async () =>
+        {
+            await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+            try
+            {
+                var profile = await db.UserProfiles.SingleAsync(item => item.Id == profileId && !item.Deleted, cancellationToken);
+                await DeleteDerivedStatisticsAsync(profileId, cancellationToken);
+                profile.ExperiencePoints = 0;
+                profile.Level = 1;
+                profile.SeasonPoints = 0;
+                profile.CurrentStreakDays = 0;
+                profile.LastActivityDate = null;
+                profile.ArenaRating = 1000;
+                profile.RatedMatchCount = 0;
+                profile.UpdatedAt = timeProvider.GetUtcNow();
+                await db.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                await RollbackAsync(transaction);
+                throw;
+            }
+        }, cancellationToken);
     }
 
     public async Task DeleteProfileAsync(Guid profileId, CancellationToken cancellationToken = default)
     {
-        var now = timeProvider.GetUtcNow();
-        liveRooms.RemoveProfile(profileId);
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var profile = await db.UserProfiles.SingleAsync(item => item.Id == profileId && !item.Deleted, cancellationToken);
-        await DeleteDerivedStatisticsAsync(profileId, cancellationToken);
-        await RemoveOwnedCollectionsAsync(profileId, cancellationToken);
-        await PseudonymizeOwnedTextsAsync(profileId, now, cancellationToken);
-        await MarkActiveChallengesDeclinedAsync(profileId, now, cancellationToken);
+        await ExecuteExclusiveOperationAsync(profileId, markDeleted: true, async () =>
+        {
+            var now = timeProvider.GetUtcNow();
+            await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+            try
+            {
+                var profile = await db.UserProfiles.SingleAsync(item => item.Id == profileId && !item.Deleted, cancellationToken);
+                await DeleteDerivedStatisticsAsync(profileId, cancellationToken);
+                await RemoveOwnedCollectionsAsync(profileId, cancellationToken);
+                await PseudonymizeOwnedTextsAsync(profileId, now, cancellationToken);
+                await MarkActiveChallengesDeclinedAsync(profileId, now, cancellationToken);
 
-        var pseudonym = $"deleted-{profile.Id:N}";
-        profile.DirectoryObjectGuid = pseudonym;
-        profile.DirectorySid = "";
-        profile.SamAccountName = pseudonym;
-        profile.UserPrincipalName = $"{pseudonym}@deleted.local";
-        profile.DisplayName = "Gelöschtes Profil";
-        profile.GivenName = null;
-        profile.Surname = null;
-        profile.Email = null;
-        profile.Department = null;
-        profile.Title = null;
-        profile.Motto = null;
-        profile.LeaderboardVisible = false;
-        profile.GhostSharingEnabled = false;
-        profile.ChallengesEnabled = false;
-        profile.ExperiencePoints = 0;
-        profile.Level = 1;
-        profile.SeasonPoints = 0;
-        profile.CurrentStreakDays = 0;
-        profile.LastActivityDate = null;
-        profile.ArenaRating = 1000;
-        profile.RatedMatchCount = 0;
-        profile.LastLoginAt = null;
-        profile.UpdatedAt = now;
-        profile.Deleted = true;
-        await db.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
+                var pseudonym = $"deleted-{profile.Id:N}";
+                profile.DirectoryObjectGuid = pseudonym;
+                profile.DirectorySid = "";
+                profile.SamAccountName = pseudonym;
+                profile.UserPrincipalName = $"{pseudonym}@deleted.local";
+                profile.DisplayName = "Gelöschtes Profil";
+                profile.GivenName = null;
+                profile.Surname = null;
+                profile.Email = null;
+                profile.Department = null;
+                profile.Title = null;
+                profile.Motto = null;
+                profile.LeaderboardVisible = false;
+                profile.GhostSharingEnabled = false;
+                profile.ChallengesEnabled = false;
+                profile.ExperiencePoints = 0;
+                profile.Level = 1;
+                profile.SeasonPoints = 0;
+                profile.CurrentStreakDays = 0;
+                profile.LastActivityDate = null;
+                profile.ArenaRating = 1000;
+                profile.RatedMatchCount = 0;
+                profile.LastLoginAt = null;
+                profile.UpdatedAt = now;
+                profile.Deleted = true;
+                await db.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                await RollbackAsync(transaction);
+                throw;
+            }
+        }, cancellationToken);
+    }
+
+    private async Task ExecuteExclusiveOperationAsync(
+        Guid profileId,
+        bool markDeleted,
+        Func<Task> operation,
+        CancellationToken cancellationToken)
+    {
+        BeginExclusiveOperation(profileId);
+        var lifecycleLocks = new List<IAsyncDisposable>();
+        try
+        {
+            await accessGate.WaitForIdleAsync(profileId, cancellationToken);
+            var removedSessions = attemptSessions.RemoveProfile(profileId);
+            var persistedAttemptIds = await db.TypingAttempts
+                .Where(attempt => attempt.UserProfileId == profileId &&
+                    (attempt.Phase == AttemptPhase.Prepared || attempt.Phase == AttemptPhase.Started))
+                .Select(attempt => attempt.Id)
+                .ToListAsync(cancellationToken);
+            var attemptIds = removedSessions
+                .Select(session => session.Id)
+                .Concat(persistedAttemptIds)
+                .Distinct()
+                .Order()
+                .ToArray();
+            foreach (var attemptId in attemptIds)
+            {
+                lifecycleLocks.Add(await attemptSessions.AcquireLifecycleLockAsync(attemptId, cancellationToken));
+            }
+
+            attemptSessions.RemoveProfile(profileId);
+            await AbortActiveAttemptsAsync(profileId, cancellationToken);
+            liveRooms.RemoveProfile(profileId);
+            var drain = await liveRoomCompletions.DrainProfileAsync(profileId, cancellationToken);
+            EnsureDrainSucceeded(drain);
+            await operation();
+            if (markDeleted)
+            {
+                accessGate.MarkDeleted(profileId);
+            }
+        }
+        finally
+        {
+            try
+            {
+                for (var index = lifecycleLocks.Count - 1; index >= 0; index--)
+                {
+                    await lifecycleLocks[index].DisposeAsync();
+                }
+            }
+            finally
+            {
+                accessGate.CompleteOperation(profileId);
+            }
+        }
+    }
+
+    private void BeginExclusiveOperation(Guid profileId)
+    {
+        if (accessGate.TryBeginOperation(profileId))
+        {
+            return;
+        }
+
+        throw accessGate.GetState(profileId) == ProfileAccessState.Deleted
+            ? new ProfileOperationException("profile_deleted", "Dieses Profil wurde bereits gelöscht.")
+            : new ProfileOperationException("profile_operation_in_progress", "Für dieses Profil läuft bereits eine Datenschutzoperation.");
+    }
+
+    private static void EnsureDrainSucceeded(CompletionDrainResult drain)
+    {
+        switch (drain.Status)
+        {
+            case CompletionDrainStatus.Success:
+                return;
+            case CompletionDrainStatus.Timeout:
+                throw new ProfileOperationException(
+                    "profile_completion_drain_timeout",
+                    "Offene Arena-Ergebnisse konnten nicht rechtzeitig abgeschlossen werden. Bitte versuche es erneut.");
+            default:
+                throw new ProfileOperationException(
+                    "profile_completion_drain_failed",
+                    "Mindestens ein Arena-Ergebnis konnte nicht sicher gespeichert werden. Bitte versuche es später erneut.");
+        }
+    }
+
+    private async Task AbortActiveAttemptsAsync(Guid profileId, CancellationToken cancellationToken)
+    {
+        await db.TypingAttempts
+            .Where(attempt => attempt.UserProfileId == profileId &&
+                (attempt.Phase == AttemptPhase.Prepared || attempt.Phase == AttemptPhase.Started))
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(attempt => attempt.Phase, AttemptPhase.Aborted),
+                cancellationToken);
+    }
+
+    private static async Task RollbackAsync(IDbContextTransaction transaction)
+    {
+        try
+        {
+            await transaction.RollbackAsync(CancellationToken.None);
+        }
+        catch
+        {
+        }
     }
 
     private async Task DeleteDerivedStatisticsAsync(Guid profileId, CancellationToken cancellationToken)

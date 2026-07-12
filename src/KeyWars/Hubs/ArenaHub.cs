@@ -11,7 +11,8 @@ public sealed class ArenaHub(
     LiveRoomManager rooms,
     LivePresenceTracker presence,
     LiveProgressBroadcaster progress,
-    LiveReactionService reactions) : Hub
+    LiveReactionService reactions,
+    ProfileAccessGate accessGate) : Hub
 {
     public async Task<LiveRoomSnapshot?> JoinRoom(Guid roomId)
     {
@@ -147,20 +148,32 @@ public sealed class ArenaHub(
 
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
-        var leave = presence.RemoveConnection(Context.ConnectionId);
-        if (leave is not null && leave.RoomLostLastConnection)
+        IDisposable? accessLease = null;
+        var profileIdValue = Context.User?.FindFirst(KeyWarsClaims.ProfileId)?.Value;
+        if (Guid.TryParse(profileIdValue, out var profileId) && !accessGate.TryAcquire(profileId, out accessLease))
         {
-            try
-            {
-                var snapshot = rooms.Disconnect(leave.RoomId, leave.ProfileId);
-                await Clients.Group(leave.RoomId.ToString("N")).SendAsync("roomChanged", snapshot);
-            }
-            catch (InvalidOperationException ex) when (IsRoomNotFound(ex))
-            {
-            }
+            presence.RemoveConnection(Context.ConnectionId);
+            await base.OnDisconnectedAsync(exception);
+            return;
         }
 
-        await base.OnDisconnectedAsync(exception);
+        using (accessLease)
+        {
+            var leave = presence.RemoveConnection(Context.ConnectionId);
+            if (leave is not null && leave.RoomLostLastConnection)
+            {
+                try
+                {
+                    var snapshot = rooms.Disconnect(leave.RoomId, leave.ProfileId);
+                    await Clients.Group(leave.RoomId.ToString("N")).SendAsync("roomChanged", snapshot);
+                }
+                catch (InvalidOperationException ex) when (IsRoomNotFound(ex))
+                {
+                }
+            }
+
+            await base.OnDisconnectedAsync(exception);
+        }
     }
 
     private async Task ApplyRoomSwitchAsync(Guid profileId, LivePresenceSwitch roomSwitch)

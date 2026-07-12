@@ -14,9 +14,69 @@ public sealed class DatabaseInitializer(
         var db = scope.ServiceProvider.GetRequiredService<KeyWarsDbContext>();
         await BaselineExistingEnsureCreatedDatabaseAsync(db, cancellationToken);
         await db.Database.MigrateAsync(cancellationToken);
+        await AbortOrphanedAttemptsAsync(db, cancellationToken);
         await db.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;", cancellationToken);
         await SeedStandardTextsAsync(db, cancellationToken);
         logger.LogInformation("KeyWars-Datenbank ist bereit ({Environment}).", environment.EnvironmentName);
+    }
+
+    private async Task AbortOrphanedAttemptsAsync(KeyWarsDbContext db, CancellationToken cancellationToken)
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var orphanedAttempts = await db.TypingAttempts
+            .Where(attempt =>
+                attempt.FinishedAt == null &&
+                (attempt.Phase == AttemptPhase.Prepared || attempt.Phase == AttemptPhase.Started))
+            .ToListAsync(cancellationToken);
+        var recoverableBindings = await db.ChallengeAttemptBindings
+            .Where(binding =>
+                !binding.Consumed &&
+                db.TypingAttempts.Any(attempt =>
+                    attempt.Id == binding.TypingAttemptId &&
+                    attempt.FinishedAt == null &&
+                    (attempt.Phase == AttemptPhase.Prepared ||
+                     attempt.Phase == AttemptPhase.Started ||
+                     attempt.Phase == AttemptPhase.Aborted)))
+            .ToListAsync(cancellationToken);
+
+        foreach (var attempt in orphanedAttempts)
+        {
+            attempt.Phase = AttemptPhase.Aborted;
+        }
+
+        if (recoverableBindings.Count > 0)
+        {
+            var challengeIds = recoverableBindings.Select(binding => binding.ChallengeId).Distinct().ToArray();
+            var profileIds = recoverableBindings.Select(binding => binding.UserProfileId).Distinct().ToArray();
+            var bindingParticipants = recoverableBindings
+                .Select(binding => (binding.ChallengeId, binding.UserProfileId))
+                .ToHashSet();
+            var participants = await db.ChallengeParticipants
+                .Where(participant =>
+                    challengeIds.Contains(participant.ChallengeId) &&
+                    profileIds.Contains(participant.UserProfileId))
+                .ToListAsync(cancellationToken);
+            foreach (var participant in participants.Where(participant =>
+                         participant.Status == ParticipantStatus.Running &&
+                         bindingParticipants.Contains((participant.ChallengeId, participant.UserProfileId))))
+            {
+                participant.Status = ParticipantStatus.Joined;
+            }
+
+            db.ChallengeAttemptBindings.RemoveRange(recoverableBindings);
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        if (orphanedAttempts.Count > 0)
+        {
+            logger.LogInformation("{AttemptCount} verwaiste Tippversuche wurden beim Start neutral abgebrochen.", orphanedAttempts.Count);
+        }
+
+        if (recoverableBindings.Count > 0)
+        {
+            logger.LogInformation("{BindingCount} abgebrochene Challenge-Versuchsbindungen wurden für einen Neustart freigegeben.", recoverableBindings.Count);
+        }
     }
 
     private async Task BaselineExistingEnsureCreatedDatabaseAsync(KeyWarsDbContext db, CancellationToken cancellationToken)

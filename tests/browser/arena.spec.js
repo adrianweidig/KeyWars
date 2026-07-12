@@ -9,6 +9,17 @@ async function login(page, username) {
   await expect(page.locator(".sidebar-profile")).toContainText(displayName(username));
 }
 
+async function hideProfileFromLeaderboards(page) {
+  await page.goto("/profil/einstellungen");
+  const leaderboardVisibility = page.getByLabel("In Ranglisten sichtbar");
+  if (await leaderboardVisibility.isChecked()) {
+    await leaderboardVisibility.uncheck();
+    await page.getByRole("button", { name: "Speichern" }).click();
+  }
+
+  await expect(leaderboardVisibility).not.toBeChecked();
+}
+
 function displayName(username) {
   return username
     .replace(/[._]/g, " ")
@@ -49,6 +60,44 @@ async function expectNoHorizontalOverflow(page) {
   });
 
   expect(overflow.documentWidth, `Overflow auf ${page.url()} durch: ${overflow.offenders.join(", ")}`).toBeLessThanOrEqual(overflow.viewportWidth + 1);
+}
+
+async function readTypingScrollState(targetLocator) {
+  return targetLocator.evaluate((target) => {
+    const current = target.querySelector(".current");
+    const targetBounds = target.getBoundingClientRect();
+    const currentBounds = current?.getBoundingClientRect();
+    return {
+      hasCurrent: current instanceof HTMLElement,
+      scrollTop: Math.round(target.scrollTop),
+      scrollHeight: Math.round(target.scrollHeight),
+      clientHeight: Math.round(target.clientHeight),
+      currentTop: Math.round(currentBounds?.top ?? -1),
+      currentBottom: Math.round(currentBounds?.bottom ?? -1),
+      targetTop: Math.round(targetBounds.top),
+      targetBottom: Math.round(targetBounds.bottom)
+    };
+  });
+}
+
+async function expectTypingTargetFollowsCurrent(targetLocator, label = "Zieltext") {
+  await expect.poll(async () => {
+    const state = await readTypingScrollState(targetLocator);
+    return state.hasCurrent &&
+      state.scrollHeight > state.clientHeight &&
+      state.scrollTop > 0 &&
+      state.currentTop >= state.targetTop - 1 &&
+      state.currentBottom <= state.targetBottom + 1;
+  }, { message: `${label} folgt dem aktuellen Zeichen.` }).toBe(true);
+
+  const scrollState = await readTypingScrollState(targetLocator);
+  expect(scrollState.hasCurrent, `${label}: aktuelles Zielzeichen fehlt.`).toBe(true);
+
+  expect(scrollState.scrollHeight, `${label} ist nicht scrollbar.`).toBeGreaterThan(scrollState.clientHeight);
+  expect(scrollState.scrollTop, `${label} blieb trotz aktueller Position am Ende oben stehen.`).toBeGreaterThan(0);
+  expect(scrollState.currentTop, `${label}: aktuelles Zeichen liegt oberhalb des sichtbaren Bereichs.`).toBeGreaterThanOrEqual(scrollState.targetTop - 1);
+  expect(scrollState.currentBottom, `${label}: aktuelles Zeichen liegt unterhalb des sichtbaren Bereichs.`).toBeLessThanOrEqual(scrollState.targetBottom + 1);
+  return scrollState;
 }
 
 async function expectOfflineRuntimeAssets(page) {
@@ -230,26 +279,96 @@ test("Dashboard und Einstellungen rendern im echten Browser", async ({ page }) =
   await expect(page.locator("html")).toHaveAttribute("lang", "de");
 });
 
-test("Designmodus-Button toggelt sichtbaren Shell-Zustand", async ({ page }) => {
+test("Theme-Schalter toggelt Light und Dark Mode dauerhaft", async ({ page }) => {
   await login(page, "browser.design");
 
-  const designButton = page.locator(".desktop-topbar [data-design-mode-toggle]");
-  await expect(designButton).toBeVisible();
-  await expect(designButton).toHaveAttribute("aria-pressed", "false");
-  await expect(page.locator("body")).not.toHaveClass(/app-design-mode/);
+  const html = page.locator("html");
+  const themeButton = page.locator(".desktop-topbar [data-theme-toggle]");
+  await expect(themeButton).toBeVisible();
+  await expect(html).toHaveAttribute("data-theme", "dark");
+  await expect(themeButton).toHaveAttribute("aria-pressed", "false");
+  await expect(themeButton).toHaveAttribute("title", "Helles Design aktivieren");
+  await expect(themeButton.locator("[data-theme-icon='light']")).toBeVisible();
+  await expect(themeButton.locator("[data-theme-icon='dark']")).toBeHidden();
+  await expect(page.locator("body")).toHaveCSS("color", "rgb(240, 246, 255)");
 
-  await designButton.click();
-  await expect(designButton).toHaveAttribute("aria-pressed", "true");
-  await expect(page.locator("body")).toHaveClass(/app-design-mode/);
-  await expect(designButton).toHaveCSS("color", "rgb(4, 16, 25)");
+  await themeButton.click();
+  await expect(html).toHaveAttribute("data-theme", "light");
+  await expect(themeButton).toHaveAttribute("aria-pressed", "true");
+  await expect(themeButton).toHaveAttribute("title", "Dunkles Design aktivieren");
+  await expect(themeButton.locator("[data-theme-icon='light']")).toBeHidden();
+  await expect(themeButton.locator("[data-theme-icon='dark']")).toBeVisible();
+  await expect(page.locator("body")).toHaveCSS("color", "rgb(15, 23, 42)");
+
+  const lightTheme = await page.evaluate(() => ({
+    colorScheme: document.documentElement.style.colorScheme,
+    cockpitBackground: getComputedStyle(document.querySelector(".status-cockpit")).backgroundImage,
+    storedTheme: window.localStorage.getItem("keywars.theme")
+  }));
+  expect(lightTheme).toEqual({
+    colorScheme: "light",
+    cockpitBackground: expect.stringContaining("rgba(255, 255, 255"),
+    storedTheme: "light"
+  });
 
   await page.reload();
-  await expect(page.locator("body")).toHaveClass(/app-design-mode/);
-  await expect(page.locator(".desktop-topbar [data-design-mode-toggle]")).toHaveAttribute("aria-pressed", "true");
+  await expect(html).toHaveAttribute("data-theme", "light");
+  await expect(page.locator(".desktop-topbar [data-theme-toggle]")).toHaveAttribute("aria-pressed", "true");
 
-  await page.locator(".desktop-topbar [data-design-mode-toggle]").click();
-  await expect(page.locator("body")).not.toHaveClass(/app-design-mode/);
-  await expect(page.locator(".desktop-topbar [data-design-mode-toggle]")).toHaveAttribute("aria-pressed", "false");
+  await page.locator(".desktop-topbar [data-theme-toggle]").click();
+  await expect(html).toHaveAttribute("data-theme", "dark");
+  await expect(page.locator(".desktop-topbar [data-theme-toggle]")).toHaveAttribute("aria-pressed", "false");
+  await expect(page.locator("body")).toHaveCSS("color", "rgb(240, 246, 255)");
+  await expect.poll(() => page.evaluate(() => window.localStorage.getItem("keywars.theme"))).toBe("dark");
+  await page.emulateMedia({ colorScheme: "light" });
+  await expect(html).toHaveAttribute("data-theme", "dark");
+
+  await page.evaluate(() => window.localStorage.removeItem("keywars.theme"));
+  await page.reload();
+  await expect(html).toHaveAttribute("data-theme", "light");
+  await page.emulateMedia({ colorScheme: "dark" });
+  await expect(html).toHaveAttribute("data-theme", "dark");
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  const mobileThemeButton = page.locator(".mobile-topbar [data-theme-toggle]");
+  await expect(mobileThemeButton).toBeVisible();
+  await expect(mobileThemeButton).toHaveAttribute("aria-pressed", "false");
+  await mobileThemeButton.click();
+  await expect(html).toHaveAttribute("data-theme", "light");
+  await expect(mobileThemeButton).toHaveAttribute("aria-pressed", "true");
+});
+
+test("Theme fällt bei ungültigem oder blockiertem Storage deterministisch zurück", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.goto("/anmelden");
+  await page.evaluate(() => window.localStorage.setItem("keywars.theme", "unbekannt"));
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+
+  await page.addInitScript(() => {
+    Object.defineProperty(Storage.prototype, "getItem", {
+      configurable: true,
+      value() {
+        throw new DOMException("Storage blockiert", "SecurityError");
+      }
+    });
+    Object.defineProperty(Storage.prototype, "setItem", {
+      configurable: true,
+      value() {
+        throw new DOMException("Storage blockiert", "SecurityError");
+      }
+    });
+  });
+
+  await login(page, "browser.theme.storage");
+  const html = page.locator("html");
+  const themeButton = page.locator(".desktop-topbar [data-theme-toggle]");
+  await expect(html).toHaveAttribute("data-theme", "light");
+  await themeButton.click();
+  await expect(html).toHaveAttribute("data-theme", "dark");
+  await page.reload();
+  await expect(html).toHaveAttribute("data-theme", "light");
 });
 
 test("Sidebar-Navigation hält lange Labels im aktiven Button", async ({ page }) => {
@@ -431,6 +550,38 @@ test("Vorbereitete Sofortrunden zeigen keinen stehenden Countdown oder tote Wert
   });
   expect(playPrepared.timerText).not.toMatch(/\d{2}:\d{2}\.\d/u);
   expect(playPrepared.timerValueVisible).toBe(false);
+  await expectNoHorizontalOverflow(page);
+});
+
+test("Zieltext scrollt beim Tippen bis zum aktuellen Zeichen mit", async ({ page }) => {
+  await login(page, "browser.typing.scroll");
+  await page.goto("/spielen");
+  const input = page.locator("[data-input]");
+  await expect(input).toBeEnabled({ timeout: 15_000 });
+  const targetText = ((await page.locator("[data-target]").textContent()) || "").trim();
+  const graphemes = Array.from(targetText);
+  expect(graphemes.length).toBeGreaterThan(100);
+
+  await input.fill(firstStableGraphemes(targetText, 3));
+  await input.focus();
+  const before = await input.evaluate((element) => ({
+    documentScrollY: Math.round(window.scrollY),
+    selectionStart: element.selectionStart,
+    selectionEnd: element.selectionEnd
+  }));
+  await input.fill(firstStableGraphemes(targetText, graphemes.length - 8));
+  await expectTypingTargetFollowsCurrent(page.locator("[data-target]"));
+  const after = await input.evaluate((element) => ({
+    documentScrollY: Math.round(window.scrollY),
+    focused: document.activeElement === element,
+    selectionStart: element.selectionStart,
+    selectionEnd: element.selectionEnd,
+    valueLength: element.value.length
+  }));
+  expect(after.focused).toBe(true);
+  expect(after.documentScrollY).toBe(before.documentScrollY);
+  expect(after.selectionStart).toBe(after.valueLength);
+  expect(after.selectionEnd).toBe(after.valueLength);
   await expectNoHorizontalOverflow(page);
 });
 
@@ -730,8 +881,26 @@ test("Wettbewerbsseite bleibt responsiv und respektiert Ranglisten-Sichtbarkeit"
   await expect(page.getByText("Du bist aktuell nicht öffentlich in Ranglisten sichtbar.")).toBeVisible();
 });
 
-test("Tippabschluss zeigt Motivation ohne bewegte Pflichtanimation", async ({ page }, testInfo) => {
+test("Tippabschluss wiederholt eine verlorene Finish-Antwort kanonisch", async ({ page }, testInfo) => {
   await login(page, `browser.motivation.${testInfo.workerIndex}`);
+  await hideProfileFromLeaderboards(page);
+  let finishRequests = 0;
+  const completions = [];
+  await page.route("**/api/spielen/abschliessen", async (route) => {
+    finishRequests += 1;
+    const response = await route.fetch();
+    completions.push({
+      status: response.status(),
+      body: await response.json()
+    });
+    if (finishRequests === 1) {
+      await route.abort("failed");
+      return;
+    }
+
+    await route.fulfill({ response });
+  });
+
   await page.goto("/spielen");
   const input = page.locator("[data-input]");
   await expect(input).toBeEnabled({ timeout: 15_000 });
@@ -746,6 +915,12 @@ test("Tippabschluss zeigt Motivation ohne bewegte Pflichtanimation", async ({ pa
   await expect(page.locator(".xp-reveal")).toBeVisible();
   await expect(page.locator(".motivation-event").first()).toBeVisible();
   await expect(page.locator(".xp-chip").first()).toBeVisible();
+  expect(finishRequests).toBe(2);
+  expect(completions.map((completion) => completion.status)).toEqual([200, 200]);
+  expect(completions[1].body.id).toBe(completions[0].body.id);
+  expect(completions[1].body.wpm).toBe(completions[0].body.wpm);
+  expect(completions[1].body.experiencePoints).toBe(completions[0].body.experiencePoints);
+  expect(completions[1].body.level).toBe(completions[0].body.level);
   const finishedStatus = await page.locator(".play-quickstart .typing-timer").evaluate((timer) =>
     getComputedStyle(timer, "::before").content);
   expect(finishedStatus).toContain("FERTIG");
@@ -868,6 +1043,10 @@ test("Arena läuft mit zwei getrennten Browserkontexten über SignalR", async ({
 
     await login(host, hostName);
     await login(guest, guestName);
+    await Promise.all([
+      hideProfileFromLeaderboards(host),
+      hideProfileFromLeaderboards(guest)
+    ]);
 
     await host.goto("/arena/neu");
     await host.getByLabel("Titel").fill(`Browser-Arena ${suffix}`);
@@ -909,14 +1088,29 @@ test("Arena läuft mit zwei getrennten Browserkontexten über SignalR", async ({
 
     const hostTarget = (await host.locator("[data-arena-target]").textContent()).trim();
     const guestTarget = (await guest.locator("[data-arena-target]").textContent()).trim();
+    const hostTargetGraphemes = Array.from(hostTarget);
+    expect(hostTargetGraphemes.length).toBeGreaterThan(100);
     await expect(host.locator("[data-arena-input]")).toBeEnabled();
     await expect(guest.locator("[data-arena-input]")).toBeEnabled();
     await expect.poll(async () => (await host.locator("[data-arena-timer] strong").textContent()).trim()).not.toBe("00:00.0");
 
+    const hostRowOnGuest = guest.locator(".live-typing-row").filter({ hasText: displayName(hostName) });
+    const hostPreviewOnGuest = hostRowOnGuest.locator("[data-live-preview]");
+
     await host.setViewportSize({ width: 390, height: 844 });
+    await guest.setViewportSize({ width: 390, height: 844 });
     await expectResponsiveAppShell(host, 390);
     await expectArenaCoreInFirstView(host);
+
+    const nearFinishInput = firstStableGraphemes(hostTarget, hostTargetGraphemes.length - 8);
+    const nearFinishLength = Array.from(nearFinishInput).length;
+    await host.locator("[data-arena-input]").fill(nearFinishInput);
+    await expectTypingTargetFollowsCurrent(host.locator("[data-arena-target]"), "Arena-Zieltext");
+    await expect(hostPreviewOnGuest.locator(".correct")).toHaveCount(nearFinishLength, { timeout: 12_000 });
+    await expectTypingTargetFollowsCurrent(hostPreviewOnGuest, "Arena-Live-Preview");
+
     await host.setViewportSize({ width: 1366, height: 768 });
+    await guest.setViewportSize({ width: 1366, height: 768 });
 
     const layoutOrder = await host.evaluate(() => {
       const target = document.querySelector("[data-arena-target]")?.getBoundingClientRect();
@@ -938,8 +1132,6 @@ test("Arena läuft mit zwei getrennten Browserkontexten über SignalR", async ({
       targetInUpperViewport: true
     });
 
-    const hostRowOnGuest = guest.locator(".live-typing-row").filter({ hasText: displayName(hostName) });
-    const hostPreviewOnGuest = hostRowOnGuest.locator("[data-live-preview]");
     const firstStableInput = firstStableGraphemes(hostTarget, 3);
     await host.locator("[data-arena-input]").fill(firstStableInput);
     await expect(hostPreviewOnGuest.locator(".correct")).toHaveCount(Array.from(firstStableInput).length, { timeout: 12_000 });

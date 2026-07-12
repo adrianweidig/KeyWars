@@ -3,7 +3,7 @@
 @using KeyWars.Services
 @inject CurrentUser CurrentUser
 <!DOCTYPE html>
-<html lang="de">
+<html lang="de" data-theme="dark">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -11,6 +11,7 @@
     <link rel="icon" href="~/img/favicon.svg" type="image/svg+xml" asp-append-version="true" />
     <link rel="apple-touch-icon" href="~/img/apple-touch-icon.png" asp-append-version="true" />
     <link rel="manifest" href="~/img/site.webmanifest" asp-append-version="true" />
+    <script src="~/js/theme-init.js" asp-append-version="true"></script>
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
 </head>
 @{
@@ -36,6 +37,7 @@
             .Where(value => !string.IsNullOrWhiteSpace(value)));
 }
 <body class="@bodyClass">
+    <a class="skip-link" href="#hauptinhalt">Zum Hauptinhalt springen</a>
     <div class="app-shell">
         @if (showAuthenticatedShell)
         {
@@ -45,7 +47,7 @@
                     <span>KeyWars</span>
                 </a>
                 <div class="app-tools">
-                    <button type="button" class="icon-button" data-design-mode-toggle title="Designmodus" aria-label="Designmodus" aria-pressed="false">@UiIcons.Svg("spark")</button>
+                    <button type="button" class="icon-button" data-theme-toggle title="Helles Design aktivieren" aria-label="Helles Design aktivieren" aria-pressed="false"><span data-theme-icon="light">@UiIcons.Svg("sun")</span><span data-theme-icon="dark">@UiIcons.Svg("moon")</span></button>
                     <a class="profile-menu" asp-page="/Profil/Index" title="Mein Profil" data-full-text="Mein Profil">
                         <span>Mein Profil</span>
                         @UiIcons.Svg("chevron-right")
@@ -86,13 +88,16 @@
                 <a class="brand app-brand" asp-page="/Index" aria-label="KeyWars Startseite">
                     <span>KeyWars</span>
                 </a>
-                <button type="button" class="mobile-menu-button" data-mobile-menu-toggle title="Navigation anzeigen" aria-label="Navigation anzeigen">@UiIcons.Svg("menu")</button>
+                <div class="mobile-topbar-actions">
+                    <button type="button" class="mobile-menu-button" data-theme-toggle title="Helles Design aktivieren" aria-label="Helles Design aktivieren" aria-pressed="false"><span data-theme-icon="light">@UiIcons.Svg("sun")</span><span data-theme-icon="dark">@UiIcons.Svg("moon")</span></button>
+                    <button type="button" class="mobile-menu-button" data-mobile-menu-toggle data-mobile-menu-opener title="Navigation anzeigen" aria-label="Navigation anzeigen" aria-controls="mobile-navigation" aria-expanded="false">@UiIcons.Svg("menu")</button>
+                </div>
             </header>
 
-            <div class="mobile-menu-panel" data-mobile-menu>
+            <div id="mobile-navigation" class="mobile-menu-panel" data-mobile-menu aria-hidden="true" inert>
                 <div class="mobile-menu-head">
                     <span>Navigation</span>
-                    <button type="button" class="mobile-menu-button" data-mobile-menu-toggle title="Navigation schließen" aria-label="Navigation schließen">@UiIcons.Svg("close")</button>
+                    <button type="button" class="mobile-menu-button" data-mobile-menu-toggle title="Navigation schließen" aria-label="Navigation schließen" aria-controls="mobile-navigation">@UiIcons.Svg("close")</button>
                 </div>
                 <nav class="sidebar-nav">
                     <a class="@(isStart ? "active" : "")" asp-page="/Index" title="Start" data-full-text="Start">@UiIcons.Svg("home")<span>Start</span></a>
@@ -104,7 +109,7 @@
                     <a class="@(isActive("/Profil") ? "active" : "")" asp-page="/Profil/Index" title="Profil" data-full-text="Profil">@UiIcons.Svg("profile")<span>Profil</span></a>
                 </nav>
             </div>
-            <button type="button" class="mobile-menu-scrim" data-mobile-menu-toggle aria-label="Navigation schließen"></button>
+            <button type="button" class="mobile-menu-scrim" data-mobile-menu-toggle aria-label="Navigation schließen" aria-controls="mobile-navigation"></button>
         }
 
         <div class="app-main">
@@ -118,7 +123,7 @@
                     <div class="xp-value"><strong>@layoutProfile.ExperiencePoints.ToString("N0")</strong> / @xpTotal.ToString("N0") XP</div>
                     <div class="next-rank"><span>Nächster Rang</span><span class="rank-token">@UiIcons.Svg("award", "kw-icon")<strong>@(layoutProfile.Level + 1)</strong></span></div>
                     <div class="app-tools">
-                        <button type="button" class="icon-button" data-design-mode-toggle title="Designmodus" aria-label="Designmodus" aria-pressed="false">@UiIcons.Svg("spark")</button>
+                        <button type="button" class="icon-button" data-theme-toggle title="Helles Design aktivieren" aria-label="Helles Design aktivieren" aria-pressed="false"><span data-theme-icon="light">@UiIcons.Svg("sun")</span><span data-theme-icon="dark">@UiIcons.Svg("moon")</span></button>
                         <a class="profile-menu" asp-page="/Profil/Index" title="Mein Profil" data-full-text="Mein Profil">
                             <span>Mein Profil</span>
                             @UiIcons.Svg("chevron-right")
@@ -130,7 +135,7 @@
                 </header>
             }
 
-            <main class="shell" role="main">
+            <main id="hauptinhalt" class="shell" role="main" tabindex="-1">
                 @RenderBody()
             </main>
         </div>

@@ -11,6 +11,7 @@ public sealed class LiveOptions
     public int ReconnectGraceSeconds { get; set; } = 30;
     public int RoomCommandQueueCapacity { get; set; } = 4096;
     public int CompletionQueueCapacity { get; set; } = 4096;
+    public int CompletionDrainTimeoutSeconds { get; set; } = 10;
     public int CompletedRoomRetentionMinutes { get; set; } = 60;
     public int LobbyRoomRetentionMinutes { get; set; } = 720;
 }

@@ -31,7 +31,16 @@ public sealed class LoeschenModel(CurrentUser currentUser, ProfilePrivacyService
             return Page();
         }
 
-        await privacy.DeleteProfileAsync(profile.Id, cancellationToken);
+        try
+        {
+            await privacy.DeleteProfileAsync(profile.Id, cancellationToken);
+        }
+        catch (ProfileOperationException exception)
+        {
+            ModelState.AddModelError(string.Empty, exception.Message);
+            return Page();
+        }
+
         await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
         return LocalRedirect("/anmelden");
     }

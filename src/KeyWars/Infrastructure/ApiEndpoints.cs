@@ -16,21 +16,42 @@ public static class ApiEndpoints
             .RequireRateLimiting("keywars-api");
         api.AddEndpointFilter(async (context, next) =>
         {
-            var request = context.HttpContext.Request;
-            if (HttpMethods.IsPost(request.Method) || HttpMethods.IsPut(request.Method) || HttpMethods.IsDelete(request.Method))
+            try
             {
-                if (!IsJsonRequest(request))
+                var request = context.HttpContext.Request;
+                if (HttpMethods.IsPost(request.Method) || HttpMethods.IsPut(request.Method) || HttpMethods.IsDelete(request.Method))
                 {
-                    return Results.StatusCode(StatusCodes.Status415UnsupportedMediaType);
+                    if (!IsJsonRequest(request))
+                    {
+                        return Results.StatusCode(StatusCodes.Status415UnsupportedMediaType);
+                    }
+
+                    if (!IsSameOrigin(request))
+                    {
+                        return Results.Forbid();
+                    }
                 }
 
-                if (!IsSameOrigin(request))
-                {
-                    return Results.Forbid();
-                }
+                return await next(context);
             }
-
-            return await next(context);
+            catch (AttemptLifecycleException exception)
+            {
+                return AttemptProblem(exception);
+            }
+            catch (ChallengeLifecycleException exception)
+            {
+                return Results.Problem(
+                    title: exception.Message,
+                    statusCode: exception.StatusCode,
+                    extensions: new Dictionary<string, object?> { ["code"] = exception.Code });
+            }
+            catch (ProfileOperationException exception)
+            {
+                return Results.Problem(
+                    title: exception.Message,
+                    statusCode: StatusCodes.Status409Conflict,
+                    extensions: new Dictionary<string, object?> { ["code"] = exception.Code });
+            }
         });
 
         api.MapGet("/personen/suche", async (string? q, CurrentUser currentUser, HttpContext httpContext, TextLibraryService texts, CancellationToken cancellationToken) =>
@@ -113,6 +134,28 @@ public static class ApiEndpoints
                 .ToList();
             return Results.Ok(new { profile.DisplayName, profile.Level, profile.ExperiencePoints, profile.ArenaRating, LastAttempts = last });
         });
+
+        api.MapGet("/arena/{roomId:guid}/speicherstatus", async (Guid roomId, CurrentUser currentUser, HttpContext httpContext, KeyWarsDbContext db, LiveRoomCompletionQueue completions, CancellationToken cancellationToken) =>
+        {
+            await currentUser.RequireProfileAsync(httpContext.User, cancellationToken);
+            var persisted = await db.LiveRoomSummaries.AsNoTracking().AnyAsync(room => room.Id == roomId, cancellationToken);
+            var state = persisted ? CompletionState.Persisted : completions.GetStatus(roomId).State;
+            return Results.Ok(new { State = state.ToString() });
+        });
+    }
+
+    private static IResult AttemptProblem(AttemptLifecycleException exception)
+    {
+        var extensions = new Dictionary<string, object?> { ["code"] = exception.Code };
+        if (exception.RetryAfterMs is { } retryAfterMs)
+        {
+            extensions["retryAfterMs"] = retryAfterMs;
+        }
+
+        return Results.Problem(
+            title: exception.Message,
+            statusCode: exception.StatusCode,
+            extensions: extensions);
     }
 
     private static object BuildAttemptResult(TypingAttempt attempt, UserProfile profile, MotivationOutcome motivation)

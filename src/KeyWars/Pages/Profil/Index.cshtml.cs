@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.Mvc.RazorPages;
 
 namespace KeyWars.Pages.Profil;
 
-public sealed class IndexModel(CurrentUser currentUser, ProfileInsightsService insights, ProfilePrivacyService privacy) : PageModel
+public sealed class IndexModel(CurrentUser currentUser, ProfileInsightsService insights) : PageModel
 {
     public UserProfile Profile { get; private set; } = new();
     public ProfileInsights Insights { get; private set; } = EmptyInsights;
@@ -21,12 +21,7 @@ public sealed class IndexModel(CurrentUser currentUser, ProfileInsightsService i
         Insights = await insights.GetAsync(Profile, Seite, 10, cancellationToken);
     }
 
-    public async Task<IActionResult> OnPostDeleteAsync(CancellationToken cancellationToken)
-    {
-        var profile = await currentUser.RequireProfileAsync(User, cancellationToken);
-        await privacy.DeleteProfileAsync(profile.Id, cancellationToken);
-        return RedirectToPage("/Abmelden");
-    }
+    public IActionResult OnPostDelete() => RedirectToPage("/Profil/Loeschen");
 
     private static readonly ProfileInsights EmptyInsights = new(
         "KW",

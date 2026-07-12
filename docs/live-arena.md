@@ -28,6 +28,21 @@ Matchanzahl und Saisonpunkte atomar. Transiente SQLite-Fehler werden begrenzt
 mit Backoff wiederholt; dauerhaft fehlgeschlagene Jobs bleiben in der
 Queue-Diagnose sichtbar.
 
+Der Browser trennt das vorläufige Spielergebnis vom Commitstatus:
+
+- `Pending`: Podium/WPM sind vorläufig; Rating und XP sind noch unbestätigt;
+- `Persisted`: Summary, Rating und Rewards sind committed;
+- `Failed`: Speicherung ist fehlgeschlagen, Rating und XP wurden nicht vergeben;
+- `AbortedUnconfirmed`: nach Prozessverlust existiert weder eine bestätigte
+  Summary noch ein wiederaufnehmbarer Raum.
+
+Der authentifizierte Endpunkt `GET /api/arena/{roomId}/speicherstatus` prüft
+zuerst die persistierte Summary und danach den begrenzten Queue-Status. Er gibt
+nur den Zustand aus, keine Teilnehmenden-, Raumcode- oder Textdaten. Die
+anonyme Health-Diagnose `/health/arena-persistence` enthält ausschließlich
+niedrig-kardinale Aggregate für Pending/Failed, Retries, Persistenzdauer und
+Abbrüche.
+
 Beim Anwendungs-Shutdown werden laufende Countdown- und Rennräume als
 `AbortedByServer` abgeschlossen. Diese Abbrüche werden nachvollziehbar
 persistiert, verändern aber kein Rating. Lobby-Räume werden weiterhin nur als
@@ -79,5 +94,6 @@ Grenzen:
 - `KEYWARS__LIVE__COUNTDOWN_SECONDS`
 - `KEYWARS__LIVE__RECONNECT_GRACE_SECONDS`
 - `KEYWARS__LIVE__COMPLETION_QUEUE_CAPACITY`
+- `KEYWARS__LIVE__COMPLETION_DRAIN_TIMEOUT_SECONDS`
 
 Bei erreichter Kapazität werden neue Räume oder Beitritte kontrolliert abgelehnt.

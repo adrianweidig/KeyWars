@@ -16,6 +16,8 @@
     var displayMode = DisplayMode(rankedParticipants.Count);
     var visibleParticipants = VisibleParticipants(rankedParticipants, Model.CurrentProfileId, displayMode).ToList();
     var hiddenParticipants = Math.Max(0, rankedParticipants.Count - visibleParticipants.Count);
+    var initialPersistenceState = InitialPersistenceState(Model.Snapshot);
+    var showPersistenceState = initialPersistenceState != "Inactive";
 }
 
 <section class="page-header arena-page-header">
@@ -33,22 +35,22 @@
         @if (inLobby)
         {
             <form method="post" asp-page-handler="Ready" data-arena-ready-form data-ready="@((currentParticipant?.Ready == true).ToString().ToLowerInvariant())" class="lobby-only-action">
-                <button type="submit" class="secondary">@readyButtonText</button>
+                <button type="submit" class="secondary" disabled>@readyButtonText</button>
             </form>
         }
         @if (isHost && inLobby)
         {
             <form method="post" asp-page-handler="Start" data-arena-start-form class="lobby-only-action">
-                <button type="submit">Starten</button>
+                <button type="submit" disabled>Starten</button>
             </form>
         }
-        <button type="button" class="secondary arena-leave-button" data-arena-leave>Raum verlassen</button>
+        <button type="button" class="secondary arena-leave-button" data-arena-leave disabled>Raum verlassen</button>
     </div>
 </section>
 
 <div asp-validation-summary="ModelOnly"></div>
 
-<section class="arena-layout" data-arena-room data-room-id="@Model.Snapshot.RoomId" data-current-profile-id="@Model.CurrentProfileId" data-arena-display-mode="@displayMode" data-max-participants="@Model.Snapshot.MaxParticipants" data-show-live-wpm="@Bool(Model.ShowLiveWpm)" data-show-live-rank-changes="@Bool(Model.ShowLiveRankChanges)" data-sound-enabled="@Bool(Model.SoundEnabled)" data-sound-volume="@Model.SoundVolumePercent" data-reactions-enabled="@Bool(Model.ReactionsEnabled)" data-reduced-motion="@Bool(Model.ReducedMotion)">
+<section class="arena-layout" data-arena-room data-room-id="@Model.Snapshot.RoomId" data-current-profile-id="@Model.CurrentProfileId" data-arena-display-mode="@displayMode" data-max-participants="@Model.Snapshot.MaxParticipants" data-show-live-wpm="@Bool(Model.ShowLiveWpm)" data-show-live-rank-changes="@Bool(Model.ShowLiveRankChanges)" data-sound-enabled="@Bool(Model.SoundEnabled)" data-sound-volume="@Model.SoundVolumePercent" data-reactions-enabled="@Bool(Model.ReactionsEnabled)" data-reduced-motion="@Bool(Model.ReducedMotion)" data-connection-state="disconnected" data-persistence-state="@initialPersistenceState">
     <div class="card arena-workbench typing-session-card">
         <div class="arena-status-bar">
             <div>
@@ -66,7 +68,8 @@
             <li class="@(Model.Snapshot.Phase == LiveRoomPhase.Running ? "active" : "")">Rennen</li>
             <li class="@(Model.Snapshot.Finished ? "active" : "")">Ergebnis</li>
         </ol>
-        <div class="typing-target" data-arena-target>
+        <p class="arena-persistence-status @(showPersistenceState ? "" : "is-hidden")" data-arena-persistence-status role="status" aria-live="polite" aria-atomic="true">@InitialPersistenceStatus(Model.Snapshot)</p>
+        <div class="typing-target" data-arena-target tabindex="0" role="region" aria-label="Zieltext des Arena-Rennens">
             @if (string.IsNullOrEmpty(Model.Snapshot.TargetText))
             {
                 <span class="muted">Der Text wird zum Start freigegeben.</span>
@@ -79,9 +82,9 @@
         <div class="form-grid form-grid-spaced arena-input-grid">
             <label>
                 Eingabe
-                <textarea asp-for="Input" class="typing-input" data-arena-input autocapitalize="off" autocomplete="off" spellcheck="false"></textarea>
+                <textarea asp-for="Input" class="typing-input" data-arena-input autocapitalize="off" autocomplete="off" spellcheck="false" disabled></textarea>
             </label>
-            <button type="button" class="secondary arena-running-action @(isRunning ? "" : "is-hidden")" data-arena-dnf>Runde aufgeben</button>
+            <button type="button" class="secondary arena-running-action @(isRunning ? "" : "is-hidden")" data-arena-dnf disabled>Runde aufgeben</button>
         </div>
         <section class="live-typing-board @displayMode" data-arena-live-board aria-label="Live-Texte der Teilnehmenden">
             <div class="live-typing-board-header">
@@ -108,7 +111,7 @@
                             <span class="badge">Host</span>
                         }
                     </div>
-                    <div class="live-typing-preview" data-live-preview aria-label="@participant.DisplayName: Live-Textfortschritt"></div>
+                    <div class="live-typing-preview" data-live-preview tabindex="0" role="region" aria-label="@participant.DisplayName: Live-Textfortschritt"></div>
                 </article>
             }
         </section>
@@ -124,11 +127,11 @@
         @if (Model.ReactionsEnabled)
         {
             <div class="reaction-panel" data-arena-reactions aria-label="Positive Arena-Reaktionen senden">
-                <button type="button" class="secondary energy-chip" data-reaction-key="stark" aria-label="Reaktion Stark senden">Stark</button>
-                <button type="button" class="secondary energy-chip" data-reaction-key="knapp" aria-label="Reaktion Knapp senden">Knapp</button>
-                <button type="button" class="secondary energy-chip" data-reaction-key="sauber" aria-label="Reaktion Sauber senden">Sauber</button>
-                <button type="button" class="secondary energy-chip" data-reaction-key="revanche" aria-label="Reaktion Revanche senden">Revanche</button>
-                <button type="button" class="secondary energy-chip" data-reaction-key="respekt" aria-label="Reaktion Respekt senden">Respekt</button>
+                <button type="button" class="secondary energy-chip" data-reaction-key="stark" aria-label="Reaktion Stark senden" disabled>Stark</button>
+                <button type="button" class="secondary energy-chip" data-reaction-key="knapp" aria-label="Reaktion Knapp senden" disabled>Knapp</button>
+                <button type="button" class="secondary energy-chip" data-reaction-key="sauber" aria-label="Reaktion Sauber senden" disabled>Sauber</button>
+                <button type="button" class="secondary energy-chip" data-reaction-key="revanche" aria-label="Reaktion Revanche senden" disabled>Revanche</button>
+                <button type="button" class="secondary energy-chip" data-reaction-key="respekt" aria-label="Reaktion Respekt senden" disabled>Respekt</button>
             </div>
             <div class="reaction-stream" data-arena-reaction-stream aria-live="polite" aria-atomic="false"></div>
         }
@@ -140,7 +143,7 @@
                 <strong data-arena-mode-label>@DisplayModeLabel(displayMode)</strong>
                 <span data-arena-roster-summary>@RosterSummary(rankedParticipants.Count, visibleParticipants.Count, Model.Snapshot.MaxParticipants)</span>
                 <span data-arena-spectator-summary>Zuschauerrolle vorbereitet</span>
-                <span data-arena-connection-quality>Verbindung: wird aufgebaut</span>
+                <span data-arena-connection-quality role="status" aria-live="polite" aria-atomic="true">Verbindung: wird aufgebaut</span>
             </div>
             <div class="race-track @displayMode" data-arena-track aria-label="Rennstrecke mit bestätigtem Fortschritt">
                 <div class="race-milestones" aria-hidden="true">
@@ -244,6 +247,26 @@
         value is null ? "-" : value.Value.ToString("0.0", System.Globalization.CultureInfo.GetCultureInfo("de-DE"));
 
     private static string Bool(bool value) => value.ToString().ToLowerInvariant();
+
+    private static string InitialPersistenceState(KeyWars.Services.LiveRoomSnapshot snapshot)
+    {
+        if (!snapshot.Finished)
+        {
+            return snapshot.Phase == LiveRoomPhase.Running ? "Running" : "Inactive";
+        }
+
+        return snapshot.PersistenceState?.ToString() ?? "FinishedPending";
+    }
+
+    private static string InitialPersistenceStatus(KeyWars.Services.LiveRoomSnapshot snapshot) => InitialPersistenceState(snapshot) switch
+    {
+        "Running" => "Ergebnisstatus: Rennen läuft.",
+        "Pending" or "FinishedPending" => "Ergebnis vorläufig: Speicherung läuft. Rating und XP werden erst nach Bestätigung angezeigt.",
+        "Persisted" => "Ergebnis gespeichert. Rating und XP sind bestätigt.",
+        "Failed" => "Speicherung fehlgeschlagen. Rating und XP wurden nicht vergeben.",
+        "AbortedUnconfirmed" => "Ergebnis nach Serverabbruch unbestätigt. Rating und XP wurden nicht vergeben.",
+        _ => string.Empty
+    };
 
     private static string InitialTimerValue(KeyWars.Services.LiveRoomSnapshot snapshot) => snapshot.Phase switch
     {

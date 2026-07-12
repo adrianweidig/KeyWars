@@ -29,6 +29,23 @@
   box-sizing: border-box;
 }
 
+.skip-link {
+  position: fixed;
+  z-index: 10000;
+  top: 12px;
+  left: 12px;
+  padding: 10px 14px;
+  border: 2px solid var(--app-cyan);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  transform: translateY(-180%);
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
 [hidden] {
   display: none !important;
 }
@@ -202,6 +219,15 @@ a:hover {
 .icon-button:hover {
   border-color: var(--line-strong);
   background: var(--surface-2);
+}
+
+[data-theme-icon] {
+  display: none;
+}
+
+[data-theme-toggle][data-theme="dark"] [data-theme-icon="light"],
+[data-theme-toggle][data-theme="light"] [data-theme-icon="dark"] {
+  display: inline-grid;
 }
 
 .logout button {
@@ -1713,6 +1739,13 @@ select:focus-visible {
 
 .typing-target span {
   border-radius: 3px;
+}
+
+.typing-target:focus-visible,
+.live-typing-preview:focus-visible,
+.preformatted:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
 }
 
 .typing-target .correct {
@@ -4064,6 +4097,38 @@ button.tertiary {
   margin-top: 2px;
 }
 
+.arena-persistence-status {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+[data-persistence-state="Running"] .arena-persistence-status {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+[data-persistence-state="Pending"] .arena-persistence-status,
+[data-persistence-state="FinishedPending"] .arena-persistence-status {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+[data-persistence-state="Persisted"] .arena-persistence-status {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+[data-persistence-state="Failed"] .arena-persistence-status,
+[data-persistence-state="AbortedUnconfirmed"] .arena-persistence-status {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
 .arena-room-page .typing-timer {
   padding: 7px 10px;
 }
@@ -4419,6 +4484,44 @@ button.tertiary {
   --app-radius: 12px;
 }
 
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f4f8fb;
+  --surface: #ffffff;
+  --surface-2: #edf6f8;
+  --surface-3: #dff1f5;
+  --surface-warm: #fff8e7;
+  --text: #0f172a;
+  --muted: #526173;
+  --line: #c9d8e4;
+  --line-strong: #94b3c8;
+  --accent: #087f92;
+  --accent-strong: #075e70;
+  --accent-2: #6857d7;
+  --warn: #9a6509;
+  --danger: #c8334c;
+  --ok: #087b58;
+  --shadow: 0 18px 42px rgba(15, 23, 42, 0.12);
+  --shadow-soft: 0 12px 28px rgba(15, 23, 42, 0.09);
+  --surface-strong: #ffffff;
+  --surface-action: #f6fbfd;
+  --surface-track: #e7f1f6;
+  --line-soft: rgba(70, 91, 112, 0.2);
+  --line-glow: rgba(8, 127, 146, 0.28);
+  --reward: #aa720d;
+  --app-bg: #eef6f8;
+  --app-panel: rgba(255, 255, 255, 0.92);
+  --app-panel-strong: rgba(255, 255, 255, 0.96);
+  --app-panel-soft: rgba(247, 251, 253, 0.78);
+  --app-border: rgba(63, 93, 117, 0.22);
+  --app-border-strong: rgba(8, 127, 146, 0.42);
+  --app-cyan: #087f92;
+  --app-green: #0f8d62;
+  --app-gold: #a66d08;
+  --app-red: #c73952;
+  --app-muted: #647486;
+}
+
 body.app-authenticated {
   min-height: 100dvh;
   overflow-x: hidden;
@@ -4447,44 +4550,18 @@ body.app-authenticated::before {
     42px 42px;
 }
 
-body.app-authenticated.app-design-mode {
-  --app-panel: rgba(9, 27, 39, 0.94);
-  --app-panel-strong: rgba(12, 35, 50, 0.98);
-  --app-panel-soft: rgba(12, 35, 50, 0.76);
-  --app-border: rgba(45, 226, 238, 0.28);
-  --app-border-strong: rgba(243, 201, 77, 0.52);
-  --app-muted: #bad0df;
+:root[data-theme="light"] body.app-authenticated {
   background:
-    radial-gradient(circle at 14% 0%, rgba(45, 226, 238, 0.18), transparent 34rem),
-    radial-gradient(circle at 84% 10%, rgba(243, 201, 77, 0.12), transparent 28rem),
-    radial-gradient(circle at 48% 100%, rgba(97, 238, 143, 0.08), transparent 34rem),
-    linear-gradient(180deg, #081722 0%, var(--app-bg) 48%, #04080d 100%);
+    radial-gradient(circle at 12% 0%, rgba(8, 127, 146, 0.12), transparent 34rem),
+    radial-gradient(circle at 88% 8%, rgba(15, 141, 98, 0.08), transparent 28rem),
+    linear-gradient(180deg, #f8fcfd 0%, var(--app-bg) 52%, #e5f1f5 100%);
 }
 
-body.app-authenticated.app-design-mode::before {
+:root[data-theme="light"] body.app-authenticated::before {
   background-image:
     url("/img/keywars-circuit.svg"),
-    linear-gradient(rgba(45, 226, 238, 0.09) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(243, 201, 77, 0.055) 1px, transparent 1px);
-}
-
-body.app-design-mode .desktop-topbar,
-body.app-design-mode .desktop-sidebar,
-body.app-design-mode .status-cockpit,
-body.app-design-mode .panel,
-body.app-design-mode .dashboard-page .card,
-body.app-design-mode .play-page .card {
-  border-color: var(--app-border);
-  box-shadow:
-    0 0 0 1px rgba(45, 226, 238, 0.08),
-    0 20px 56px rgba(0, 0, 0, 0.32);
-}
-
-body.app-design-mode [data-design-mode-toggle] {
-  border-color: var(--app-border-strong);
-  background: linear-gradient(135deg, var(--app-gold), var(--app-cyan));
-  color: #041019;
-  box-shadow: 0 0 0 3px rgba(45, 226, 238, 0.14), 0 0 22px rgba(243, 201, 77, 0.18);
+    linear-gradient(rgba(8, 127, 146, 0.09) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(166, 109, 8, 0.055) 1px, transparent 1px);
 }
 
 .app-shell {
@@ -4564,6 +4641,12 @@ body.app-design-mode [data-design-mode-toggle] {
 
 .desktop-topbar .app-tools {
   display: flex;
+}
+
+.mobile-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .desktop-sidebar > .app-brand {
@@ -5967,6 +6050,44 @@ body.app-design-mode [data-design-mode-toggle] {
   white-space: nowrap;
 }
 
+@media (min-width: 768px) {
+  .competition-page .competition-hero-stats > div {
+    grid-template-columns: 30px minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    align-items: center;
+    column-gap: 8px;
+    row-gap: 2px;
+    min-width: 0;
+  }
+
+  .competition-page .competition-hero-stats > div > .competition-stat-icon {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+    margin: 0;
+  }
+
+  .competition-page .competition-hero-stats > div > span:not(.competition-stat-icon),
+  .competition-page .competition-hero-stats > div > strong {
+    grid-column: 2;
+    min-width: 0;
+  }
+
+  .competition-page .competition-board-peek > .competition-stat-icon {
+    grid-row: 1;
+  }
+
+  .competition-page .competition-board-peek ol {
+    grid-column: 1 / -1;
+  }
+
+  .competition-page .competition-board-peek li strong {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
 .arena-entry-primary {
   border-color: rgba(45, 226, 238, 0.38);
   background:
@@ -6413,6 +6534,10 @@ body.app-public.auth-exit-page .shell {
     padding-inline: 16px !important;
   }
 
+  .competition-page .competition-board-peek {
+    display: none;
+  }
+
   body.app-authenticated .shell,
   body.app-authenticated.play-page .shell,
   body.app-authenticated.competition-page .shell,
@@ -6554,10 +6679,6 @@ body.app-public.auth-exit-page .shell {
   .competition-hero-stats {
     display: none;
     grid-template-columns: 1fr;
-  }
-
-  .competition-hero-stats:has(.competition-board-peek) {
-    display: grid;
   }
 
   .competition-hero-stats > div:not(.competition-board-peek) {
@@ -6990,4 +7111,219 @@ body.app-public.auth-exit-page .shell {
   .challenge-play-page .motivation-events {
     grid-template-columns: 1fr;
   }
+}
+
+:root[data-theme="light"] body {
+  background:
+    linear-gradient(135deg, rgba(8, 127, 146, 0.08), transparent 28rem),
+    linear-gradient(180deg, #fbfdfe 0%, #edf6f8 52%, #e7f1f5 100%);
+}
+
+:root[data-theme="light"] body::before {
+  background-image:
+    linear-gradient(rgba(8, 127, 146, 0.085) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(166, 109, 8, 0.052) 1px, transparent 1px);
+  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.34), transparent 78%);
+}
+
+:root[data-theme="light"] body.app-public.auth-exit-page {
+  background:
+    radial-gradient(circle at 50% 12%, rgba(8, 127, 146, 0.14), transparent 34rem),
+    linear-gradient(180deg, #fbfdfe 0%, #eaf4f7 100%);
+}
+
+:root[data-theme="light"] .desktop-sidebar {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(244, 249, 251, 0.98)),
+    var(--app-bg);
+  box-shadow: 18px 0 46px rgba(15, 23, 42, 0.12);
+}
+
+:root[data-theme="light"] .desktop-topbar,
+:root[data-theme="light"] .mobile-topbar,
+:root[data-theme="light"] .mobile-bottom-nav {
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.12);
+}
+
+:root[data-theme="light"] .mobile-menu-panel {
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 24px 0 56px rgba(15, 23, 42, 0.18);
+}
+
+:root[data-theme="light"] .mobile-menu-scrim {
+  background: rgba(15, 23, 42, 0.28);
+}
+
+:root[data-theme="light"] .mobile-menu-head,
+:root[data-theme="light"] .section-header h1,
+:root[data-theme="light"] .section-header h2,
+:root[data-theme="light"] .status-chip strong,
+:root[data-theme="light"] .round-stats-preview strong,
+:root[data-theme="light"] .dashboard-quick-round .typing-timer strong,
+:root[data-theme="light"] .play-quickstart .typing-timer strong,
+:root[data-theme="light"] .next-rank .rank-token strong,
+:root[data-theme="light"] .mini-podium-player strong,
+:root[data-theme="light"] .play-text-card p,
+:root[data-theme="light"] .competition-hero .lead,
+:root[data-theme="light"] .auth-exit-card p {
+  color: var(--text);
+}
+
+:root[data-theme="light"] .section-header p,
+:root[data-theme="light"] .mobile-bottom-nav a,
+:root[data-theme="light"] .sidebar-profile-arrow,
+:root[data-theme="light"] .round-stats-preview small,
+:root[data-theme="light"] .mini-podium-player small,
+:root[data-theme="light"] .xp-value,
+:root[data-theme="light"] .play-hero-copy .lead {
+  color: var(--muted);
+}
+
+:root[data-theme="light"] .sidebar-nav a {
+  color: #334155;
+}
+
+:root[data-theme="light"] .sidebar-nav a:hover,
+:root[data-theme="light"] .sidebar-nav a.active,
+:root[data-theme="light"] .competition-tabs a:hover,
+:root[data-theme="light"] .competition-tabs a.active {
+  border-color: rgba(8, 127, 146, 0.32);
+  background: linear-gradient(90deg, rgba(8, 127, 146, 0.13), rgba(8, 127, 146, 0.04));
+  color: var(--app-cyan);
+}
+
+:root[data-theme="light"] .brand-mark,
+:root[data-theme="light"] .auth-exit-mark {
+  color: #04313a;
+}
+
+:root[data-theme="light"] .sidebar-profile .user-avatar {
+  background: linear-gradient(135deg, #6857d7, #087f92);
+}
+
+:root[data-theme="light"] .status-cockpit,
+:root[data-theme="light"] .card,
+:root[data-theme="light"] .panel,
+:root[data-theme="light"] .dashboard-page .card,
+:root[data-theme="light"] .play-page .card,
+:root[data-theme="light"] .play-quickstart,
+:root[data-theme="light"] .play-side-panel,
+:root[data-theme="light"] .play-library,
+:root[data-theme="light"] .competition-hero > div:first-child,
+:root[data-theme="light"] .competition-hero-stats,
+:root[data-theme="light"] .competition-controls,
+:root[data-theme="light"] .competition-main,
+:root[data-theme="light"] .competition-card,
+:root[data-theme="light"] .competition-privacy,
+:root[data-theme="light"] .challenge-play-header,
+:root[data-theme="light"] .challenge-play-page .finish-panel,
+:root[data-theme="light"] .challenge-play-page .motivation-panel,
+:root[data-theme="light"] .challenge-play-page .typing-analysis,
+:root[data-theme="light"] .empty-state,
+:root[data-theme="light"] .auth-exit-card {
+  border-color: var(--app-border);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0)),
+    var(--app-panel);
+  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.11);
+}
+
+:root[data-theme="light"] .card::before {
+  border-top-color: rgba(8, 127, 146, 0.08);
+}
+
+:root[data-theme="light"] .page-header:not(.arena-page-header),
+:root[data-theme="light"] .dashboard-hero,
+:root[data-theme="light"] .text-library-header,
+:root[data-theme="light"] .arena-lobby-hero,
+:root[data-theme="light"] .play-hero-copy {
+  border-color: var(--app-border);
+  background:
+    linear-gradient(135deg, rgba(8, 127, 146, 0.11), transparent 42%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.76), rgba(255, 255, 255, 0)),
+    var(--app-panel);
+}
+
+:root[data-theme="light"] .status-chip,
+:root[data-theme="light"] .level-chip,
+:root[data-theme="light"] .sidebar-profile,
+:root[data-theme="light"] .profile-menu,
+:root[data-theme="light"] .mode-select-link,
+:root[data-theme="light"] .competition-tabs a,
+:root[data-theme="light"] .hero-stat-row span,
+:root[data-theme="light"] .competition-chase-line span,
+:root[data-theme="light"] .competition-hero-stats div,
+:root[data-theme="light"] .own-rank,
+:root[data-theme="light"] .target-rank,
+:root[data-theme="light"] .play-hero-stats span,
+:root[data-theme="light"] .play-focus-list a,
+:root[data-theme="light"] .play-mode-link,
+:root[data-theme="light"] .play-text-card,
+:root[data-theme="light"] .podium-card,
+:root[data-theme="light"] .challenge-play-page .finish-score,
+:root[data-theme="light"] .challenge-play-page .result-metrics .metric,
+:root[data-theme="light"] .challenge-play-page .analysis-grid div,
+:root[data-theme="light"] .challenge-play-page .motivation-event,
+:root[data-theme="light"] .leaderboard-row {
+  border-color: var(--app-border);
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--text);
+}
+
+:root[data-theme="light"] .leaderboard-row.is-user {
+  border-color: rgba(8, 127, 146, 0.34);
+  background: linear-gradient(90deg, rgba(8, 127, 146, 0.13), rgba(8, 127, 146, 0.04));
+  color: var(--app-cyan);
+}
+
+:root[data-theme="light"] .app-tools .logout button,
+:root[data-theme="light"] .app-tools .icon-button,
+:root[data-theme="light"] .mobile-menu-button,
+:root[data-theme="light"] .dashboard-target,
+:root[data-theme="light"] .play-target,
+:root[data-theme="light"] .dashboard-input,
+:root[data-theme="light"] .play-input,
+:root[data-theme="light"] .typing-input,
+:root[data-theme="light"] .typing-target,
+:root[data-theme="light"] .typing-session-card.typing-idle .typing-target,
+:root[data-theme="light"] .daily-challenge-card.typing-idle .typing-target {
+  border-color: var(--app-border);
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--text);
+}
+
+:root[data-theme="light"] [data-theme-toggle] {
+  border-color: var(--app-border-strong);
+  background: linear-gradient(135deg, rgba(166, 109, 8, 0.18), rgba(8, 127, 146, 0.14));
+  color: var(--text);
+}
+
+:root[data-theme="light"] .race-lane.current .race-token {
+  background: var(--accent-strong);
+  color: #ffffff;
+}
+
+:root[data-theme="light"] [data-theme-toggle].active {
+  background: linear-gradient(135deg, var(--app-gold), var(--app-cyan));
+  color: #ffffff;
+  box-shadow: 0 0 0 3px rgba(8, 127, 146, 0.12), 0 0 22px rgba(166, 109, 8, 0.18);
+}
+
+:root[data-theme="light"] .xp-track,
+:root[data-theme="light"] .sidebar-xp-progress {
+  background: rgba(8, 127, 146, 0.14);
+}
+
+:root[data-theme="light"] .xp-track::-webkit-progress-bar,
+:root[data-theme="light"] .sidebar-xp-progress::-webkit-progress-bar {
+  background: rgba(8, 127, 146, 0.14);
+}
+
+:root[data-theme="light"] .mobile-bottom-nav a.active {
+  color: var(--app-cyan);
+}
+
+:root[data-theme="light"] .mobile-menu-open .mobile-menu-scrim {
+  opacity: 1;
 }

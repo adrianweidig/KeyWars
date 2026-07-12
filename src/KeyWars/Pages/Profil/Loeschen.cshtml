@@ -15,11 +15,11 @@
     </ul>
     <p>Gib zur Bestätigung deinen Kontonamen <strong>@Model.ConfirmationName</strong> ein.</p>
     <form method="post" class="form-grid">
-        <div asp-validation-summary="ModelOnly"></div>
+        <div asp-validation-summary="ModelOnly" role="alert" aria-live="assertive"></div>
         <label>
             Kontoname
-            <input asp-for="Input.Confirmation" autocomplete="off" />
-            <span asp-validation-for="Input.Confirmation"></span>
+            <input asp-for="Input.Confirmation" autocomplete="off" aria-describedby="delete-confirmation-error" />
+            <span id="delete-confirmation-error" asp-validation-for="Input.Confirmation"></span>
         </label>
         <button type="submit" class="warning">Profil löschen und abmelden</button>
     </form>
