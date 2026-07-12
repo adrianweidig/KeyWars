@@ -1,5 +1,7 @@
 # KeyWars v0.3.0 – ausführbarer Implementierungsplan
 
+<!-- markdownlint-disable MD024 -->
+
 Stand: 11. Juli 2026
 Ausgangsbasis: `v0.2.13` / `bd15322` plus lokaler Theme- und
 Autoscroll-Arbeitsstand
