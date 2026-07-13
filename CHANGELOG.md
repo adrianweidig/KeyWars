@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.3.1 - 2026-07-13
+
+- Handle expected challenge lifecycle errors inside the Razor Pages instead of
+  routing expired or invalid actions through the global HTTP 500 page.
+- Hide challenge actions that are not valid for the current participant state.
+- Add HTTP regression coverage for expired challenge responses, play redirects
+  and invalid challenge creation.
+
 ## v0.2.13 - 2026-07-04
 
 - Hardened SQLite backup and restore connection strings so maintenance commands

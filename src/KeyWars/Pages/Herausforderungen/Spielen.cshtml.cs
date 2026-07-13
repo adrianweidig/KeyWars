@@ -16,7 +16,16 @@ public sealed class SpielenModel(CurrentUser currentUser, KeyWarsDbContext db, C
     public async Task<IActionResult> OnGetAsync(Guid id, CancellationToken cancellationToken)
     {
         var profile = await currentUser.RequireProfileAsync(User, cancellationToken);
-        await challenges.RequirePlayableAsync(id, profile.Id, cancellationToken);
+        try
+        {
+            await challenges.RequirePlayableAsync(id, profile.Id, cancellationToken);
+        }
+        catch (ChallengeLifecycleException exception)
+        {
+            TempData["ChallengeError"] = exception.Message;
+            return RedirectToPage("/Herausforderungen/Details", new { id });
+        }
+
         CurrentChallenge = await db.Challenges.SingleAsync(item => item.Id == id, cancellationToken);
         Text = await db.TrainingTexts.SingleAsync(item => item.Id == CurrentChallenge.TrainingTextId, cancellationToken);
         return Page();

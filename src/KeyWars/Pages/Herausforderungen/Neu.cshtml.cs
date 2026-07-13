@@ -30,14 +30,24 @@ public sealed class NeuModel(CurrentUser currentUser, TextLibraryService texts, 
             return Page();
         }
 
-        var challenge = await challenges.CreateAsync(profile.Id, new CreateChallengeRequest(
-            Input.Title,
-            Input.TrainingTextId,
-            Input.Mode,
-            Input.ParticipantIds,
-            Input.RoundCount,
-            Input.ExpiryDays), cancellationToken);
-        return RedirectToPage("/Herausforderungen/Details", new { id = challenge.Id });
+        try
+        {
+            var challenge = await challenges.CreateAsync(profile.Id, new CreateChallengeRequest(
+                Input.Title,
+                Input.TrainingTextId,
+                Input.Mode,
+                Input.ParticipantIds,
+                Input.RoundCount,
+                Input.ExpiryDays), cancellationToken);
+            return RedirectToPage("/Herausforderungen/Details", new { id = challenge.Id });
+        }
+        catch (ChallengeLifecycleException exception)
+        {
+            Response.StatusCode = exception.StatusCode;
+            ModelState.AddModelError(string.Empty, exception.Message);
+            await LoadAsync(cancellationToken);
+            return Page();
+        }
     }
 
     private async Task LoadAsync(CancellationToken cancellationToken)

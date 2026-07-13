@@ -10,15 +10,26 @@
         <p class="lead">@Model.Text.Title · @DisplayNames.For(Model.CurrentChallenge.Mode) · Ablauf @Model.CurrentChallenge.ExpiresAt.LocalDateTime.ToString("g")</p>
     </div>
     <div class="page-actions">
-        <form method="post" asp-page-handler="Join">
-            <button type="submit" class="secondary">Annehmen</button>
-        </form>
-        <form method="post" asp-page-handler="Decline">
-            <button type="submit" class="secondary">Ablehnen</button>
-        </form>
-        <a class="button" asp-page="/Herausforderungen/Spielen" asp-route-id="@Model.CurrentChallenge.Id">Runde spielen</a>
+        @if (Model.CanJoin)
+        {
+            <form method="post" asp-page-handler="Join">
+                <button type="submit" class="secondary">Annehmen</button>
+            </form>
+        }
+        @if (Model.CanDecline)
+        {
+            <form method="post" asp-page-handler="Decline">
+                <button type="submit" class="secondary">Ablehnen</button>
+            </form>
+        }
+        @if (Model.CanPlay)
+        {
+            <a class="button" asp-page="/Herausforderungen/Spielen" asp-route-id="@Model.CurrentChallenge.Id">Runde spielen</a>
+        }
     </div>
 </section>
+
+<div asp-validation-summary="ModelOnly" role="alert" aria-live="assertive"></div>
 
 <section class="card">
     <table class="table">

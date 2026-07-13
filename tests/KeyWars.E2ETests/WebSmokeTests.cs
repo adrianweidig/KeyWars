@@ -209,6 +209,103 @@ public sealed partial class WebSmokeTests : IClassFixture<KeyWarsWebFactory>
     }
 
     [Fact]
+    public async Task ExpiredChallengeDeclineReturnsGoneWithInlineMessage()
+    {
+        using var isolatedFactory = new KeyWarsWebFactory();
+        var client = isolatedFactory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        await LoginAsync(client);
+        Guid challengeId;
+        await using (var scope = isolatedFactory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<KeyWarsDbContext>();
+            var profile = await db.UserProfiles.SingleAsync(item => item.SamAccountName == "max.mustermann");
+            var text = new TrainingText
+            {
+                OwnerProfileId = profile.Id,
+                Title = "Expired Challenge",
+                Body = "Expired Challenge",
+                Visibility = TrainingTextVisibility.Private,
+                CharacterCount = TypingEngine.SplitGraphemes("Expired Challenge").Count
+            };
+            var challenge = new Challenge
+            {
+                CreatorProfileId = profile.Id,
+                TrainingTextId = text.Id,
+                Title = "Expired Challenge",
+                Status = ChallengeStatus.Open,
+                ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1)
+            };
+            db.TrainingTexts.Add(text);
+            db.Challenges.Add(challenge);
+            db.ChallengeRounds.Add(new ChallengeRound { ChallengeId = challenge.Id });
+            db.ChallengeParticipants.Add(new ChallengeParticipant
+            {
+                ChallengeId = challenge.Id,
+                UserProfileId = profile.Id,
+                Status = ParticipantStatus.Joined
+            });
+            await db.SaveChangesAsync();
+            challengeId = challenge.Id;
+        }
+
+        var details = await client.GetStringAsync($"/herausforderungen/{challengeId}");
+        var token = AntiForgeryRegex().Match(details).Groups["token"].Value;
+        var response = await client.PostAsync(
+            $"/herausforderungen/{challengeId}?handler=Decline",
+            new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["__RequestVerificationToken"] = token
+            }));
+        var body = WebUtility.HtmlDecode(await response.Content.ReadAsStringAsync());
+
+        Assert.Equal(HttpStatusCode.Gone, response.StatusCode);
+        Assert.Contains("Diese Herausforderung ist abgelaufen.", body);
+        Assert.DoesNotContain("Ein unerwarteter Fehler", body);
+        Assert.DoesNotContain(">Ablehnen<", body);
+        Assert.DoesNotContain(">Runde spielen<", body);
+
+        var playResponse = await client.GetAsync($"/herausforderungen/{challengeId}/spielen");
+        Assert.Equal(HttpStatusCode.Redirect, playResponse.StatusCode);
+        Assert.Equal($"/herausforderungen/{challengeId}", playResponse.Headers.Location?.OriginalString);
+
+        var redirectedDetails = await client.GetStringAsync(playResponse.Headers.Location);
+        Assert.Contains("Diese Herausforderung ist abgelaufen.", WebUtility.HtmlDecode(redirectedDetails));
+    }
+
+    [Fact]
+    public async Task InvalidChallengeCreationReturnsBadRequestWithInlineMessage()
+    {
+        using var isolatedFactory = new KeyWarsWebFactory();
+        var client = isolatedFactory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        await LoginAsync(client);
+        Guid textId;
+        await using (var scope = isolatedFactory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<KeyWarsDbContext>();
+            textId = await db.TrainingTexts.Select(item => item.Id).FirstAsync();
+        }
+
+        var page = await client.GetStringAsync("/herausforderungen/neu");
+        var token = AntiForgeryRegex().Match(page).Groups["token"].Value;
+        var response = await client.PostAsync(
+            "/herausforderungen/neu",
+            new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["Input.Title"] = "Ungültige Herausforderung",
+                ["Input.TrainingTextId"] = textId.ToString(),
+                ["Input.Mode"] = nameof(ChallengeMode.Classic),
+                ["Input.RoundCount"] = "1",
+                ["Input.ExpiryDays"] = "7",
+                ["__RequestVerificationToken"] = token
+            }));
+        var body = WebUtility.HtmlDecode(await response.Content.ReadAsStringAsync());
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("Eine Herausforderung benötigt mindestens zwei Personen.", body);
+        Assert.DoesNotContain("Ein unerwarteter Fehler", body);
+    }
+
+    [Fact]
     public async Task DevelopmentUserCanLoginAndOpenDashboard()
     {
         var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
