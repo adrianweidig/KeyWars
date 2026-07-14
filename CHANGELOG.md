@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.4.3 - 2026-07-14
+
+- Restore clear Light Theme contrast for finish summaries, score cards and
+  result metrics across dashboard, training and challenge completion views.
+
 ## v0.4.2 - 2026-07-14
 
 - Keep dashboard round statistics on one clearly labeled attempt scope and

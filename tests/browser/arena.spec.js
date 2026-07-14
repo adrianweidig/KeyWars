@@ -656,6 +656,15 @@ test("Sprint-Ergebnis trennt Zeitablauf vom fehlerfreien Ziel und erklärt die W
   await expect(card.locator('[data-round-stat="consistency"]')).toHaveText("22,5 %");
   await expect(card.locator(".metric-note")).toContainText("475 korrekte von 798 gewerteten Zeichen");
   await expect(card.locator(".metric-note")).toContainText("Konsistenz aus 42 abgeschlossenen Wortzeiten");
+  await page.locator("[data-theme-toggle]:visible").first().click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  const lightResultColors = await card.evaluate((element) => ({
+    detail: getComputedStyle(element.querySelector(".finish-summary > p")).color,
+    body: getComputedStyle(document.body).color,
+    scoreBackground: getComputedStyle(element.querySelector(".finish-score")).backgroundColor
+  }));
+  expect(lightResultColors.detail).toBe(lightResultColors.body);
+  expect(lightResultColors.scoreBackground).toBe("rgba(255, 255, 255, 0.76)");
   await expectNoHorizontalOverflow(page);
 });
 

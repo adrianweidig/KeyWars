@@ -7732,6 +7732,24 @@ body.app-public.auth-exit-page .shell {
   color: var(--app-cyan);
 }
 
+:root[data-theme="light"] .finish-panel {
+  border-color: var(--app-border);
+  background:
+    linear-gradient(135deg, rgba(8, 127, 146, 0.08), transparent 56%),
+    var(--app-panel);
+}
+
+:root[data-theme="light"] .finish-score,
+:root[data-theme="light"] .result-metrics .metric {
+  border-color: var(--app-border);
+  background: rgba(255, 255, 255, 0.76);
+  color: var(--text);
+}
+
+:root[data-theme="light"] .finish-summary p {
+  color: var(--text);
+}
+
 :root[data-theme="light"] .app-tools .logout button,
 :root[data-theme="light"] .app-tools .icon-button,
 :root[data-theme="light"] .mobile-menu-button,
