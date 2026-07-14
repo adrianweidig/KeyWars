@@ -12,6 +12,7 @@
     <link rel="apple-touch-icon" href="~/img/apple-touch-icon.png" asp-append-version="true" />
     <link rel="manifest" href="~/img/site.webmanifest" asp-append-version="true" />
     <script src="~/js/theme-init.js" asp-append-version="true"></script>
+    <script src="~/js/layout-init.js" asp-append-version="true"></script>
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
 </head>
 @{
@@ -35,17 +36,42 @@
         " ",
         new[] { ViewData["BodyClass"] as string, showAuthenticatedShell ? "app-authenticated" : "app-public" }
             .Where(value => !string.IsNullOrWhiteSpace(value)));
+    var isTypingFocusPage = bodyClass.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+        .Contains("typing-focus-page", StringComparer.Ordinal);
 }
 <body class="@bodyClass">
     <a class="skip-link" href="#hauptinhalt">Zum Hauptinhalt springen</a>
+    @if (showAuthenticatedShell && isTypingFocusPage)
+    {
+        <button type="button"
+                class="zen-mode-toggle"
+                data-zen-toggle
+                aria-pressed="false"
+                aria-keyshortcuts="Alt+Z"
+                title="Zen-Modus aktivieren (Alt+Z)">
+            @UiIcons.Svg("target", "kw-icon")
+            <span data-zen-label>Zen-Modus</span>
+        </button>
+    }
     <div class="app-shell">
         @if (showAuthenticatedShell)
         {
             <header class="desktop-topbar" aria-label="App-Leiste">
-                <a class="brand app-brand" asp-page="/Index" aria-label="KeyWars Startseite">
-                    <span class="brand-mark" aria-hidden="true">KW</span>
-                    <span>KeyWars</span>
-                </a>
+                <div class="desktop-topbar-leading">
+                    <a class="brand app-brand" asp-page="/Index" aria-label="KeyWars Startseite">
+                        <span class="brand-mark" aria-hidden="true">KW</span>
+                        <span>KeyWars</span>
+                    </a>
+                    <button type="button"
+                            class="icon-button sidebar-toggle"
+                            data-sidebar-toggle
+                            title="Sidebar einklappen"
+                            aria-label="Sidebar einklappen"
+                            aria-controls="desktop-sidebar"
+                            aria-expanded="true">
+                        @UiIcons.Svg("menu")
+                    </button>
+                </div>
                 <div class="app-tools">
                     <button type="button" class="icon-button" data-theme-toggle title="Helles Design aktivieren" aria-label="Helles Design aktivieren" aria-pressed="false"><span data-theme-icon="light">@UiIcons.Svg("sun")</span><span data-theme-icon="dark">@UiIcons.Svg("moon")</span></button>
                     <a class="profile-menu" asp-page="/Profil/Index" title="Mein Profil" data-full-text="Mein Profil">
@@ -58,7 +84,7 @@
                 </div>
             </header>
 
-            <aside class="desktop-sidebar" aria-label="Hauptnavigation">
+            <aside id="desktop-sidebar" class="desktop-sidebar" aria-label="Hauptnavigation">
                 <a class="brand app-brand" asp-page="/Index" aria-label="KeyWars Startseite">
                     <span class="brand-mark" aria-hidden="true">KW</span>
                     <span>KeyWars</span>

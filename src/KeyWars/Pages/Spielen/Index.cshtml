@@ -2,11 +2,11 @@
 @model KeyWars.Pages.Spielen.IndexModel
 @{
     ViewData["Title"] = "Spielen";
-    ViewData["BodyClass"] = "play-page";
+    ViewData["BodyClass"] = "play-page typing-focus-page";
 }
 
 <section class="play-command-grid" aria-label="Training starten">
-    <article class="panel play-quickstart typing-session-card" data-typing-app data-mode="Sprint60" data-seconds="60" data-words="120" data-timer-placement="before-target" data-hide-start-when-prepared="true">
+    <article class="panel play-quickstart typing-session-card typing-focus-primary" data-typing-app data-mode="Sprint60" data-seconds="60" data-words="120" data-timer-placement="before-target" data-hide-start-when-prepared="true">
         <div class="section-header">
             <div>
                 <h1>Sofortrunde</h1>
@@ -26,7 +26,7 @@
         <div data-result></div>
     </article>
 
-    <aside class="panel play-mode-panel" aria-label="Trainingsmodi">
+    <aside class="panel play-mode-panel typing-focus-secondary" aria-label="Trainingsmodi">
         <div class="section-header compact">
             <h2>Fokus wählen</h2>
             <span class="muted">@Model.Texts.Count Texte</span>

@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.4.1 - 2026-07-14
+
+- Make every training and arena typing surface the full-width visual focus while
+  keeping a comfortable centered reading measure on large displays.
+- Replace parallel Sprint and Words typing cards with accessible selectors and
+  one active workspace, using validated query parameters with stable defaults.
+- Move dashboard rankings and training-mode navigation below the primary typing
+  surface and extend responsive browser coverage across desktop and mobile.
+- Widen the authenticated desktop workspace, add a persistent collapsible
+  sidebar and provide a distraction-free Zen mode on every typing page.
+- Align every arena mode radio consistently at the left edge of its selectable
+  card and strengthen selected and keyboard-focus states.
+
 ## v0.4.0 - 2026-07-14
 
 - Add server-authoritative three- and five-round arena series with placement

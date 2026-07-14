@@ -2768,29 +2768,51 @@ select:focus-visible {
 
 .arena-mode-card {
   display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
   gap: 7px;
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface-2);
+  cursor: pointer;
   font-weight: 500;
+  transition:
+    border-color var(--motion-fast) var(--ease-standard),
+    background var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard);
 }
 
 .arena-mode-card.selected {
-  grid-template-columns: auto minmax(0, 1fr);
   border-color: rgba(36, 200, 216, 0.55);
   background: rgba(36, 200, 216, 0.09);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
-.arena-mode-card.selected > input {
+.arena-mode-card > input {
+  grid-column: 1;
   grid-row: 1 / span 3;
-  width: auto;
-  margin: 3px 2px 0 0;
+  align-self: start;
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  min-height: 18px;
+  margin: 3px 0 0;
+  padding: 0;
   accent-color: var(--accent);
 }
 
-.arena-mode-card.selected > span {
+.arena-mode-card > span {
   grid-column: 2;
+}
+
+.arena-mode-card:hover {
+  border-color: rgba(36, 200, 216, 0.38);
+  background: rgba(36, 200, 216, 0.06);
+}
+
+.arena-mode-card:focus-within {
+  outline: 3px solid rgba(36, 200, 216, 0.28);
+  outline-offset: 2px;
 }
 
 .arena-mode-card.is-disabled {
@@ -4511,7 +4533,10 @@ button.tertiary {
   --app-gold: #f3c94d;
   --app-red: #ff626f;
   --app-muted: #91a7ba;
-  --app-sidebar: 224px;
+  --app-sidebar-expanded: 224px;
+  --app-sidebar-collapsed: 72px;
+  --app-sidebar: var(--app-sidebar-expanded);
+  --app-content-max: 1760px;
   --app-radius: 12px;
 }
 
@@ -4603,13 +4628,14 @@ body.app-authenticated::before {
   min-height: 100dvh;
   margin-left: var(--app-sidebar);
   padding: 76px 24px 30px;
+  transition: margin-left var(--motion-normal) var(--ease-emphasis);
 }
 
 .app-authenticated .shell,
 .app-authenticated.play-page .shell,
 .app-authenticated.competition-page .shell,
 .app-authenticated.arena-room-page .shell {
-  width: min(1240px, 100%);
+  width: min(var(--app-content-max), 100%);
   margin: 0 auto;
 }
 
@@ -4653,6 +4679,9 @@ body.app-authenticated::before {
     linear-gradient(180deg, rgba(7, 18, 29, 0.96), rgba(4, 11, 18, 0.98)),
     var(--app-bg);
   box-shadow: 18px 0 46px rgba(0, 0, 0, 0.28);
+  transition:
+    width var(--motion-normal) var(--ease-emphasis),
+    padding var(--motion-normal) var(--ease-emphasis);
 }
 
 .desktop-topbar {
@@ -4672,6 +4701,18 @@ body.app-authenticated::before {
 
 .desktop-topbar .app-tools {
   display: flex;
+}
+
+.desktop-topbar-leading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.sidebar-toggle[aria-expanded="false"] {
+  border-color: rgba(45, 226, 238, 0.36);
+  background: rgba(45, 226, 238, 0.12);
+  color: var(--app-cyan);
 }
 
 .mobile-topbar-actions {
@@ -4824,7 +4865,7 @@ body.app-authenticated::before {
   grid-template-columns: auto auto minmax(180px, 1fr) auto auto;
   align-items: center;
   gap: 16px;
-  width: min(1240px, 100%);
+  width: min(var(--app-content-max), 100%);
   min-height: 66px;
   margin: 0 auto 16px;
   padding: 12px 14px 12px 18px;
@@ -5674,6 +5715,37 @@ body.app-authenticated::before {
 @media (min-width: 1024px) {
   .desktop-topbar {
     display: flex;
+  }
+
+  :root[data-sidebar="collapsed"] {
+    --app-sidebar: var(--app-sidebar-collapsed);
+  }
+
+  :root[data-sidebar="collapsed"] .desktop-sidebar {
+    padding-inline: 10px;
+  }
+
+  :root[data-sidebar="collapsed"] .desktop-sidebar .sidebar-nav a {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    padding-inline: 0;
+  }
+
+  :root[data-sidebar="collapsed"] .desktop-sidebar .sidebar-nav a span,
+  :root[data-sidebar="collapsed"] .desktop-sidebar .user-label,
+  :root[data-sidebar="collapsed"] .desktop-sidebar .sidebar-profile-arrow,
+  :root[data-sidebar="collapsed"] .desktop-sidebar .sidebar-xp-progress {
+    display: none;
+  }
+
+  :root[data-sidebar="collapsed"] .desktop-sidebar .sidebar-profile {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    padding-inline: 0;
+  }
+
+  :root[data-sidebar="collapsed"] .desktop-sidebar .sidebar-nav a:hover {
+    transform: none;
   }
 }
 
@@ -7142,6 +7214,345 @@ body.app-public.auth-exit-page .shell {
   .challenge-play-page .motivation-events {
     grid-template-columns: 1fr;
   }
+}
+
+/* Typing focus layout */
+.typing-focus-page {
+  --typing-focus-max-width: var(--app-content-max);
+  --typing-readable-measure: 1320px;
+}
+
+.typing-focus-page .typing-focus-primary,
+.typing-focus-page .typing-target,
+.typing-focus-page .typing-input {
+  width: 100%;
+  min-width: 0;
+}
+
+.typing-focus-page .dashboard-cockpit,
+.typing-focus-page .play-command-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.typing-focus-page .typing-focus-primary {
+  overflow: hidden;
+}
+
+.typing-focus-page .arena-input-grid {
+  display: grid;
+  grid-template-areas:
+    "label action"
+    "input input";
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  width: 100%;
+}
+
+.typing-focus-page .arena-input-label {
+  grid-area: label;
+  align-self: center;
+  margin: 0;
+}
+
+.typing-focus-page .arena-input-grid .typing-input {
+  grid-area: input;
+}
+
+.typing-focus-page .arena-input-grid .arena-running-action {
+  grid-area: action;
+  align-self: center;
+  width: auto;
+  min-width: fit-content;
+}
+
+.typing-mode-selector {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.typing-mode-chip {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 7px;
+  min-width: 0;
+  min-height: 52px;
+  padding: 11px 14px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface-2);
+  color: var(--text);
+  text-decoration: none;
+  transition:
+    border-color var(--motion-fast) var(--ease-standard),
+    background var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
+}
+
+.typing-mode-chip:hover,
+.typing-mode-chip:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent-strong);
+  text-decoration: none;
+}
+
+.typing-mode-chip:focus-visible {
+  outline: 3px solid rgba(37, 200, 216, 0.3);
+  outline-offset: 2px;
+}
+
+.typing-mode-chip.active {
+  border-color: rgba(66, 227, 220, 0.62);
+  background:
+    linear-gradient(135deg, rgba(37, 200, 216, 0.16), rgba(53, 211, 154, 0.07)),
+    var(--surface-2);
+  color: var(--text);
+  box-shadow: inset 0 -3px 0 var(--accent-strong);
+}
+
+.typing-mode-chip strong {
+  font-size: 1.15rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.typing-mode-chip span {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.typing-mode-workspace {
+  display: grid;
+  gap: 16px;
+}
+
+.typing-mode-workspace > h2 {
+  margin: 0;
+}
+
+@media (min-width: 1024px) {
+  body.app-authenticated.typing-focus-page .shell,
+  body.app-authenticated.typing-focus-page .status-cockpit {
+    width: min(var(--typing-focus-max-width), 100%);
+  }
+
+  .typing-focus-page .typing-focus-primary > .typing-target,
+  .typing-focus-page .typing-focus-primary .typing-input {
+    padding-inline: max(18px, calc((100% - var(--typing-readable-measure)) / 2));
+  }
+
+  .typing-focus-page .typing-focus-primary > .typing-target {
+    min-height: clamp(220px, 24dvh, 300px);
+    max-height: min(42dvh, 420px);
+    overflow: auto;
+  }
+
+  .typing-focus-page .typing-focus-primary .typing-input {
+    min-height: 110px;
+  }
+
+  .typing-focus-page .arena-workbench > .typing-target {
+    min-height: 190px;
+    max-height: min(32dvh, 260px);
+  }
+
+  .typing-focus-page .arena-workbench .typing-input {
+    min-height: 100px;
+  }
+
+  .typing-focus-page .dashboard-quick-round,
+  .typing-focus-page .play-command-grid .play-quickstart {
+    min-height: 0;
+  }
+
+  .typing-focus-page .daily-board-panel {
+    display: grid;
+    grid-template-columns: minmax(220px, 0.72fr) minmax(0, 2fr) auto;
+    align-items: center;
+    gap: 18px;
+    min-height: 0;
+  }
+
+  .typing-focus-page .daily-board-panel > .section-header,
+  .typing-focus-page .daily-board-panel .leaderboard-empty,
+  .typing-focus-page .daily-board-panel .leaderboard-list,
+  .typing-focus-page .daily-board-panel .mini-podium {
+    margin: 0;
+  }
+
+  .typing-focus-page .daily-board-content {
+    min-width: 0;
+  }
+
+  .typing-focus-page .daily-board-content.has-results {
+    display: grid;
+    grid-template-columns: minmax(270px, 0.9fr) minmax(260px, 1.1fr);
+    align-items: center;
+    gap: 16px;
+  }
+
+  .typing-focus-page .daily-board-panel .illustrated-empty img {
+    width: 116px;
+    height: auto;
+  }
+
+  .typing-focus-page .daily-board-panel > .full-width {
+    width: auto;
+    margin: 0;
+    white-space: nowrap;
+  }
+
+  .typing-focus-page .play-mode-panel {
+    min-height: 0;
+  }
+
+  .typing-focus-page .play-focus-list {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1023.98px) {
+  .typing-focus-page .daily-board-panel {
+    min-height: 0;
+  }
+}
+
+@media (max-width: 620px) {
+  .typing-mode-selector {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .typing-mode-chip {
+    min-height: 46px;
+    padding: 9px 10px;
+  }
+
+  .typing-mode-chip strong {
+    font-size: 1rem;
+  }
+
+  .typing-mode-chip span {
+    font-size: 0.8rem;
+  }
+}
+
+/* Persistent desktop navigation and distraction-free typing mode. */
+.zen-mode-toggle {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  z-index: 75;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: auto;
+  min-height: 42px;
+  padding: 9px 13px;
+  border: 1px solid rgba(45, 226, 238, 0.42);
+  border-radius: 999px;
+  background: rgba(7, 21, 33, 0.94);
+  color: var(--app-cyan);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(14px);
+}
+
+.zen-mode-toggle:hover,
+.zen-mode-toggle:focus-visible,
+.zen-mode-toggle[aria-pressed="true"] {
+  border-color: rgba(97, 238, 143, 0.64);
+  background: rgba(15, 54, 42, 0.96);
+  color: var(--app-green);
+}
+
+:root[data-zen="true"] body.typing-focus-page .desktop-sidebar,
+:root[data-zen="true"] body.typing-focus-page .desktop-topbar,
+:root[data-zen="true"] body.typing-focus-page .mobile-topbar,
+:root[data-zen="true"] body.typing-focus-page .mobile-bottom-nav,
+:root[data-zen="true"] body.typing-focus-page .mobile-menu-panel,
+:root[data-zen="true"] body.typing-focus-page .mobile-menu-scrim,
+:root[data-zen="true"] body.typing-focus-page .status-cockpit {
+  display: none !important;
+}
+
+:root[data-zen="true"] body.typing-focus-page .app-main {
+  width: 100% !important;
+  margin-left: 0 !important;
+  padding: 28px clamp(14px, 2.5vw, 44px) 32px !important;
+}
+
+:root[data-zen="true"] body.typing-focus-page .shell {
+  width: min(var(--app-content-max), 100%) !important;
+  max-width: none !important;
+  margin-inline: auto !important;
+  padding-bottom: 0 !important;
+}
+
+:root[data-zen="true"] body.typing-focus-page .shell > :not(.typing-focus-primary):not(.dashboard-cockpit):not(.play-command-grid):not(.arena-layout),
+:root[data-zen="true"] body.typing-focus-page .dashboard-cockpit > :not(.typing-focus-primary),
+:root[data-zen="true"] body.typing-focus-page .play-command-grid > :not(.typing-focus-primary),
+:root[data-zen="true"] body.typing-focus-page .arena-layout > :not(.typing-focus-primary),
+:root[data-zen="true"] body.typing-focus-page .typing-focus-primary .mode-select-link,
+:root[data-zen="true"] body.typing-focus-page .typing-focus-primary .section-header p,
+:root[data-zen="true"] body.typing-focus-page .typing-focus-primary .round-stats-preview,
+:root[data-zen="true"] body.typing-focus-page .typing-focus-primary .arena-phase-steps,
+:root[data-zen="true"] body.typing-focus-page .typing-focus-primary .arena-persistence-status,
+:root[data-zen="true"] body.typing-focus-page .typing-focus-primary .live-typing-board {
+  display: none !important;
+}
+
+:root[data-zen="true"] body.typing-focus-page .typing-focus-primary {
+  min-height: calc(100dvh - 60px);
+  --typing-readable-measure: 1440px;
+}
+
+:root[data-zen="true"] body.typing-focus-page .typing-focus-primary > .typing-target {
+  max-height: min(52dvh, 520px);
+}
+
+:root[data-zen="true"] body.typing-focus-page .zen-mode-toggle {
+  top: 18px;
+  right: 18px;
+  bottom: auto;
+}
+
+@media (max-width: 1023.98px) {
+  .zen-mode-toggle {
+    right: 14px;
+    bottom: calc(76px + env(safe-area-inset-bottom));
+  }
+
+  :root[data-zen="true"] body.typing-focus-page .app-main {
+    padding: 18px 12px 24px !important;
+  }
+
+  :root[data-zen="true"] body.typing-focus-page .typing-focus-primary {
+    min-height: calc(100dvh - 42px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-authenticated .app-main,
+  .desktop-sidebar,
+  .arena-mode-card {
+    transition: none;
+  }
+}
+
+:root[data-theme="light"] .zen-mode-toggle {
+  border-color: rgba(8, 127, 146, 0.38);
+  background: rgba(255, 255, 255, 0.96);
+  color: var(--app-cyan);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.16);
+}
+
+:root[data-theme="light"] .zen-mode-toggle:hover,
+:root[data-theme="light"] .zen-mode-toggle:focus-visible,
+:root[data-theme="light"] .zen-mode-toggle[aria-pressed="true"] {
+  border-color: rgba(15, 141, 98, 0.52);
+  background: rgba(231, 248, 240, 0.98);
+  color: var(--app-green);
 }
 
 :root[data-theme="light"] body {

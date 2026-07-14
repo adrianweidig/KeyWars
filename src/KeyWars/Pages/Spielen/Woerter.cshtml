@@ -2,6 +2,7 @@
 @model KeyWars.Pages.Spielen.WoerterModel
 @{
     ViewData["Title"] = "Wörter";
+    ViewData["BodyClass"] = "typing-focus-page";
 }
 
 <section class="page-header">
@@ -12,20 +13,29 @@
     </div>
 </section>
 
-<section class="grid">
-@foreach (var item in Model.Modes)
-{
-    <article class="card typing-session-card" data-typing-app data-mode="@item.Mode" data-words="@item.Words" data-hide-start-when-prepared="true">
-        <h2>@item.Words Wörter</h2>
-        <div class="typing-target" data-target tabindex="0" role="region" aria-label="Zieltext des Wörtertrainings"></div>
-        <label>
-            Eingabe
-            <textarea class="typing-input" data-input disabled autocapitalize="off" autocomplete="off" spellcheck="false"></textarea>
-        </label>
-        <div class="form-actions typing-actions">
-            <button type="button" data-start>Starten</button>
-        </div>
-        <div data-result></div>
-    </article>
-}
+<nav class="typing-mode-selector" aria-label="Wortzahl auswählen">
+    @foreach (var item in Model.Modes)
+    {
+        var selected = item.Words == Model.SelectedWords;
+        <a class="typing-mode-chip @(selected ? "active" : "")"
+           asp-page="/Spielen/Woerter"
+           asp-route-words="@item.Words"
+           aria-current="@(selected ? "page" : null)">
+            <strong>@item.Words</strong>
+            <span>Wörter</span>
+        </a>
+    }
+</nav>
+
+<section class="card typing-session-card typing-focus-primary typing-mode-workspace" data-typing-app data-mode="@Model.SelectedMode" data-words="@Model.SelectedWords" data-hide-start-when-prepared="true">
+    <h2>@Model.SelectedWords Wörter</h2>
+    <div class="typing-target" data-target tabindex="0" role="region" aria-label="Zieltext des Wörtertrainings"></div>
+    <label class="typing-input-wrap">
+        Eingabe
+        <textarea class="typing-input" data-input disabled autocapitalize="off" autocomplete="off" spellcheck="false"></textarea>
+    </label>
+    <div class="form-actions typing-actions">
+        <button type="button" data-start>Starten</button>
+    </div>
+    <div data-result></div>
 </section>

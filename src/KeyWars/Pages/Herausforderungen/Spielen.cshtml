@@ -2,7 +2,7 @@
 @model KeyWars.Pages.Herausforderungen.SpielenModel
 @{
     ViewData["Title"] = "Herausforderung spielen";
-    ViewData["BodyClass"] = "challenge-play-page";
+    ViewData["BodyClass"] = "challenge-play-page typing-focus-page";
 }
 
 <section class="page-header challenge-play-header">
@@ -12,7 +12,7 @@
     </div>
 </section>
 
-<section class="card typing-session-card challenge-typing-card" data-typing-app data-mode="Text" data-text-id="@Model.Text.Id" data-challenge-id="@Model.CurrentChallenge.Id" data-hide-start-when-prepared="true">
+<section class="card typing-session-card typing-focus-primary challenge-typing-card" data-typing-app data-mode="Text" data-text-id="@Model.Text.Id" data-challenge-id="@Model.CurrentChallenge.Id" data-hide-start-when-prepared="true">
     <div class="typing-target" data-target tabindex="0" role="region" aria-label="Zieltext der Herausforderung"></div>
     <label>
         Eingabe

@@ -4,7 +4,7 @@
 @model KeyWars.Pages.IndexModel
 @{
     ViewData["Title"] = "Start";
-    ViewData["BodyClass"] = "dashboard-page";
+    ViewData["BodyClass"] = "dashboard-page typing-focus-page";
     var culture = CultureInfo.GetCultureInfo("de-DE");
     var topSprint = Model.DailySprintBoard.Entries.Take(5).ToList();
     var podium = topSprint.Take(3).ToList();
@@ -17,7 +17,7 @@
 <h1 class="visually-hidden">KeyWars Start</h1>
 
 <section class="dashboard-cockpit" aria-label="KeyWars Cockpit">
-    <article class="panel instant-round-panel typing-session-card dashboard-quick-round" data-typing-app data-mode="Sprint60" data-seconds="60" data-words="120" data-timer-placement="before-target" data-hide-start-when-prepared="true">
+    <article class="panel instant-round-panel typing-session-card typing-focus-primary dashboard-quick-round" data-typing-app data-mode="Sprint60" data-seconds="60" data-words="120" data-timer-placement="before-target" data-hide-start-when-prepared="true">
         <div class="section-header">
             <div>
                 <h2>Sofortrunde</h2>
@@ -48,7 +48,7 @@
         <div data-result></div>
     </article>
 
-    <aside class="panel daily-board-panel" aria-label="Tages-Sprint Rangliste">
+    <aside class="panel daily-board-panel typing-focus-secondary" aria-label="Tages-Sprint Rangliste">
         <div class="section-header">
             <div>
                 <h2>Tages-Sprint 60s</h2>
@@ -57,60 +57,62 @@
             <a class="mode-select-link" asp-page="/Ranglisten" asp-route-board="sprint" asp-route-period="day" asp-route-mode="sprint60">24h</a>
         </div>
 
-        @if (podium.Count == 0)
-        {
-            <div class="empty-state compact-empty leaderboard-empty illustrated-empty">
-                <img src="~/vendor/keywars-assets/illustrations/motivator-leaderboard.svg" alt="" width="220" height="165" loading="lazy" />
-                <div>
-                    <h3>Noch kein Tageswert</h3>
-                    <p>Setze den ersten 60s-Wert und starte das Board.</p>
-                    <div class="card-actions">
-                        <a class="button compact-button" asp-page="/Spielen/Sprint">Sprint starten</a>
+        <div class="daily-board-content @(podium.Count == 0 ? "is-empty" : "has-results")">
+            @if (podium.Count == 0)
+            {
+                <div class="empty-state compact-empty leaderboard-empty illustrated-empty">
+                    <img src="~/vendor/keywars-assets/illustrations/motivator-leaderboard.svg" alt="" width="220" height="165" loading="lazy" />
+                    <div>
+                        <h3>Noch kein Tageswert</h3>
+                        <p>Setze den ersten 60s-Wert und starte das Board.</p>
+                        <div class="card-actions">
+                            <a class="button compact-button" asp-page="/Spielen/Sprint">Sprint starten</a>
+                        </div>
                     </div>
                 </div>
-            </div>
-        }
-        else
-        {
-            <div class="mini-podium" aria-label="Top 3 Tages-Sprint">
-                @foreach (var entry in podium)
-                {
-                    <article class="mini-podium-player rank-@entry.Rank @(entry.IsCurrentUser ? "is-user" : "")">
-                        <span class="podium-crown" aria-hidden="true">
-                            @if (entry.Rank == 1)
-                            {
-                                @UiIcons.Svg("trophy", "kw-icon")
-                            }
-                            else
-                            {
-                                @entry.Rank.ToString(culture)
-                            }
-                        </span>
-                        <span class="user-avatar" aria-hidden="true">@entry.Initials</span>
-                        <strong>@entry.DisplayName</strong>
-                        <small>@entry.PrimaryValue WPM</small>
-                    </article>
-                }
-            </div>
-            <div class="leaderboard-list">
-                @foreach (var entry in leaderboardRows)
-                {
-                    <div class="leaderboard-row @(entry.IsCurrentUser ? "is-user" : "")">
-                        <span>#@entry.Rank.ToString("N0", culture)</span>
-                        <span>@entry.DisplayName</span>
-                        <strong>@entry.PrimaryValue WPM</strong>
-                    </div>
-                }
-                @if (ownSprint is not null && topSprint.All(entry => entry.UserProfileId != ownSprint.UserProfileId))
-                {
-                    <div class="leaderboard-row is-user">
-                        <span>#@ownSprint.Rank.ToString("N0", culture)</span>
-                        <span>Deine Position</span>
-                        <strong>@ownSprint.PrimaryValue WPM</strong>
-                    </div>
-                }
-            </div>
-        }
+            }
+            else
+            {
+                <div class="mini-podium" aria-label="Top 3 Tages-Sprint">
+                    @foreach (var entry in podium)
+                    {
+                        <article class="mini-podium-player rank-@entry.Rank @(entry.IsCurrentUser ? "is-user" : "")">
+                            <span class="podium-crown" aria-hidden="true">
+                                @if (entry.Rank == 1)
+                                {
+                                    @UiIcons.Svg("trophy", "kw-icon")
+                                }
+                                else
+                                {
+                                    @entry.Rank.ToString(culture)
+                                }
+                            </span>
+                            <span class="user-avatar" aria-hidden="true">@entry.Initials</span>
+                            <strong>@entry.DisplayName</strong>
+                            <small>@entry.PrimaryValue WPM</small>
+                        </article>
+                    }
+                </div>
+                <div class="leaderboard-list">
+                    @foreach (var entry in leaderboardRows)
+                    {
+                        <div class="leaderboard-row @(entry.IsCurrentUser ? "is-user" : "")">
+                            <span>#@entry.Rank.ToString("N0", culture)</span>
+                            <span>@entry.DisplayName</span>
+                            <strong>@entry.PrimaryValue WPM</strong>
+                        </div>
+                    }
+                    @if (ownSprint is not null && topSprint.All(entry => entry.UserProfileId != ownSprint.UserProfileId))
+                    {
+                        <div class="leaderboard-row is-user">
+                            <span>#@ownSprint.Rank.ToString("N0", culture)</span>
+                            <span>Deine Position</span>
+                            <strong>@ownSprint.PrimaryValue WPM</strong>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
 
         <a class="button secondary full-width" asp-page="/Ranglisten" asp-route-board="sprint" asp-route-period="day" asp-route-mode="sprint60">Zum Wettbewerb</a>
     </aside>

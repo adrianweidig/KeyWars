@@ -2,7 +2,7 @@
 @model KeyWars.Pages.TageschallengeModel
 @{
     ViewData["Title"] = "Tageschallenge";
-    ViewData["BodyClass"] = "daily-challenge-page";
+    ViewData["BodyClass"] = "daily-challenge-page typing-focus-page";
 }
 
 <section class="page-header daily-challenge-hero">
@@ -18,7 +18,7 @@
     </div>
 </section>
 
-<section class="card typing-session-card daily-challenge-card"
+<section class="card typing-session-card typing-focus-primary daily-challenge-card"
          data-typing-app
          data-mode="Text"
          data-text-id="@Model.Text.Id"

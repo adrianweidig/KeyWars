@@ -62,6 +62,46 @@ async function expectNoHorizontalOverflow(page) {
   expect(overflow.documentWidth, `Overflow auf ${page.url()} durch: ${overflow.offenders.join(", ")}`).toBeLessThanOrEqual(overflow.viewportWidth + 1);
 }
 
+async function expectTypingFocusWidth(page, primarySelector = ".typing-focus-primary") {
+  await expect(page.locator("body")).toHaveClass(/typing-focus-page/);
+  await expect(page.locator(primarySelector)).toBeVisible();
+  await expect(page.locator(`${primarySelector} .typing-target`).first()).toBeVisible();
+  await expect(page.locator(`${primarySelector} .typing-input`).first()).toBeVisible();
+
+  const layout = await page.evaluate((selector) => {
+    const shell = document.querySelector(".shell");
+    const primary = document.querySelector(selector);
+    const target = primary?.querySelector(".typing-target");
+    const input = primary?.querySelector(".typing-input");
+    if (!(shell instanceof HTMLElement) || !(primary instanceof HTMLElement) || !(target instanceof HTMLElement) || !(input instanceof HTMLElement)) {
+      throw new Error("Fokuslayout ist unvollständig.");
+    }
+
+    const shellBounds = shell.getBoundingClientRect();
+    const primaryBounds = primary.getBoundingClientRect();
+    const targetBounds = target.getBoundingClientRect();
+    const inputBounds = input.getBoundingClientRect();
+    const primaryStyle = getComputedStyle(primary);
+    const primaryInnerWidth = primaryBounds.width - Number.parseFloat(primaryStyle.paddingLeft) - Number.parseFloat(primaryStyle.paddingRight);
+    return {
+      primaryRatio: primaryBounds.width / shellBounds.width,
+      targetRatio: targetBounds.width / primaryInnerWidth,
+      inputRatio: inputBounds.width / primaryInnerWidth,
+      targetLeft: Math.round(targetBounds.left),
+      inputLeft: Math.round(inputBounds.left),
+      targetRight: Math.round(targetBounds.right),
+      inputRight: Math.round(inputBounds.right)
+    };
+  }, primarySelector);
+
+  expect(layout.primaryRatio).toBeGreaterThanOrEqual(0.95);
+  expect(layout.targetRatio).toBeGreaterThanOrEqual(0.95);
+  expect(layout.inputRatio).toBeGreaterThanOrEqual(0.95);
+  expect(Math.abs(layout.targetLeft - layout.inputLeft)).toBeLessThanOrEqual(1);
+  expect(Math.abs(layout.targetRight - layout.inputRight)).toBeLessThanOrEqual(1);
+  await expectNoHorizontalOverflow(page);
+}
+
 async function readTypingScrollState(targetLocator) {
   return targetLocator.evaluate((target) => {
     const current = target.querySelector(".current");
@@ -84,8 +124,7 @@ async function expectTypingTargetFollowsCurrent(targetLocator, label = "Zieltext
   await expect.poll(async () => {
     const state = await readTypingScrollState(targetLocator);
     return state.hasCurrent &&
-      state.scrollHeight > state.clientHeight &&
-      state.scrollTop > 0 &&
+      (state.scrollHeight <= state.clientHeight || state.scrollTop > 0) &&
       state.currentTop >= state.targetTop - 1 &&
       state.currentBottom <= state.targetBottom + 1;
   }, { message: `${label} folgt dem aktuellen Zeichen.` }).toBe(true);
@@ -93,8 +132,9 @@ async function expectTypingTargetFollowsCurrent(targetLocator, label = "Zieltext
   const scrollState = await readTypingScrollState(targetLocator);
   expect(scrollState.hasCurrent, `${label}: aktuelles Zielzeichen fehlt.`).toBe(true);
 
-  expect(scrollState.scrollHeight, `${label} ist nicht scrollbar.`).toBeGreaterThan(scrollState.clientHeight);
-  expect(scrollState.scrollTop, `${label} blieb trotz aktueller Position am Ende oben stehen.`).toBeGreaterThan(0);
+  if (scrollState.scrollHeight > scrollState.clientHeight) {
+    expect(scrollState.scrollTop, `${label} blieb trotz aktueller Position am Ende oben stehen.`).toBeGreaterThan(0);
+  }
   expect(scrollState.currentTop, `${label}: aktuelles Zeichen liegt oberhalb des sichtbaren Bereichs.`).toBeGreaterThanOrEqual(scrollState.targetTop - 1);
   expect(scrollState.currentBottom, `${label}: aktuelles Zeichen liegt unterhalb des sichtbaren Bereichs.`).toBeLessThanOrEqual(scrollState.targetBottom + 1);
   return scrollState;
@@ -193,6 +233,7 @@ async function expectArenaCoreInFirstView(page) {
   expect(layout.timerTop).toBeLessThan(layout.viewportHeight * 0.32);
   expect(layout.targetTop).toBeLessThan(layout.viewportHeight * 0.52);
   expect(layout.inputBottom).toBeLessThan(layout.viewportHeight - 76);
+  await expectTypingFocusWidth(page, ".arena-workbench");
 }
 
 async function expectArenaConnected(page) {
@@ -369,6 +410,18 @@ test("Theme fällt bei ungültigem oder blockiertem Storage deterministisch zur�
   await expect(html).toHaveAttribute("data-theme", "dark");
   await page.reload();
   await expect(html).toHaveAttribute("data-theme", "light");
+
+  await expect(html).toHaveAttribute("data-sidebar", "expanded");
+  await page.locator("[data-sidebar-toggle]").click();
+  await expect(html).toHaveAttribute("data-sidebar", "collapsed");
+  await page.reload();
+  await expect(html).toHaveAttribute("data-sidebar", "expanded");
+
+  await page.goto("/spielen/sprint");
+  await page.locator("[data-zen-toggle]").click();
+  await expect(html).toHaveAttribute("data-zen", "true");
+  await page.reload();
+  await expect(html).toHaveAttribute("data-zen", "false");
 });
 
 test("Sidebar-Navigation hält lange Labels im aktiven Button", async ({ page }) => {
@@ -403,6 +456,112 @@ test("Sidebar-Navigation hält lange Labels im aktiven Button", async ({ page })
   expect(metrics.labelClientWidth, "Aktiver Sidebar-Button hat keine sichtbare Label-Fläche.").toBeGreaterThan(0);
   expect(metrics.linkScrollWidth, "Aktiver Sidebar-Button hat lokalen Horizontal-Overflow.").toBeLessThanOrEqual(metrics.linkClientWidth + 1);
   expect(metrics.linkRight, "Aktiver Sidebar-Button läuft über die Sidebar-Kante.").toBeLessThanOrEqual(metrics.sidebarRight - 12);
+});
+
+test("Desktop-Arbeitsbereich nutzt die Breite und die Sidebar bleibt einklappbar", async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await login(page, "browser.sidebar.collapse");
+  await page.goto("/arena/neu");
+
+  const toggle = page.locator("[data-sidebar-toggle]");
+  await expect(toggle).toBeVisible();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+
+  const expanded = await page.evaluate(() => {
+    const shell = document.querySelector(".shell")?.getBoundingClientRect();
+    const sidebar = document.querySelector(".desktop-sidebar")?.getBoundingClientRect();
+    return {
+      viewportWidth: window.innerWidth,
+      shellWidth: Math.round(shell?.width ?? 0),
+      sidebarWidth: Math.round(sidebar?.width ?? 0)
+    };
+  });
+  expect(expanded.shellWidth).toBeGreaterThanOrEqual(1600);
+  expect(expanded.sidebarWidth).toBeGreaterThanOrEqual(210);
+
+  await toggle.click();
+  await expect(page.locator("html")).toHaveAttribute("data-sidebar", "collapsed");
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(toggle).toHaveAccessibleName("Sidebar ausklappen");
+
+  await expect.poll(() => page.locator(".desktop-sidebar").evaluate((sidebar) => Math.round(sidebar.getBoundingClientRect().width))).toBeLessThanOrEqual(76);
+  const collapsed = await page.evaluate(() => {
+    const shell = document.querySelector(".shell")?.getBoundingClientRect();
+    const main = document.querySelector(".app-main")?.getBoundingClientRect();
+    const visibleLabels = [...document.querySelectorAll(".desktop-sidebar .sidebar-nav a span")]
+      .filter((label) => getComputedStyle(label).display !== "none").length;
+    return {
+      shellWidth: Math.round(shell?.width ?? 0),
+      mainLeft: Math.round(main?.left ?? -1),
+      visibleLabels
+    };
+  });
+  expect(collapsed.shellWidth).toBeGreaterThanOrEqual(1740);
+  expect(collapsed.mainLeft).toBeLessThanOrEqual(76);
+  expect(collapsed.visibleLabels).toBe(0);
+  await expectNoHorizontalOverflow(page);
+
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-sidebar", "collapsed");
+  await expect(page.getByRole("button", { name: "Sidebar ausklappen" })).toHaveAttribute("aria-expanded", "false");
+  await page.getByRole("button", { name: "Sidebar ausklappen" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-sidebar", "expanded");
+});
+
+test("Zen-Modus reduziert jede Tippseite auf die aktive Fokusfläche", async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await login(page, "browser.typing.zen");
+  await page.goto("/spielen/sprint");
+  await expect(page.locator("[data-input]")).toBeEnabled({ timeout: 15_000 });
+
+  const toggle = page.locator("[data-zen-toggle]");
+  await expect(toggle).toBeVisible();
+  await toggle.click();
+  await expect(page.locator("html")).toHaveAttribute("data-zen", "true");
+  await expect(page.locator("body")).toHaveClass(/zen-mode/);
+  await expect(page.getByRole("button", { name: "Zen-Modus beenden" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator(".desktop-sidebar")).toBeHidden();
+  await expect(page.locator(".desktop-topbar")).toBeHidden();
+  await expect(page.locator(".status-cockpit")).toBeHidden();
+  await expect(page.locator(".typing-mode-selector")).toBeHidden();
+  await expect(page.locator(".typing-focus-primary")).toBeVisible();
+  await expect(page.locator(".typing-target")).toBeVisible();
+  await expect(page.locator(".typing-input")).toBeVisible();
+
+  const desktopFocus = await page.evaluate(() => {
+    const primary = document.querySelector(".typing-focus-primary")?.getBoundingClientRect();
+    const shell = document.querySelector(".shell")?.getBoundingClientRect();
+    return {
+      primaryHeight: Math.round(primary?.height ?? 0),
+      shellWidth: Math.round(shell?.width ?? 0),
+      viewportHeight: window.innerHeight,
+      viewportWidth: window.innerWidth
+    };
+  });
+  expect(desktopFocus.primaryHeight).toBeGreaterThanOrEqual(desktopFocus.viewportHeight - 80);
+  expect(desktopFocus.shellWidth / desktopFocus.viewportWidth).toBeGreaterThanOrEqual(0.9);
+  await expectNoHorizontalOverflow(page);
+
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-zen", "true");
+  await page.keyboard.press("Escape");
+  await expect(page.locator("html")).toHaveAttribute("data-zen", "false");
+  await expect(page.locator(".desktop-sidebar")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Zen-Modus" })).toBeFocused();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/spielen/woerter");
+  await page.keyboard.press("Alt+z");
+  await expect(page.locator("html")).toHaveAttribute("data-zen", "true");
+  await expect(page.locator(".mobile-topbar")).toBeHidden();
+  await expect(page.locator(".mobile-bottom-nav")).toBeHidden();
+  await expect(page.locator(".typing-target")).toBeVisible();
+  await expect(page.locator(".typing-input")).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+  await page.keyboard.press("Escape");
+
+  await page.goto("/arena/neu");
+  await expect(page.locator("[data-zen-toggle]")).toHaveCount(0);
 });
 
 test("Quickstart-Karten nutzen volle Hover-Texte ohne Pfeilzeichen", async ({ page }) => {
@@ -553,7 +712,7 @@ test("Vorbereitete Sofortrunden zeigen keinen stehenden Countdown oder tote Wert
   await expectNoHorizontalOverflow(page);
 });
 
-test("Zieltext scrollt beim Tippen bis zum aktuellen Zeichen mit", async ({ page }) => {
+test("Zieltext hält beim Tippen das aktuelle Zeichen sichtbar", async ({ page }) => {
   await login(page, "browser.typing.scroll");
   await page.goto("/spielen");
   const input = page.locator("[data-input]");
@@ -633,6 +792,7 @@ test("Challenge-Spiel bleibt nach vorbereiteter Runde und Reload spielbar", asyn
     await expect(page).toHaveURL(/\/herausforderungen\/[0-9a-f-]{36}\/spielen$/i);
     await expect(page.locator("[data-input]")).toBeEnabled({ timeout: 15_000 });
     await expect(page.locator("[data-target]")).not.toContainText("konnte nicht vorbereitet werden");
+    await expectTypingFocusWidth(page, ".challenge-typing-card");
 
     await page.reload();
     await expect(page.locator("[data-input]")).toBeEnabled({ timeout: 15_000 });
@@ -787,6 +947,85 @@ test("Spielseite zeigt Sofortrunde und Modi sauber auf Desktop und Mobile", asyn
   expect(mobileLayout.quickstartTop).toBeLessThan(mobileLayout.viewportHeight);
   expect(mobileLayout.targetTop).toBeLessThan(mobileLayout.viewportHeight);
   expect(mobileLayout.hasButtonOverflow).toBe(false);
+});
+
+test("Sprint und Wörter verwenden genau eine auswählbare Fokusfläche", async ({ page }) => {
+  await login(page, "browser.typing.selection");
+
+  await page.goto("/spielen/sprint");
+  await expect(page.locator("[data-typing-app]")).toHaveCount(1);
+  await expect(page.locator(".typing-mode-chip")).toHaveCount(4);
+  await expect(page.locator(".typing-mode-chip.active")).toContainText("60");
+  await expect(page.locator(".typing-mode-chip.active")).toHaveAttribute("aria-current", "page");
+  await expect(page.locator("[data-typing-app]")).toHaveAttribute("data-mode", "Sprint60");
+  await page.getByRole("link", { name: "15 Sekunden" }).click();
+  await expect(page).toHaveURL(/\/spielen\/sprint\?seconds=15$/);
+  await expect(page.locator("[data-typing-app]")).toHaveCount(1);
+  await expect(page.locator("[data-typing-app]")).toHaveAttribute("data-mode", "Sprint15");
+  await page.goto("/spielen/sprint?seconds=999");
+  await expect(page.locator("[data-typing-app]")).toHaveAttribute("data-mode", "Sprint60");
+  await expect(page.locator(".typing-mode-chip.active")).toContainText("60");
+
+  await page.goto("/spielen/woerter");
+  await expect(page.locator("[data-typing-app]")).toHaveCount(1);
+  await expect(page.locator(".typing-mode-chip")).toHaveCount(4);
+  await expect(page.locator(".typing-mode-chip.active")).toContainText("25");
+  await expect(page.locator("[data-typing-app]")).toHaveAttribute("data-mode", "Words25");
+  await page.getByRole("link", { name: "100 Wörter" }).click();
+  await expect(page).toHaveURL(/\/spielen\/woerter\?words=100$/);
+  await expect(page.locator("[data-typing-app]")).toHaveCount(1);
+  await expect(page.locator("[data-typing-app]")).toHaveAttribute("data-mode", "Words100");
+  await page.goto("/spielen/woerter?words=-1");
+  await expect(page.locator("[data-typing-app]")).toHaveAttribute("data-mode", "Words25");
+  await expect(page.locator(".typing-mode-chip.active")).toContainText("25");
+});
+
+test("Tippflächen bleiben von Desktop bis Mobile die dominante Fokusbahn", async ({ page }) => {
+  await login(page, "browser.typing.focus.width");
+
+  for (const viewport of [
+    { width: 1920, height: 1080 },
+    { width: 1440, height: 900 },
+    { width: 1024, height: 768 },
+    { width: 768, height: 1024 },
+    { width: 390, height: 844 },
+    { width: 360, height: 800 }
+  ]) {
+    await page.setViewportSize(viewport);
+    await page.goto("/");
+    await expect(page.locator(".dashboard-quick-round .typing-input")).toBeEnabled({ timeout: 15_000 });
+    await expectTypingFocusWidth(page, ".dashboard-quick-round");
+  }
+
+  for (const viewport of [
+    { width: 1920, height: 1080 },
+    { width: 390, height: 844 }
+  ]) {
+    await page.setViewportSize(viewport);
+    for (const item of [
+      { url: "/spielen", selector: ".play-quickstart" },
+      { url: "/spielen/sprint", selector: ".typing-mode-workspace" },
+      { url: "/spielen/woerter", selector: ".typing-mode-workspace" },
+      { url: "/spielen/fehlerfokus", selector: ".typing-focus-primary" }
+    ]) {
+      await page.goto(item.url);
+      await expect(page.locator(`${item.selector} .typing-input`)).toBeEnabled({ timeout: 15_000 });
+      await expectTypingFocusWidth(page, item.selector);
+    }
+
+    await page.goto("/spielen");
+    const textTrainingUrl = await page.locator(".play-text-card a[href*='/spielen/text']").first().getAttribute("href");
+    expect(textTrainingUrl).toBeTruthy();
+    await page.goto(textTrainingUrl);
+    await expect(page.locator(".typing-focus-primary .typing-input")).toBeEnabled({ timeout: 15_000 });
+    await expectTypingFocusWidth(page);
+  }
+
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.goto("/tageschallenge");
+  await page.getByRole("button", { name: "Tageschallenge starten" }).click();
+  await expect(page.locator(".daily-challenge-card .typing-input")).toBeEnabled({ timeout: 15_000 });
+  await expectTypingFocusWidth(page, ".daily-challenge-card");
 });
 
 test("Wettbewerbsseite bleibt responsiv und respektiert Ranglisten-Sichtbarkeit", async ({ page }) => {
@@ -984,7 +1223,26 @@ test("Serienrennen und Teamwertung sind im Raumformular spielbar auswählbar", a
   await login(page, "arena.modi");
   await page.goto("/arena/neu");
 
+  const modeAlignment = await page.locator(".arena-mode-card").evaluateAll((cards) => cards.map((card) => {
+    const radio = card.querySelector("input[type='radio']");
+    const cardBounds = card.getBoundingClientRect();
+    const radioBounds = radio?.getBoundingClientRect();
+    return {
+      offsetFromLeft: Math.round((radioBounds?.left ?? 0) - cardBounds.left),
+      offsetFromCenter: Math.round(Math.abs((radioBounds?.left ?? 0) + (radioBounds?.width ?? 0) / 2 - (cardBounds.left + cardBounds.width / 2))),
+      radioWidth: Math.round(radioBounds?.width ?? 0)
+    };
+  }));
+  expect(modeAlignment).toHaveLength(3);
+  for (const item of modeAlignment) {
+    expect(item.offsetFromLeft).toBeGreaterThanOrEqual(10);
+    expect(item.offsetFromLeft).toBeLessThanOrEqual(18);
+    expect(item.offsetFromCenter).toBeGreaterThan(100);
+    expect(item.radioWidth).toBeGreaterThanOrEqual(16);
+  }
+
   await page.locator('[data-arena-mode-input][value="Series"]').check();
+  await expect(page.locator('.arena-mode-card:has([value="Series"])')).toHaveClass(/selected/);
   await expect(page.locator("[data-arena-round-count-group]")).toBeVisible();
   await page.locator("[data-arena-round-count]").selectOption("3");
   await page.getByLabel("Titel").fill("Browser-Serie");

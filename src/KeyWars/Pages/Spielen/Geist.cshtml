@@ -2,6 +2,7 @@
 @model KeyWars.Pages.Spielen.GeistModel
 @{
     ViewData["Title"] = "Geisterrennen";
+    ViewData["BodyClass"] = "typing-focus-page";
 }
 
 <section class="page-header">
@@ -11,7 +12,7 @@
     </div>
 </section>
 
-<section class="card" data-typing-app data-mode="Ghost" data-text-id="@Model.TextId" data-hide-start-when-prepared="true">
+<section class="card typing-session-card typing-focus-primary" data-typing-app data-mode="Ghost" data-text-id="@Model.TextId" data-hide-start-when-prepared="true">
     <p class="muted">Geist: @Model.ReferenceWpm WPM · @Model.ReferenceAccuracy % Genauigkeit</p>
     <div class="typing-target" data-target tabindex="0" role="region" aria-label="Zieltext des Geistrennens"></div>
     <label>

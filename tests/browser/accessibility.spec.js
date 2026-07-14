@@ -38,6 +38,12 @@ test("Login und App-Shell sind tastatur- und Axe-tauglich", async ({ page }) => 
   await expect(page.locator("#hauptinhalt")).toBeFocused();
   await expectNoSeriousViolations(page, "Dashboard Light");
 
+  const sidebarToggle = page.locator("[data-sidebar-toggle]");
+  await sidebarToggle.click();
+  await expect(sidebarToggle).toHaveAccessibleName("Sidebar ausklappen");
+  await expectNoSeriousViolations(page, "Dashboard mit eingeklappter Sidebar");
+  await sidebarToggle.click();
+
   await page.setViewportSize({ width: 390, height: 844 });
   const opener = page.locator("[data-mobile-menu-opener]");
   await opener.click();
@@ -57,6 +63,13 @@ test("Typing-Zustände behalten Fokus und erfüllen Axe", async ({ page }) => {
   const target = page.locator("[data-target]");
   await expect(input).toBeEnabled({ timeout: 15_000 });
   await expectNoSeriousViolations(page, "Typing vorbereitet");
+
+  const zenToggle = page.locator("[data-zen-toggle]");
+  await zenToggle.click();
+  await expect(zenToggle).toHaveAccessibleName("Zen-Modus beenden");
+  await expectNoSeriousViolations(page, "Typing im Zen-Modus");
+  await page.keyboard.press("Escape");
+  await expect(zenToggle).toHaveAccessibleName("Zen-Modus");
 
   const targetText = ((await target.textContent()) || "").trim();
   await input.fill(Array.from(targetText).slice(0, 3).join(""));

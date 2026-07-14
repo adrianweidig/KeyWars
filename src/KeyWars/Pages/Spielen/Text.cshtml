@@ -2,6 +2,7 @@
 @model KeyWars.Pages.Spielen.TextModel
 @{
     ViewData["Title"] = "Texttraining";
+    ViewData["BodyClass"] = "typing-focus-page";
 }
 
 <section class="page-header">
@@ -12,7 +13,7 @@
     </div>
 </section>
 
-<section class="card typing-session-card" data-typing-app data-mode="Text" data-text-id="@Model.Text.Id" data-hide-start-when-prepared="true">
+<section class="card typing-session-card typing-focus-primary" data-typing-app data-mode="Text" data-text-id="@Model.Text.Id" data-hide-start-when-prepared="true">
     <div class="typing-target" data-target tabindex="0" role="region" aria-label="Zieltext des Texttrainings"></div>
     <label>
         Eingabe

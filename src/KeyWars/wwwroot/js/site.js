@@ -166,6 +166,96 @@ function attachMobileMenu() {
   renderMenu(false);
 }
 
+function attachDesktopSidebar() {
+  const toggles = document.querySelectorAll("[data-sidebar-toggle]");
+  const layout = window.keyWarsLayout;
+  if (toggles.length === 0 || !layout) {
+    return;
+  }
+
+  const renderSidebar = (state, persist = false) => {
+    const collapsed = state === "collapsed";
+    layout.applySidebar(collapsed ? "collapsed" : "expanded");
+    document.body.classList.toggle("sidebar-collapsed", collapsed);
+    if (persist) {
+      layout.storeSidebar(collapsed ? "collapsed" : "expanded");
+    }
+
+    const label = collapsed ? "Sidebar ausklappen" : "Sidebar einklappen";
+    toggles.forEach((toggle) => {
+      toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      toggle.setAttribute("aria-label", label);
+      toggle.title = label;
+    });
+  };
+
+  renderSidebar(layout.readSidebar());
+  toggles.forEach((toggle) => {
+    toggle.addEventListener("click", () => {
+      renderSidebar(document.documentElement.dataset.sidebar === "collapsed" ? "expanded" : "collapsed", true);
+    });
+  });
+}
+
+function attachZenMode() {
+  const toggles = document.querySelectorAll("[data-zen-toggle]");
+  const layout = window.keyWarsLayout;
+  if (toggles.length === 0 || !layout || !document.body.classList.contains("typing-focus-page")) {
+    return;
+  }
+
+  const closeMobileMenu = () => {
+    const panel = document.querySelector("[data-mobile-menu]");
+    document.body.classList.remove("mobile-menu-open");
+    if (panel) {
+      panel.setAttribute("aria-hidden", "true");
+      panel.inert = true;
+    }
+    document.querySelectorAll("[data-mobile-menu-toggle][aria-expanded]").forEach((toggle) => {
+      toggle.setAttribute("aria-expanded", "false");
+    });
+  };
+
+  const renderZen = (active, persist = false) => {
+    const enabled = layout.applyZen(active);
+    document.body.classList.toggle("zen-mode", enabled);
+    if (enabled) {
+      closeMobileMenu();
+    }
+    if (persist) {
+      layout.storeZen(enabled);
+    }
+
+    const label = enabled ? "Zen-Modus beenden" : "Zen-Modus";
+    const title = enabled ? "Zen-Modus beenden (Escape)" : "Zen-Modus aktivieren (Alt+Z)";
+    toggles.forEach((toggle) => {
+      toggle.setAttribute("aria-pressed", enabled ? "true" : "false");
+      toggle.setAttribute("aria-label", label);
+      toggle.title = title;
+      const text = toggle.querySelector("[data-zen-label]");
+      if (text) {
+        text.textContent = label;
+      }
+    });
+  };
+
+  const toggleZen = () => renderZen(document.documentElement.dataset.zen !== "true", true);
+  renderZen(layout.readZen());
+  toggles.forEach((toggle) => toggle.addEventListener("click", toggleZen));
+  document.addEventListener("keydown", (event) => {
+    if (event.altKey && !event.ctrlKey && !event.metaKey && event.key.toLowerCase() === "z") {
+      event.preventDefault();
+      toggleZen();
+      return;
+    }
+
+    if (event.key === "Escape" && document.documentElement.dataset.zen === "true") {
+      renderZen(false, true);
+      toggles[0]?.focus({ preventScroll: true });
+    }
+  });
+}
+
 const overflowTitleSelector = [
   "[data-full-text]",
   "[data-overflow-title]",
@@ -360,4 +450,6 @@ attachShareButtons();
 attachSubmitGuards();
 attachThemeToggle();
 attachMobileMenu();
+attachDesktopSidebar();
+attachZenMode();
 attachOverflowTitles();
