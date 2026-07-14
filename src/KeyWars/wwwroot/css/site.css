@@ -5243,6 +5243,19 @@ body.app-authenticated::before {
   gap: 10px;
 }
 
+.round-stats-block {
+  display: grid;
+  gap: 7px;
+}
+
+.round-stats-context {
+  color: var(--app-muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .round-stats-preview span {
   display: grid;
   gap: 4px;

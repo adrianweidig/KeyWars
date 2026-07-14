@@ -64,8 +64,10 @@ public sealed record ProfileAttemptHistoryRow(
     double Wpm,
     double Accuracy,
     double Consistency,
+    int ConsistencySampleCount,
     int DurationMilliseconds,
-    int CorrectCharacters);
+    int CorrectCharacters,
+    int IncorrectCharacters);
 
 public sealed class ProfileInsightsService(KeyWarsDbContext db, TimeProvider timeProvider)
 {
@@ -276,7 +278,8 @@ public sealed class ProfileInsightsService(KeyWarsDbContext db, TimeProvider tim
         {
             await using var command = connection.CreateCommand();
             command.CommandText = """
-                SELECT Id, CreatedAt, Mode, Wpm, Accuracy, Consistency, DurationMilliseconds, CorrectCharacters
+                SELECT Id, CreatedAt, Mode, Wpm, Accuracy, Consistency, ConsistencySampleCount,
+                       DurationMilliseconds, CorrectCharacters, IncorrectCharacters
                 FROM TypingAttempts
                 WHERE UserProfileId = $profileId
                   AND Phase = $phase
@@ -301,7 +304,9 @@ public sealed class ProfileInsightsService(KeyWarsDbContext db, TimeProvider tim
                     reader.GetDouble(4),
                     reader.GetDouble(5),
                     reader.GetInt32(6),
-                    reader.GetInt32(7)));
+                    reader.GetInt32(7),
+                    reader.GetInt32(8),
+                    reader.GetInt32(9)));
             }
 
             return rows;

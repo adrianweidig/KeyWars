@@ -6,6 +6,8 @@ export function attachTypingApps() {
     const input = root.querySelector("[data-input]");
     const startButton = root.querySelector("[data-start]");
     const result = root.querySelector("[data-result]");
+    const roundStats = root.querySelector("[data-round-stats]");
+    const roundStatsContext = root.querySelector("[data-round-stats-context]");
     const challengeId = root.dataset.challengeId || "";
     const autoPrepare = root.dataset.autoPrepare !== "false";
     const initialStartLabel = root.dataset.startLabel || startButton.textContent.trim() || "Starten";
@@ -55,6 +57,35 @@ export function attachTypingApps() {
 
     const timedSeconds = () => request().sprintSeconds;
     const isTimed = () => timedSeconds() > 0 && (request().mode || "").startsWith("Sprint");
+
+    const targetWasCompleted = (data) => data.targetCompleted === true ||
+      (data.targetCompleted == null && !isTimed() && data.completed === true);
+
+    const updateRoundStats = (data) => {
+      if (!roundStats) {
+        return;
+      }
+
+      const values = {
+        wpm: numberFormat.format(data.wpm),
+        accuracy: `${numberFormat.format(data.accuracy)} %`,
+        correct: numberFormat.format(data.correctCharacters),
+        incorrect: numberFormat.format(data.incorrectCharacters),
+        consistency: Number(data.consistencySampleCount) >= 2
+          ? `${numberFormat.format(data.consistency)} %`
+          : "–"
+      };
+      Object.entries(values).forEach(([name, value]) => {
+        const element = roundStats.querySelector(`[data-round-stat="${name}"]`);
+        if (element) {
+          element.textContent = value;
+        }
+      });
+      roundStats.setAttribute("aria-label", "Ergebnis dieser Runde");
+      if (roundStatsContext) {
+        roundStatsContext.textContent = "Ergebnis dieser Runde";
+      }
+    };
 
     const render = () => {
       if (!session) {
@@ -281,7 +312,9 @@ export function attachTypingApps() {
       const finalErrors = collectFinalErrors().slice(0, 5);
       const observedRows = observed.map(item => `<li>Position ${item.index + 1}: ${escapeHtml(item.expected)} erwartet, ${escapeHtml(item.actual)} getippt (${item.count}x)</li>`).join("");
       const finalRows = finalErrors.map(item => `<li>Position ${item.index + 1}: ${escapeHtml(item.expected)} erwartet, ${escapeHtml(item.actual)} im Ergebnis</li>`).join("");
-      const status = data.completed ? "Zieltext abgeschlossen" : "Zieltext nicht fehlerfrei abgeschlossen";
+      const status = targetWasCompleted(data)
+        ? "Zieltext fehlerfrei abgeschlossen"
+        : isTimed() ? "Sprintzeit beendet" : "Zieltext nicht fehlerfrei abgeschlossen";
       analysis.innerHTML = `<h3>Fehleranalyse</h3>
         <div class="analysis-grid">
           <div><span>Status</span><strong>${status}</strong></div>
@@ -405,13 +438,34 @@ export function attachTypingApps() {
       }
 
       const data = await response.json();
+      const targetCompleted = targetWasCompleted(data);
+      const consistencySampleCount = Math.max(0, Number(data.consistencySampleCount) || 0);
+      const consistencyValue = consistencySampleCount >= 2
+        ? `${numberFormat.format(data.consistency)} %`
+        : "–";
+      const correctCharacters = Math.max(0, Number(data.correctCharacters) || 0);
+      const incorrectCharacters = Math.max(0, Number(data.incorrectCharacters) || 0);
+      const attemptedCharacters = correctCharacters + incorrectCharacters;
+      const durationSeconds = Math.max(0, Number(data.durationMilliseconds) || 0) / 1000;
       const progressPercent = Number.isFinite(data.progressPercent) ? Math.max(0, Math.min(100, data.progressPercent)) : 0;
       const personalBest = Array.isArray(data.motivation?.events) &&
         data.motivation.events.some((item) => item.type === "PersonalBest");
-      const finishTitle = personalBest ? "Neuer Bestwert" : data.completed ? "Runde sauber abgeschlossen" : "Runde gewertet";
-      const finishDetail = data.completed
-        ? "Der Zieltext wurde vollständig erreicht."
-        : `${data.incorrectCharacters} Fehlerzeichen bleiben im Ergebnis sichtbar.`;
+      const finishTitle = personalBest
+        ? "Neuer Bestwert"
+        : targetCompleted ? "Zieltext fehlerfrei abgeschlossen" : isTimed() ? "Sprint abgeschlossen" : "Runde gewertet";
+      const finishDetail = targetCompleted
+        ? "Der Zieltext wurde vollständig und fehlerfrei erreicht."
+        : isTimed()
+          ? "Die Zeit ist abgelaufen. Dein bis dahin erreichter Stand wurde gewertet."
+          : `${incorrectCharacters} Fehlerzeichen bleiben im Ergebnis sichtbar.`;
+      const durationNote = durationSeconds > 0
+        ? `WPM: ${numberFormat.format(correctCharacters)} korrekte Zeichen ÷ 5 in ${numberFormat.format(durationSeconds)} s.`
+        : "WPM basiert auf korrekten Zeichen und der gewerteten Dauer.";
+      const accuracyNote = `Genauigkeit: ${numberFormat.format(correctCharacters)} korrekte von ${numberFormat.format(attemptedCharacters)} gewerteten Zeichen; ${numberFormat.format(incorrectCharacters)} Fehlerzeichen.`;
+      const consistencyNote = consistencySampleCount >= 2
+        ? `Konsistenz aus ${numberFormat.format(consistencySampleCount)} abgeschlossenen Wortzeiten.`
+        : "Für eine Konsistenzwertung sind mindestens zwei abgeschlossene Wortzeiten nötig.";
+      updateRoundStats(data);
       result.innerHTML = `<section class="finish-panel ${personalBest ? "personal-best" : ""}">
         <div class="finish-score">
           <span>${finishTitle}</span>
@@ -422,9 +476,9 @@ export function attachTypingApps() {
           <p>${finishDetail}</p>
           <div class="metric-row result-metrics">
             <div class="metric"><span>Genauigkeit</span><strong>${numberFormat.format(data.accuracy)} %</strong></div>
-            <div class="metric"><span>Konsistenz</span><strong>${numberFormat.format(data.consistency)} %</strong></div>
-            <div class="metric"><span>Korrekte Zeichen</span><strong>${data.correctCharacters}</strong></div>
-            <div class="metric"><span>Level</span><strong>${data.level}</strong></div>
+            <div class="metric"><span>Konsistenz</span><strong>${consistencyValue}</strong></div>
+            <div class="metric"><span>Korrekte Zeichen</span><strong>${numberFormat.format(correctCharacters)}</strong></div>
+            <div class="metric"><span>Fehlerzeichen</span><strong>${numberFormat.format(incorrectCharacters)}</strong></div>
           </div>
         </div>
       </section>
@@ -439,7 +493,7 @@ export function attachTypingApps() {
         </div>
       </section>
       ${renderMotivation(data.motivation)}
-      <p class="metric-note">WPM basiert auf korrekten Zeichen. Konsistenz misst die Schwankung der abgeschlossenen Wortzeiten.</p>`;
+      <p class="metric-note">${durationNote} ${accuracyNote} ${consistencyNote}</p>`;
       result.append(analysis);
       renderAnalysis(data);
       session = null;

@@ -2,7 +2,6 @@ using KeyWars.Auth;
 using KeyWars.Data;
 using KeyWars.Domain;
 using KeyWars.Services;
-using System.Globalization;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
 
@@ -24,8 +23,6 @@ public sealed class IndexModel(
     public CoachRecommendation Recommendation { get; private set; } = new("Starte mit einer ruhigen Runde.", TrainingMode.Sprint60, 1);
     public LevelProgress LevelProgress { get; private set; } = new(1, 0, 0, 200, 0, 200, 0);
     public LeaderboardBoard DailySprintBoard { get; private set; } = EmptyDailySprintBoard;
-    public string LastWpm { get; private set; } = "-";
-    public string LastAccuracy { get; private set; } = "-";
 
     public async Task OnGetAsync(CancellationToken cancellationToken)
     {
@@ -46,14 +43,6 @@ public sealed class IndexModel(
             Profile,
             new LeaderboardQuery(CompetitionBoardKind.Sprint, CompetitionPeriod.Day, TrainingMode.Sprint60, null),
             cancellationToken)).Board;
-
-        var culture = CultureInfo.GetCultureInfo("de-DE");
-        var lastAttempt = Insights.History.FirstOrDefault();
-        if (lastAttempt is not null)
-        {
-            LastWpm = lastAttempt.Wpm.ToString("0.0", culture);
-            LastAccuracy = lastAttempt.Accuracy.ToString("0.0", culture);
-        }
     }
 
     private static readonly ProfileInsights EmptyInsights = new(

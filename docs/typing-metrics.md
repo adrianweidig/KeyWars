@@ -22,6 +22,10 @@ nicht als Fehler gezählt.
   `retryAfterMs`.
 - Nach der Deadline darf ein partieller Sprint abgeschlossen werden. Seine
   gewertete Dauer wird auf das Moduslimit begrenzt.
+- `Completed` kennzeichnet bei einem Sprint einen gültig beendeten Versuch und
+  nicht zwangsläufig einen vollständig oder fehlerfrei erreichten Zieltext.
+  Die Abschlussantwort trennt dies mit `TargetCompleted`: Dieser Wert ist nur
+  dann wahr, wenn alle Zielgrapheme ohne verbleibenden Fehler erreicht wurden.
 - Ein wiederholter oder paralleler Finish-Request liefert das bereits
   persistierte kanonische Ergebnis. Er erzeugt keine zweite Ledger-, XP- oder
   Challenge-Wirkung.
@@ -42,7 +46,8 @@ nicht als Fehler gezählt.
 
 Ohne mindestens zwei Wortdauer-Samples bleibt `Consistency` neutral bei `100`.
 Fehler, Backspaces und Fokusverlust beeinflussen diese Kennzahl nicht direkt;
-sie bleiben eigene Metriken.
+sie bleiben eigene Metriken. Die Oberfläche zeigt bei weniger als zwei Samples
+keinen Prozentwert an und nennt bei einer Wertung die Zahl der Wortzeit-Samples.
 
 ## Fehler- und Schwachendaten
 

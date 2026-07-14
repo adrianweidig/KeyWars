@@ -603,6 +603,62 @@ test("Quickstart-Karten nutzen volle Hover-Texte ohne Pfeilzeichen", async ({ pa
   await expectNoHorizontalOverflow(page);
 });
 
+test("Sprint-Ergebnis trennt Zeitablauf vom fehlerfreien Ziel und erklärt die Werte", async ({ page }, testInfo) => {
+  await login(page, `browser.result.semantics.${testInfo.workerIndex}`);
+  await page.route("**/api/spielen/abschliessen", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        id: "01900000-0000-7000-8000-000000000001",
+        wpm: 95,
+        rawWpm: 159.6,
+        charactersPerMinute: 475,
+        durationMilliseconds: 60_000,
+        accuracy: 59.52,
+        consistency: 22.5,
+        consistencySampleCount: 42,
+        correctCharacters: 475,
+        incorrectCharacters: 323,
+        completed: true,
+        targetCompleted: false,
+        level: 3,
+        experiencePoints: 450,
+        nextLevelXp: 900,
+        remainingXp: 450,
+        progressPercent: 50,
+        motivation: {
+          xpDelta: 0,
+          levelBefore: 3,
+          levelAfter: 3,
+          progressPercent: 50,
+          events: []
+        }
+      })
+    });
+  });
+
+  const card = page.locator(".dashboard-quick-round");
+  const input = card.locator("[data-input]");
+  await expect(input).toBeEnabled({ timeout: 15_000 });
+  const targetLength = Array.from((await card.locator("[data-target]").textContent()).trim()).length;
+  await input.fill("x".repeat(targetLength));
+
+  await expect(card.getByText("Sprint abgeschlossen", { exact: true })).toBeVisible();
+  await expect(card.getByText("Die Zeit ist abgelaufen. Dein bis dahin erreichter Stand wurde gewertet.")).toBeVisible();
+  await expect(card.getByText("Runde sauber abgeschlossen", { exact: true })).toHaveCount(0);
+  await expect(card.getByText("Der Zieltext wurde vollständig erreicht.", { exact: true })).toHaveCount(0);
+  await expect(card.locator("[data-round-stats-context]")).toHaveText("Ergebnis dieser Runde");
+  await expect(card.locator('[data-round-stat="wpm"]')).toHaveText("95");
+  await expect(card.locator('[data-round-stat="accuracy"]')).toHaveText("59,5 %");
+  await expect(card.locator('[data-round-stat="correct"]')).toHaveText("475");
+  await expect(card.locator('[data-round-stat="incorrect"]')).toHaveText("323");
+  await expect(card.locator('[data-round-stat="consistency"]')).toHaveText("22,5 %");
+  await expect(card.locator(".metric-note")).toContainText("475 korrekte von 798 gewerteten Zeichen");
+  await expect(card.locator(".metric-note")).toContainText("Konsistenz aus 42 abgeschlossenen Wortzeiten");
+  await expectNoHorizontalOverflow(page);
+});
+
 test("Offline-Visuals zeigen Achievement-Katalog und Mission-Icons", async ({ page }) => {
   await login(page, "browser.visual.assets");
 

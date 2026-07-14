@@ -128,6 +128,46 @@ public sealed partial class WebSmokeTests : IClassFixture<KeyWarsWebFactory>
     }
 
     [Fact]
+    public async Task ExactWordAttemptReportsTargetCompletionAndConsistencyEvidence()
+    {
+        using var isolatedFactory = new KeyWarsWebFactory();
+        var client = isolatedFactory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        await LoginAsync(client);
+
+        var startResponse = await client.PostAsJsonAsync("/api/spielen/start", new
+        {
+            mode = "Words10",
+            sprintSeconds = 0,
+            wordCount = 10
+        });
+        startResponse.EnsureSuccessStatusCode();
+        using var start = JsonDocument.Parse(await startResponse.Content.ReadAsStringAsync());
+        var attemptId = start.RootElement.GetProperty("id").GetGuid();
+        var nonce = start.RootElement.GetProperty("nonce").GetString();
+        var text = start.RootElement.GetProperty("text").GetString()!;
+        (await client.PostAsJsonAsync("/api/spielen/begin", new { attemptId, nonce })).EnsureSuccessStatusCode();
+
+        var finishResponse = await client.PostAsJsonAsync("/api/spielen/abschliessen", new
+        {
+            attemptId,
+            nonce,
+            input = text,
+            backspaces = 0,
+            focusLosses = 0,
+            clientDurationMilliseconds = 3_000,
+            wordDurationsMilliseconds = new[] { 900, 1_000, 1_100 }
+        });
+        finishResponse.EnsureSuccessStatusCode();
+        using var result = JsonDocument.Parse(await finishResponse.Content.ReadAsStringAsync());
+
+        Assert.True(result.RootElement.GetProperty("completed").GetBoolean());
+        Assert.True(result.RootElement.GetProperty("targetCompleted").GetBoolean());
+        Assert.Equal(3, result.RootElement.GetProperty("consistencySampleCount").GetInt32());
+        Assert.True(result.RootElement.GetProperty("durationMilliseconds").GetInt32() >= 1_000);
+        Assert.Equal(0, result.RootElement.GetProperty("incorrectCharacters").GetInt32());
+    }
+
+    [Fact]
     public async Task IncompatibleAttemptTargetReturnsTypedBadRequest()
     {
         using var isolatedFactory = new KeyWarsWebFactory();

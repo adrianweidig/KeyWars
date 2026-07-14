@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.4.2 - 2026-07-14
+
+- Keep dashboard round statistics on one clearly labeled attempt scope and
+  update every value immediately after the current round finishes.
+- Distinguish a valid timed-sprint finish from a fully and correctly completed
+  target so partial sprints no longer receive misleading success copy.
+- Explain WPM, accuracy and consistency evidence in the result, expose final
+  error characters and suppress consistency percentages without enough timing
+  samples.
+
 ## v0.4.1 - 2026-07-14
 
 - Make every training and arena typing surface the full-width visual focus while

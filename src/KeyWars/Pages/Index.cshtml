@@ -11,6 +11,7 @@
     var leaderboardRows = topSprint.Skip(3).ToList();
     var missions = Model.Missions.Take(3).ToList();
     var recentResults = Model.Insights.History.Take(4).ToList();
+    var lastAttempt = Model.Insights.History.FirstOrDefault();
     var ownSprint = Model.DailySprintBoard.OwnEntry;
 }
 
@@ -34,12 +35,17 @@
         </label>
 
         <div class="dashboard-round-footer">
-            <div class="round-stats-preview" aria-label="Aktuelle Werte">
-                <span><small>WPM</small><strong>@Model.LastWpm</strong></span>
-                <span><small>Genauigkeit</small><strong>@Model.LastAccuracy %</strong></span>
-                <span><small>Zeichen</small><strong>@Model.Insights.Totals.CorrectCharacters.ToString("N0", culture)</strong></span>
-                <span><small>Fehler</small><strong>@Model.Insights.Totals.IncorrectCharacters.ToString("N0", culture)</strong></span>
-                <span><small>Konsistenz</small><strong>@(Model.Insights.Trends.FirstOrDefault()?.AverageConsistency.ToString("0", culture) ?? "-") %</strong></span>
+            <div class="round-stats-block">
+                <small class="round-stats-context" data-round-stats-context>
+                    @(lastAttempt is null ? "Noch keine abgeschlossene Runde" : "Letzte abgeschlossene Runde")
+                </small>
+                <div class="round-stats-preview" data-round-stats aria-label="@(lastAttempt is null ? "Noch keine abgeschlossene Runde" : "Letzte abgeschlossene Runde")">
+                    <span><small>WPM</small><strong data-round-stat="wpm">@(lastAttempt?.Wpm.ToString("0.0", culture) ?? "–")</strong></span>
+                    <span><small>Genauigkeit</small><strong data-round-stat="accuracy">@(lastAttempt is null ? "–" : $"{lastAttempt.Accuracy.ToString("0.0", culture)} %")</strong></span>
+                    <span><small>Korrekte Zeichen</small><strong data-round-stat="correct">@(lastAttempt?.CorrectCharacters.ToString("N0", culture) ?? "–")</strong></span>
+                    <span><small>Fehlerzeichen</small><strong data-round-stat="incorrect">@(lastAttempt?.IncorrectCharacters.ToString("N0", culture) ?? "–")</strong></span>
+                    <span><small>Konsistenz</small><strong data-round-stat="consistency">@(lastAttempt is null || lastAttempt.ConsistencySampleCount < 2 ? "–" : $"{lastAttempt.Consistency.ToString("0.0", culture)} %")</strong></span>
+                </div>
             </div>
             <div class="form-actions typing-actions">
                 <button type="button" data-start>Neue Runde</button>

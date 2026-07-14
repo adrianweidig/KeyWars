@@ -127,6 +127,13 @@ public sealed class ProfileInsightsServiceTests
         Assert.Equal(10, insights.History.Count);
         Assert.Equal(125, insights.HistoryTotalItems);
         Assert.Equal(13, insights.HistoryTotalPages);
+        foreach (var historyRow in insights.History)
+        {
+            var attempt = attempts.Single(item => item.Id == historyRow.Id);
+            Assert.Equal(attempt.CorrectCharacters, historyRow.CorrectCharacters);
+            Assert.Equal(attempt.IncorrectCharacters, historyRow.IncorrectCharacters);
+            Assert.Equal(attempt.ConsistencySampleCount, historyRow.ConsistencySampleCount);
+        }
         Assert.Single(insights.FeaturedAchievements);
         Assert.Single(insights.CurrentGoals);
         Assert.Single(insights.RecentEvents);
