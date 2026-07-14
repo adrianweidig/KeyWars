@@ -14,6 +14,102 @@ public sealed record RankedRaceResult(RaceResult Result, int Placement);
 
 public sealed record RatingChange(Guid UserProfileId, int RatingBefore, int RatingDelta, int RatingAfter);
 
+public sealed record ArenaSeriesScore(
+    Guid UserProfileId,
+    int Points,
+    int RoundWins,
+    int FinishedRounds,
+    int TotalDurationMilliseconds,
+    double AverageAccuracy);
+
+public sealed record RankedArenaSeriesScore(ArenaSeriesScore Score, int Placement);
+
+public sealed record ArenaTeamScore(
+    int TeamNumber,
+    int Points,
+    int RoundWins,
+    int FinishedRounds,
+    int TotalDurationMilliseconds);
+
+public sealed record RankedArenaTeamScore(ArenaTeamScore Score, int Placement);
+
+public static class ArenaScoring
+{
+    public static int PointsForRound(ParticipantStatus status, int? placement, int participantCount)
+    {
+        if (status != ParticipantStatus.Finished || placement is null || participantCount < 1)
+        {
+            return 0;
+        }
+
+        return Math.Max(1, participantCount - placement.Value + 1);
+    }
+
+    public static IReadOnlyList<RankedArenaSeriesScore> RankSeries(IEnumerable<ArenaSeriesScore> scores)
+    {
+        var ordered = scores
+            .OrderByDescending(item => item.Points)
+            .ThenByDescending(item => item.RoundWins)
+            .ThenByDescending(item => item.FinishedRounds)
+            .ThenBy(item => item.TotalDurationMilliseconds)
+            .ThenByDescending(item => item.AverageAccuracy)
+            .ThenBy(item => item.UserProfileId)
+            .ToArray();
+
+        var ranked = new List<RankedArenaSeriesScore>(ordered.Length);
+        for (var index = 0; index < ordered.Length; index++)
+        {
+            var placement = index + 1;
+            if (index > 0 && IsSeriesTie(ordered[index - 1], ordered[index]))
+            {
+                placement = ranked[index - 1].Placement;
+            }
+
+            ranked.Add(new RankedArenaSeriesScore(ordered[index], placement));
+        }
+
+        return ranked;
+    }
+
+    public static IReadOnlyList<RankedArenaTeamScore> RankTeams(IEnumerable<ArenaTeamScore> scores)
+    {
+        var ordered = scores
+            .OrderByDescending(item => item.Points)
+            .ThenByDescending(item => item.RoundWins)
+            .ThenByDescending(item => item.FinishedRounds)
+            .ThenBy(item => item.TotalDurationMilliseconds)
+            .ThenBy(item => item.TeamNumber)
+            .ToArray();
+
+        var ranked = new List<RankedArenaTeamScore>(ordered.Length);
+        for (var index = 0; index < ordered.Length; index++)
+        {
+            var placement = index + 1;
+            if (index > 0 && IsTeamTie(ordered[index - 1], ordered[index]))
+            {
+                placement = ranked[index - 1].Placement;
+            }
+
+            ranked.Add(new RankedArenaTeamScore(ordered[index], placement));
+        }
+
+        return ranked;
+    }
+
+    private static bool IsSeriesTie(ArenaSeriesScore left, ArenaSeriesScore right) =>
+        left.Points == right.Points &&
+        left.RoundWins == right.RoundWins &&
+        left.FinishedRounds == right.FinishedRounds &&
+        left.TotalDurationMilliseconds == right.TotalDurationMilliseconds &&
+        Math.Abs(left.AverageAccuracy - right.AverageAccuracy) < 0.001d;
+
+    private static bool IsTeamTie(ArenaTeamScore left, ArenaTeamScore right) =>
+        left.Points == right.Points &&
+        left.RoundWins == right.RoundWins &&
+        left.FinishedRounds == right.FinishedRounds &&
+        left.TotalDurationMilliseconds == right.TotalDurationMilliseconds;
+}
+
 public static class RaceRanking
 {
     public static IReadOnlyList<RankedRaceResult> RankClassic(IEnumerable<RaceResult> results)

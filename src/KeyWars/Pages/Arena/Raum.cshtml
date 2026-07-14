@@ -6,6 +6,7 @@
     var currentParticipant = Model.Snapshot.Participants.FirstOrDefault(item => item.ProfileId == Model.CurrentProfileId);
     var isHost = Model.Snapshot.CreatorProfileId == Model.CurrentProfileId;
     var inLobby = Model.Snapshot.Phase == LiveRoomPhase.Lobby;
+    var betweenRounds = Model.Snapshot.Phase == LiveRoomPhase.RoundResults;
     var isRunning = Model.Snapshot.Phase == LiveRoomPhase.Running;
     var readyButtonText = currentParticipant?.Ready == true ? "Nicht bereit" : "Bereit";
     var rankedParticipants = Model.Snapshot.Participants
@@ -23,7 +24,7 @@
 <section class="page-header arena-page-header">
     <div>
         <h1>@Model.Snapshot.Title</h1>
-        <p class="lead">@DisplayNames.For(Model.Snapshot.Mode) · Runde @Model.Snapshot.CurrentRound von @Model.Snapshot.RoundCount · @Model.Snapshot.Participants.Count @(Model.Snapshot.Participants.Count == 1 ? "Person" : "Personen")</p>
+        <p class="lead">@DisplayNames.For(Model.Snapshot.Mode) · <span data-arena-round-label>Runde @Model.Snapshot.CurrentRound von @Model.Snapshot.RoundCount</span> · @Model.Snapshot.Participants.Count @(Model.Snapshot.Participants.Count == 1 ? "Person" : "Personen")</p>
         <div class="room-code-share">
             <span class="room-code">Code <strong>@Model.Snapshot.Code</strong></span>
             <button type="button" class="secondary compact-button" data-copy-text="@Model.Snapshot.Code" data-copy-success="Raumcode kopiert.">Code kopieren</button>
@@ -38,10 +39,10 @@
                 <button type="submit" class="secondary" disabled>@readyButtonText</button>
             </form>
         }
-        @if (isHost && inLobby)
+        @if (isHost && (inLobby || betweenRounds))
         {
-            <form method="post" asp-page-handler="Start" data-arena-start-form class="lobby-only-action">
-                <button type="submit" disabled>Starten</button>
+            <form method="post" asp-page-handler="Start" data-arena-start-form>
+                <button type="submit" disabled>@(betweenRounds ? "Nächste Runde" : "Starten")</button>
             </form>
         }
         <button type="button" class="secondary arena-leave-button" data-arena-leave disabled>Raum verlassen</button>
@@ -138,6 +139,19 @@
         <div class="visually-hidden" aria-live="polite" data-arena-live-region></div>
     </div>
     <aside class="arena-secondary">
+        <div class="card arena-team-board @(Model.Snapshot.Mode == LiveRoomMode.Team ? "" : "is-hidden")" data-arena-team-board>
+            <h2>Teamwertung</h2>
+            <p class="muted">Zieleinläufe bringen Platzierungspunkte. Bei Gleichstand entscheiden Rundensiege und Gesamtzeit.</p>
+            <div data-arena-teams>
+                @foreach (var team in Model.Snapshot.Teams ?? [])
+                {
+                    <div class="arena-team-row" data-team-number="@team.TeamNumber">
+                        <strong>@(team.Placement). @team.Name</strong>
+                        <span>@team.Points Punkte · @RoundWinsText(team.RoundWins)</span>
+                    </div>
+                }
+            </div>
+        </div>
         <div class="card">
             <div class="arena-scale-note">
                 <strong data-arena-mode-label>@DisplayModeLabel(displayMode)</strong>
@@ -183,14 +197,16 @@
         <div class="card">
             <h2>Teilnehmende</h2>
             <table class="table participant-list @displayMode">
-                <thead><tr><th>Name</th><th>Status</th><th>Fortschritt</th><th>Platz</th></tr></thead>
+                <thead><tr><th>Name</th><th>Team</th><th>Status</th><th>Fortschritt</th><th>Punkte</th><th>Platz</th></tr></thead>
                 <tbody data-arena-participants>
                 @foreach (var participant in visibleParticipants)
                 {
                     <tr data-participant-id="@participant.ProfileId">
                         <td data-label="Name">@participant.DisplayName</td>
+                        <td data-label="Team">@TeamName(participant.TeamNumber)</td>
                         <td data-label="Status"><span class="pill">@DisplayNames.For(participant.Status)</span></td>
                         <td data-label="Fortschritt">@participant.CorrectCharacters / @Model.Snapshot.TargetCharacterCount</td>
+                        <td data-label="Punkte">@participant.SeriesPoints</td>
                         <td data-label="Platz">@(participant.Placement?.ToString() ?? "-")</td>
                     </tr>
                 }
@@ -202,7 +218,7 @@
                 {
                     <div class="podium-row" data-podium-participant-id="@participant.ProfileId">
                         <strong>@(participant.Placement?.ToString() ?? "-"). @participant.DisplayName</strong>
-                        <span>@FormatNumber(participant.Wpm) WPM · @FormatNumber(participant.Accuracy) %</span>
+                         <span>@participant.SeriesPoints Punkte · @FormatNumber(participant.Wpm) WPM · @FormatNumber(participant.Accuracy) %</span>
                     </div>
                 }
             </div>
@@ -248,6 +264,15 @@
 
     private static string Bool(bool value) => value.ToString().ToLowerInvariant();
 
+    private static string TeamName(int? teamNumber) => teamNumber switch
+    {
+        1 => "Alpha",
+        2 => "Bravo",
+        _ => "-"
+    };
+
+    private static string RoundWinsText(int roundWins) => $"{roundWins} {(roundWins == 1 ? "Rundensieg" : "Rundensiege")}";
+
     private static string InitialPersistenceState(KeyWars.Services.LiveRoomSnapshot snapshot)
     {
         if (!snapshot.Finished)
@@ -272,8 +297,8 @@
     {
         LiveRoomPhase.Lobby => "Bereit",
         LiveRoomPhase.Countdown => "Start",
-        LiveRoomPhase.Running when snapshot.StartedAt is { } startedAt => FormatDuration(snapshot.ServerNow - startedAt),
-        LiveRoomPhase.RoundResults or LiveRoomPhase.SeriesResults or LiveRoomPhase.Closed when snapshot.StartedAt is { } startedAt && snapshot.FinishedAt is { } finishedAt => FormatDuration(finishedAt - startedAt),
+        LiveRoomPhase.Running when snapshot.RaceStartsAt is { } raceStartsAt => FormatDuration(snapshot.ServerNow - raceStartsAt),
+        LiveRoomPhase.RoundResults or LiveRoomPhase.SeriesResults or LiveRoomPhase.Closed when snapshot.RaceStartsAt is { } raceStartsAt && snapshot.RoundEndsAt is { } roundEndsAt => FormatDuration(roundEndsAt - raceStartsAt),
         _ => "-"
     };
 
@@ -318,7 +343,9 @@
     {
         if (totalParticipants == visibleParticipants)
         {
-            return $"{totalParticipants} aktive Teilnehmende von {maxParticipants} Plätzen";
+            return totalParticipants == 1
+                ? $"1 aktive Person von {maxParticipants} Plätzen"
+                : $"{totalParticipants} aktive Teilnehmende von {maxParticipants} Plätzen";
         }
 
         return $"{visibleParticipants} von {totalParticipants} Teilnehmenden im Fokus, Kapazität {maxParticipants}";

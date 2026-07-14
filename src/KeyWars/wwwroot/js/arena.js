@@ -16,6 +16,9 @@ export function attachArenaPages() {
     const hud = root.querySelector("[data-arena-hud]");
     const liveBoard = root.querySelector("[data-arena-live-board]");
     const podium = root.querySelector("[data-arena-podium]");
+    const teamBoard = root.querySelector("[data-arena-team-board]");
+    const teams = root.querySelector("[data-arena-teams]");
+    const roundLabel = document.querySelector("[data-arena-round-label]");
     const liveRegion = root.querySelector("[data-arena-live-region]");
     const modeLabel = root.querySelector("[data-arena-mode-label]");
     const rosterSummaryLabel = root.querySelector("[data-arena-roster-summary]");
@@ -274,7 +277,7 @@ export function attachArenaPages() {
       const capacity = maxParticipants();
       if (total === visible) {
         return capacity > 0
-          ? `${total} aktive Teilnehmende von ${capacity} Plätzen`
+          ? total === 1 ? `1 aktive Person von ${capacity} Plätzen` : `${total} aktive Teilnehmende von ${capacity} Plätzen`
           : `${total} sichtbare Teilnehmende`;
       }
 
@@ -310,7 +313,9 @@ export function attachArenaPages() {
       row.dataset.participantId = participant.profileId;
       row.append(
         tableCell(""),
+        tableCell(""),
         tableCell(document.createElement("span")),
+        tableCell(""),
         tableCell(""),
         tableCell("")
       );
@@ -318,13 +323,35 @@ export function attachArenaPages() {
     };
 
     const updateParticipantRow = (row, participant) => {
-      ["Name", "Status", "Fortschritt", "Platz"].forEach((label, index) => {
+      ["Name", "Team", "Status", "Fortschritt", "Punkte", "Platz"].forEach((label, index) => {
         row.cells[index].dataset.label = label;
       });
       row.cells[0].textContent = participant.displayName;
-      row.cells[1].replaceChildren(statusPill(participant.status));
-      row.cells[2].textContent = `${participant.correctCharacters} / ${snapshot.targetCharacterCount}`;
-      row.cells[3].textContent = participant.placement ? String(participant.placement) : participant.rankHint ? `~${participant.rankHint}` : String(rankFor(participant.profileId));
+      row.cells[1].textContent = teamName(participant.teamNumber);
+      row.cells[2].replaceChildren(statusPill(participant.status));
+      row.cells[3].textContent = `${participant.correctCharacters} / ${snapshot.targetCharacterCount}`;
+      row.cells[4].textContent = String(participant.seriesPoints || 0);
+      row.cells[5].textContent = participant.placement ? String(participant.placement) : participant.rankHint ? `~${participant.rankHint}` : String(rankFor(participant.profileId));
+    };
+
+    const renderTeams = () => {
+      if (!teamBoard || !teams || !snapshot) {
+        return;
+      }
+
+      const teamStandings = Array.isArray(snapshot.teams) ? snapshot.teams : [];
+      teamBoard.classList.toggle("is-hidden", snapshot.mode !== "Team");
+      teams.replaceChildren(...teamStandings.map((team) => {
+        const row = document.createElement("div");
+        row.className = "arena-team-row";
+        row.dataset.teamNumber = String(team.teamNumber);
+        const title = document.createElement("strong");
+        title.textContent = `${team.placement || "-"}. ${team.name}`;
+        const detail = document.createElement("span");
+        detail.textContent = `${team.points} Punkte · ${team.roundWins} ${team.roundWins === 1 ? "Rundensieg" : "Rundensiege"}`;
+        row.append(title, detail);
+        return row;
+      }));
     };
 
     const trackLane = (participant) => {
@@ -593,9 +620,10 @@ export function attachArenaPages() {
         const title = document.createElement("strong");
         title.textContent = `${participant.placement || "-"} . ${participant.displayName}`;
         const detail = document.createElement("span");
-        detail.textContent = participant.status === "Dnf"
+        const performance = participant.status === "Dnf"
           ? "Nicht beendet"
           : `${formatNumber(participant.wpm)} WPM · ${formatNumber(participant.accuracy)} %`;
+        detail.textContent = `${participant.seriesPoints || 0} Punkte · ${performance}`;
         row.append(title, detail);
         return row;
       }));
@@ -657,6 +685,7 @@ export function attachArenaPages() {
 
       const running = snapshot.phase === "Running";
       const lobby = snapshot.phase === "Lobby";
+      const betweenRounds = snapshot.phase === "RoundResults" && !snapshot.finished;
       renderPhaseSteps();
       if (state) {
         state.textContent = phaseLabel(snapshot.phase);
@@ -676,10 +705,10 @@ export function attachArenaPages() {
         readyButton.disabled = !connected || readyPending || !snapshot || !lobby;
       }
 
-      setHidden(startForm, !lobby);
+      setHidden(startForm, !lobby && !betweenRounds);
       if (startButton) {
-        startButton.textContent = startPending ? "Startet..." : "Starten";
-        startButton.disabled = !connected || startPending || !snapshot || !lobby;
+        startButton.textContent = startPending ? "Startet..." : betweenRounds ? "Nächste Runde" : "Starten";
+        startButton.disabled = !connected || startPending || !snapshot || (!lobby && !betweenRounds);
       }
 
       if (leaveButton) {
@@ -723,6 +752,7 @@ export function attachArenaPages() {
         snapshot.phase,
         snapshot.raceStartsAt || "",
         snapshot.startedAt || "",
+        snapshot.roundEndsAt || "",
         snapshot.finishedAt || "",
         snapshot.finished ? "finished" : "active"
       ].join("|");
@@ -758,18 +788,20 @@ export function attachArenaPages() {
         return;
       }
 
-      if (!snapshot.startedAt) {
+      const roundStartedAtValue = snapshot.raceStartsAt || snapshot.startedAt;
+      if (!roundStartedAtValue) {
         value.textContent = snapshot.phase === "Lobby" ? "Bereit" : "-";
         label.textContent = snapshot.phase === "Lobby" ? "Lobby" : phaseLabel(snapshot.phase);
         return;
       }
 
-      const startedAt = new Date(snapshot.startedAt).getTime();
+      const startedAt = new Date(roundStartedAtValue).getTime();
       const tick = () => {
-        const end = snapshot.finishedAt ? new Date(snapshot.finishedAt).getTime() : Date.now() + clockOffset;
+        const endedAt = snapshot.roundEndsAt || snapshot.finishedAt;
+        const end = endedAt ? new Date(endedAt).getTime() : Date.now() + clockOffset;
         value.textContent = formatDuration(Math.max(0, end - startedAt));
-        label.textContent = snapshot.finished ? "Dauer" : "vergangen";
-        if (!snapshot.finished) {
+        label.textContent = snapshot.phase === "RoundResults" ? "Rundendauer" : snapshot.finished ? "Dauer" : "vergangen";
+        if (!endedAt) {
           timerFrame = requestAnimationFrame(tick);
         }
       };
@@ -888,7 +920,19 @@ export function attachArenaPages() {
         incoming.persistenceState = previousPersistenceState;
       }
 
+      const roundChanged = snapshot && Number(snapshot.currentRound) !== Number(incoming.currentRound);
       snapshot = incoming;
+      if (roundChanged) {
+        sequence = 0;
+        backspaces = 0;
+        focusLosses = 0;
+        finishedLocally = false;
+        previousCurrentRank = null;
+        lastRenderedTargetText = null;
+        if (input) {
+          input.value = "";
+        }
+      }
       persistenceState = persistenceStateFor(snapshot);
       const currentParticipant = snapshot.participants?.find((participant) => participant.profileId === currentProfileId);
       const serverSequence = Number(currentParticipant?.sequence);
@@ -903,7 +947,9 @@ export function attachArenaPages() {
       renderParticipants();
       renderTrack();
       renderHud();
+      renderTeams();
       renderPodium();
+      setText(roundLabel, `Runde ${snapshot.currentRound} von ${snapshot.roundCount}`);
       renderState();
       renderPersistenceStatus();
     };
@@ -1338,6 +1384,10 @@ function phaseLabel(phase) {
     Closed: "Geschlossen",
     Aborted: "Abgebrochen"
   }[phase] || "Arena";
+}
+
+function teamName(teamNumber) {
+  return Number(teamNumber) === 1 ? "Alpha" : Number(teamNumber) === 2 ? "Bravo" : "-";
 }
 
 function normalizePersistenceState(value) {

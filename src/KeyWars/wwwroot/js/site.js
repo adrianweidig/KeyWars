@@ -272,6 +272,9 @@ function attachArenaCreateForms() {
     const title = form.querySelector("[data-text-preview-title]");
     const stats = form.querySelector("[data-text-preview-stats]");
     const body = form.querySelector("[data-text-preview-body]");
+    const modeInputs = [...form.querySelectorAll("[data-arena-mode-input]")];
+    const roundCount = form.querySelector("[data-arena-round-count]");
+    const roundCountGroup = form.querySelector("[data-arena-round-count-group]");
     if (!select || !title || !stats || !body) {
       return;
     }
@@ -294,7 +297,22 @@ function attachArenaCreateForms() {
     };
 
     select.addEventListener("change", updatePreview);
+    const updateMode = () => {
+      const selectedMode = modeInputs.find((input) => input.checked)?.value || "Classic";
+      form.querySelectorAll(".arena-mode-card").forEach((card) => {
+        card.classList.toggle("selected", card.querySelector("[data-arena-mode-input]")?.checked === true);
+      });
+      roundCountGroup?.classList.toggle("is-hidden", selectedMode !== "Series");
+      if (roundCount && selectedMode !== "Series") {
+        roundCount.value = "1";
+      } else if (roundCount && !["3", "5"].includes(roundCount.value)) {
+        roundCount.value = "3";
+      }
+    };
+
+    modeInputs.forEach((input) => input.addEventListener("change", updateMode));
     updatePreview();
+    updateMode();
   });
 }
 

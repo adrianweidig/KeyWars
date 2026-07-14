@@ -583,7 +583,15 @@ public sealed class SqliteLiveRoomCompletionWriter(IServiceScopeFactory scopeFac
                 item.Wpm,
                 0))
             .ToArray();
-        var ranked = RaceRanking.RankClassic(rankingInput);
+        var ranked = record.Participants.All(item => item.Placement is not null)
+            ? rankingInput
+                .Select(result => new RankedRaceResult(
+                    result,
+                    record.Participants.Single(item => item.UserProfileId == result.UserProfileId).Placement!.Value))
+                .OrderBy(item => item.Placement)
+                .ThenBy(item => item.Result.UserProfileId)
+                .ToArray()
+            : RaceRanking.RankClassic(rankingInput);
         var isServerAbort = record.Participants.Any(item => item.Status == ParticipantStatus.AbortedByServer);
         if (!isServerAbort && ranked.Count >= 2)
         {
@@ -624,6 +632,7 @@ public sealed class SqliteLiveRoomCompletionWriter(IServiceScopeFactory scopeFac
             {
                 LiveRoomSummaryId = record.Id,
                 UserProfileId = participant.UserProfileId,
+                TeamNumber = participant.TeamNumber,
                 Status = participant.Status,
                 Placement = participant.Placement,
                 DurationMilliseconds = participant.DurationMilliseconds,

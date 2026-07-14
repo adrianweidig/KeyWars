@@ -2275,6 +2275,37 @@ select:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 
+.arena-team-board {
+  display: grid;
+  gap: 12px;
+}
+
+.arena-team-board.is-hidden {
+  display: none;
+}
+
+.arena-team-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.arena-team-row:first-child {
+  border-color: rgba(36, 200, 216, 0.55);
+  background: rgba(36, 200, 216, 0.09);
+}
+
+.arena-team-row span {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .typing-input {
   min-height: 100px;
   font-size: 1.1rem;

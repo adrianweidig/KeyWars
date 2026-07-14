@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.4.0 - 2026-07-14
+
+- Add server-authoritative three- and five-round arena series with placement
+  points, round wins, deterministic tie handling and one aggregated result.
+- Add automatically balanced Team Alpha and Team Bravo races with a live team
+  board, shared scoring, team placements and persisted team assignments.
+- Expand the seeded German training library to 33 curated texts, including
+  twelve military terminology texts, nine original stories and six factual
+  scenarios.
+- Add the EF Core migration, documentation, unit, concurrency, HTTP and browser
+  coverage for the new arena formats and text catalog.
+
 ## v0.3.1 - 2026-07-13
 
 - Handle expected challenge lifecycle errors inside the Razor Pages instead of

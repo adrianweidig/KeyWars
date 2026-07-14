@@ -98,7 +98,9 @@ public enum LiveRoomMode
     Classic,
     TimeDuel,
     Precision,
-    BestOf
+    BestOf,
+    Series,
+    Team
 }
 
 public enum GamificationEventType

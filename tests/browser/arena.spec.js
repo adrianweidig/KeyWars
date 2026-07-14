@@ -980,6 +980,29 @@ test("Raumformular blockiert doppelte Submit-Aktion im echten Browser", async ({
   });
 });
 
+test("Serienrennen und Teamwertung sind im Raumformular spielbar auswählbar", async ({ page }) => {
+  await login(page, "arena.modi");
+  await page.goto("/arena/neu");
+
+  await page.locator('[data-arena-mode-input][value="Series"]').check();
+  await expect(page.locator("[data-arena-round-count-group]")).toBeVisible();
+  await page.locator("[data-arena-round-count]").selectOption("3");
+  await page.getByLabel("Titel").fill("Browser-Serie");
+  await page.getByRole("button", { name: "Raum erstellen" }).click();
+  await expect(page.locator("[data-arena-round-label]")).toHaveText("Runde 1 von 3");
+  await expect(page.locator(".page-header .lead")).toContainText("Serienrennen");
+
+  await page.goto("/arena/neu");
+  await page.locator('[data-arena-mode-input][value="Team"]').check();
+  await expect(page.locator("[data-arena-round-count-group]")).toBeHidden();
+  await expect(page.locator("[data-arena-round-count]")).toHaveValue("1");
+  await page.getByLabel("Titel").fill("Browser-Teams");
+  await page.getByRole("button", { name: "Raum erstellen" }).click();
+  await expect(page.locator(".page-header .lead")).toContainText("Teamwertung");
+  await expect(page.locator("[data-arena-team-board]")).toBeVisible();
+  await expect(page.locator("[data-arena-team-board]")).toContainText("Team Alpha");
+});
+
 test("Texttraining zeigt Absatzwechsel als Enter-Stelle", async ({ page }, testInfo) => {
   await login(page, `browser.paragraph.${testInfo.workerIndex}`);
 

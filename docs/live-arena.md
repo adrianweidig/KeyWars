@@ -6,10 +6,20 @@ pro Taste in SQLite geschrieben. Ein Host-Start führt zuerst in eine
 serverseitige Countdown-Phase; der Zieltext wird erst zur freigegebenen
 Startzeit im Snapshot ausgeliefert.
 
-Bis die Serienlogik aus KW-018 vollständig umgesetzt ist, akzeptiert der
-produktive Raumvertrag genau eine Runde. Anfragen für 3- oder 5-Runden-Serien
-werden kontrolliert abgelehnt, damit die UI keine Best-of-Serie verspricht, die
-nach Runde 1 endet.
+Der produktive Raumvertrag unterstützt drei auswählbare Formate:
+
+- das klassische Einzelrennen über eine Runde;
+- das Serienrennen über drei oder fünf Runden;
+- die Teamwertung über eine Runde mit automatisch ausgeglichener Verteilung
+  auf Team Alpha und Team Bravo.
+
+In einer Serie erhält ein fehlerfrei beendeter Lauf absteigende
+Platzierungspunkte; ein nicht beendeter Lauf erhält null Punkte. Die
+Gesamtwertung sortiert nach Punkten, Rundensiegen, beendeten Runden,
+Gesamtzeit und durchschnittlicher Genauigkeit. In der Teamwertung werden die
+Punkte aller Teammitglieder addiert. Bei Gleichstand entscheiden Rundensiege,
+beendete Läufe und Gesamtzeit. Diese Regeln werden serverseitig angewendet und
+als Teil jedes Raumsnapshots ausgeliefert.
 
 Präsenz wird pro Profil und aktiver SignalR-Connection geführt. Mehrere Tabs
 derselben Person erzeugen eine Teilnehmerzeile. Erst wenn die letzte
@@ -19,10 +29,11 @@ periodischer Hintergrund-Sweep setzt abgelaufene Lobby-Verbindungen auf
 Verlässt die Raumleitung in der Lobby den Raum, geht die Leitung auf die
 älteste aktive Person über.
 
-Beendete Arena-Runden werden nicht per Fire-and-forget gespeichert. Der
-Raummanager erstellt einen unveränderlichen Abschlussrecord mit Raum-ID, Runde,
+Beendete Arena-Räume werden nicht per Fire-and-forget gespeichert. Bei einer
+Serie bleiben Zwischenergebnisse im flüchtigen Raumzustand; erst die
+Gesamtwertung erzeugt genau einen unveränderlichen Abschlussrecord mit Raum-ID, Runde,
 Raumversion und Idempotenzschlüssel. Eine begrenzte gehostete Queue schreibt
-die Zusammenfassung und alle Teilnehmerresultate in einer SQLite-Transaktion,
+die Zusammenfassung, Teamzuordnung und alle aggregierten Teilnehmerresultate in einer SQLite-Transaktion,
 berechnet das Arena-Rating genau einmal und aktualisiert Profilrating,
 Matchanzahl und Saisonpunkte atomar. Transiente SQLite-Fehler werden begrenzt
 mit Backoff wiederholt; dauerhaft fehlgeschlagene Jobs bleiben in der

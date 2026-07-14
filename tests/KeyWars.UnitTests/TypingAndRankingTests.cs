@@ -235,7 +235,7 @@ public sealed class TypingAndRankingTests
     [Fact]
     public void StandardTextsAreMeaningfulLongExamples()
     {
-        Assert.True(GermanWordBank.StandardTexts.Length >= 6);
+        Assert.True(GermanWordBank.StandardTexts.Length >= 30);
         Assert.Equal(
             GermanWordBank.StandardTexts.Length,
             GermanWordBank.StandardTexts.Select(text => text.Key).Distinct(StringComparer.Ordinal).Count());
@@ -248,6 +248,36 @@ public sealed class TypingAndRankingTests
             Assert.True(TypingEngine.CountWords(normalized) >= 55, $"{text.Key} ist zu kurz.");
             Assert.True(TypingEngine.SplitGraphemes(normalized).Count >= 350, $"{text.Key} braucht einen größeren Beispieltext.");
         }
+
+        Assert.True(GermanWordBank.StandardTexts.Count(text => text.Key.StartsWith("mil-", StringComparison.Ordinal)) >= 12);
+        Assert.True(GermanWordBank.StandardTexts.Count(text => text.Key.StartsWith("story-", StringComparison.Ordinal)) >= 8);
+    }
+
+    [Fact]
+    public void ArenaScoringAwardsPlacementPointsAndRanksSeriesDeterministically()
+    {
+        Assert.Equal(4, ArenaScoring.PointsForRound(ParticipantStatus.Finished, 1, 4));
+        Assert.Equal(1, ArenaScoring.PointsForRound(ParticipantStatus.Finished, 4, 4));
+        Assert.Equal(0, ArenaScoring.PointsForRound(ParticipantStatus.Dnf, 2, 4));
+
+        var first = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        var second = Guid.Parse("00000000-0000-0000-0000-000000000002");
+        var ranked = ArenaScoring.RankSeries(
+        [
+            new ArenaSeriesScore(first, 8, 1, 3, 90_000, 98),
+            new ArenaSeriesScore(second, 8, 2, 3, 95_000, 97)
+        ]);
+
+        Assert.Equal(second, ranked[0].Score.UserProfileId);
+        Assert.Equal(1, ranked[0].Placement);
+        Assert.Equal(2, ranked[1].Placement);
+
+        var tiedTeams = ArenaScoring.RankTeams(
+        [
+            new ArenaTeamScore(1, 6, 1, 2, 55_000),
+            new ArenaTeamScore(2, 6, 1, 2, 55_000)
+        ]);
+        Assert.All(tiedTeams, item => Assert.Equal(1, item.Placement));
     }
 
     [Fact]

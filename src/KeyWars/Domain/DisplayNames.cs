@@ -44,6 +44,8 @@ public static class DisplayNames
         LiveRoomMode.TimeDuel => "Zeitduell",
         LiveRoomMode.Precision => "Präzisionsduell",
         LiveRoomMode.BestOf => "Best-of-Serie",
+        LiveRoomMode.Series => "Serienrennen",
+        LiveRoomMode.Team => "Teamwertung",
         _ => mode.ToString()
     };
 

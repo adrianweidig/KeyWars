@@ -756,8 +756,11 @@ public sealed partial class WebSmokeTests : IClassFixture<KeyWarsWebFactory>
         Assert.Contains("Klassisches Rennen", WebUtility.HtmlDecode(form));
         Assert.Contains("Live-Textboard", WebUtility.HtmlDecode(form));
         Assert.Contains("Serienrennen", WebUtility.HtmlDecode(form));
-        Assert.Contains("Geplant", WebUtility.HtmlDecode(form));
-        Assert.Contains("aria-disabled=\"true\"", form);
+        Assert.Contains("Teamwertung", WebUtility.HtmlDecode(form));
+        Assert.Contains("data-arena-mode-input", form);
+        Assert.Contains("data-arena-round-count", form);
+        Assert.DoesNotContain("Geplant", WebUtility.HtmlDecode(form));
+        Assert.DoesNotContain("aria-disabled=\"true\"", form);
         Assert.Contains("data-submit-guard", form);
         Assert.DoesNotContain("max=\"64\"", form);
         Assert.DoesNotContain("Einladungen", form);

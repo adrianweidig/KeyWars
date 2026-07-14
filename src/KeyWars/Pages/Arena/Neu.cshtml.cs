@@ -39,6 +39,19 @@ public sealed class NeuModel(CurrentUser currentUser, TextLibraryService texts, 
             ModelState.AddModelError($"{nameof(Input)}.{nameof(Input.MaxParticipants)}", $"Erlaubt sind 2 bis {MaxParticipantsLimit} Personen.");
         }
 
+        if (Input.Mode is not (LiveRoomMode.Classic or LiveRoomMode.Series or LiveRoomMode.Team))
+        {
+            ModelState.AddModelError($"{nameof(Input)}.{nameof(Input.Mode)}", "Der ausgewählte Arena-Modus ist nicht verfügbar.");
+        }
+        else if (Input.Mode == LiveRoomMode.Series && Input.RoundCount is not (3 or 5))
+        {
+            ModelState.AddModelError($"{nameof(Input)}.{nameof(Input.RoundCount)}", "Wähle für ein Serienrennen drei oder fünf Runden.");
+        }
+        else if (Input.Mode is LiveRoomMode.Classic or LiveRoomMode.Team && Input.RoundCount != 1)
+        {
+            ModelState.AddModelError($"{nameof(Input)}.{nameof(Input.RoundCount)}", "Dieser Modus läuft über genau eine Runde.");
+        }
+
         if (Texts.Count == 0)
         {
             ModelState.AddModelError(string.Empty, "Erstelle zuerst einen Trainingstext, bevor du einen Live-Raum startest.");

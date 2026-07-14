@@ -240,6 +240,7 @@ public sealed class LiveRoomParticipantSummary
     public Guid Id { get; set; } = Guid.CreateVersion7();
     public Guid LiveRoomSummaryId { get; set; }
     public Guid UserProfileId { get; set; }
+    public int? TeamNumber { get; set; }
     public ParticipantStatus Status { get; set; }
     public int? Placement { get; set; }
     public int DurationMilliseconds { get; set; }

@@ -479,7 +479,7 @@ public sealed class LiveRoomConcurrencyTests
     }
 
     [Fact]
-    public void CreateRoomRejectsSeriesUntilRoundFlowExists()
+    public void ClassicRoomRejectsMultipleRounds()
     {
         var manager = CreateManager();
         var creator = Guid.CreateVersion7();
@@ -487,7 +487,96 @@ public sealed class LiveRoomConcurrencyTests
         var ex = Assert.Throws<InvalidOperationException>(() =>
             manager.CreateRoom(new CreateLiveRoomRequest(creator, "A", "Raum", "Text", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 3, 8)));
 
-        Assert.Contains("Arena-Serien", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("genau eine Runde", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SeriesRaceCarriesPointsAcrossRoundsAndPersistsOnlyFinalStanding()
+    {
+        var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-07-14T12:00:00Z"));
+        var sink = new RecordingCompletionSink();
+        var manager = CreateManager(new LiveOptions { CountdownSeconds = 1 }, time, sink);
+        var first = Guid.CreateVersion7();
+        var second = Guid.CreateVersion7();
+        var room = manager.CreateRoom(new CreateLiveRoomRequest(first, "A", "Serie", "Text", LiveRoomMode.Series, LiveRoomVisibility.InternalOpen, 3, 8));
+        manager.Join(room.RoomId, second, "B");
+        manager.SetReady(room.RoomId, first, true);
+        manager.SetReady(room.RoomId, second, true);
+
+        CompleteRound(first, second);
+        var firstResult = manager.Snapshot(room.RoomId);
+        Assert.Equal(LiveRoomPhase.RoundResults, firstResult.Phase);
+        Assert.Equal(2, firstResult.Participants.Single(item => item.ProfileId == first).SeriesPoints);
+        Assert.Equal(1, firstResult.Participants.Single(item => item.ProfileId == second).SeriesPoints);
+        Assert.Empty(sink.Records);
+
+        CompleteRound(second, first);
+        var secondResult = manager.Snapshot(room.RoomId);
+        Assert.Equal(2, secondResult.CurrentRound);
+        Assert.Equal(3, secondResult.Participants.Single(item => item.ProfileId == first).SeriesPoints);
+        Assert.Equal(3, secondResult.Participants.Single(item => item.ProfileId == second).SeriesPoints);
+        Assert.Empty(sink.Records);
+
+        CompleteRound(first, second);
+        var final = manager.Snapshot(room.RoomId);
+        Assert.Equal(LiveRoomPhase.SeriesResults, final.Phase);
+        Assert.True(final.Finished);
+        Assert.Equal(3, final.CurrentRound);
+        Assert.Equal(1, final.Participants.Single(item => item.ProfileId == first).Placement);
+        Assert.Equal(2, final.Participants.Single(item => item.ProfileId == second).Placement);
+        var persisted = Assert.Single(sink.Records);
+        Assert.Equal(3, persisted.RoundNumber);
+        Assert.Equal(7_000, persisted.Participants.Single(item => item.UserProfileId == first).DurationMilliseconds);
+        Assert.Equal(21.33, persisted.Participants.Single(item => item.UserProfileId == first).Wpm, 2);
+
+        void CompleteRound(Guid winner, Guid runnerUp)
+        {
+            manager.Start(room.RoomId, first);
+            time.Advance(TimeSpan.FromSeconds(1));
+            manager.Snapshot(room.RoomId);
+            time.Advance(TimeSpan.FromSeconds(2));
+            manager.Finish(room.RoomId, winner, "Text", 0, 0);
+            time.Advance(TimeSpan.FromSeconds(1));
+            manager.Finish(room.RoomId, runnerUp, "Text", 0, 0);
+        }
+    }
+
+    [Fact]
+    public void TeamRaceBalancesParticipantsAndRanksCombinedPoints()
+    {
+        var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-07-14T12:00:00Z"));
+        var manager = CreateManager(new LiveOptions { CountdownSeconds = 1 }, time);
+        var players = Enumerable.Range(0, 4).Select(_ => Guid.CreateVersion7()).ToArray();
+        var room = manager.CreateRoom(new CreateLiveRoomRequest(players[0], "A", "Teams", "Text", LiveRoomMode.Team, LiveRoomVisibility.InternalOpen, 1, 8));
+        for (var index = 1; index < players.Length; index++)
+        {
+            manager.Join(room.RoomId, players[index], ((char)('A' + index)).ToString());
+        }
+
+        var lobby = manager.Snapshot(room.RoomId);
+        Assert.Equal([1, 2, 1, 2], players.Select(id => lobby.Participants.Single(item => item.ProfileId == id).TeamNumber).ToArray());
+        foreach (var player in players)
+        {
+            manager.SetReady(room.RoomId, player, true);
+        }
+
+        manager.Start(room.RoomId, players[0]);
+        time.Advance(TimeSpan.FromSeconds(1));
+        manager.Snapshot(room.RoomId);
+        foreach (var player in players)
+        {
+            time.Advance(TimeSpan.FromSeconds(1));
+            manager.Finish(room.RoomId, player, "Text", 0, 0);
+        }
+
+        var final = manager.Snapshot(room.RoomId);
+        Assert.Equal(LiveRoomPhase.SeriesResults, final.Phase);
+        var teams = Assert.IsAssignableFrom<IReadOnlyList<LiveTeamSnapshot>>(final.Teams);
+        Assert.Equal(6, teams.Single(item => item.TeamNumber == 1).Points);
+        Assert.Equal(4, teams.Single(item => item.TeamNumber == 2).Points);
+        Assert.Equal(1, teams.Single(item => item.TeamNumber == 1).Placement);
+        Assert.All(final.Participants.Where(item => item.TeamNumber == 1), item => Assert.Equal(1, item.Placement));
+        Assert.All(final.Participants.Where(item => item.TeamNumber == 2), item => Assert.Equal(2, item.Placement));
     }
 
     [Fact]
