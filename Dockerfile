@@ -17,7 +17,7 @@ RUN dotnet restore --locked-mode
 COPY . .
 RUN dotnet publish src/KeyWars/KeyWars.csproj -c Release -o /app/publish --no-restore -p:UseAppHost=false
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:7644f992230d35cf230017189d4038c0ae0f7388b13f4f7ae1900a155bafb597 AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:1fa23fc4872d95fd71c2833ebe65d7e84a43b2d51a31d119516852f13d9505a7 AS runtime
 ARG VERSION=0.1.0
 ARG REVISION=local
 ARG CREATED=unknown
