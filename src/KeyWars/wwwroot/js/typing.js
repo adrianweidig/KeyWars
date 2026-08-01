@@ -1,3 +1,4 @@
+import { normalizeTypingText, renderTypingCharacters, splitGraphemes } from "./typing-text.js";
 import { resetTypingScroll, scrollCurrentCharacterIntoView } from "./typing-scroll.js";
 
 export function attachTypingApps() {
@@ -212,15 +213,6 @@ export function attachTypingApps() {
         timerValue.textContent = formatDuration(elapsed);
         timerLabel.textContent = "Dauer";
       }
-    };
-
-    const splitGraphemes = (value) => {
-      const normalized = normalizeTypingText(value);
-      if (window.Intl && Intl.Segmenter) {
-        return Array.from(new Intl.Segmenter("de", { granularity: "grapheme" }).segment(normalized), segment => segment.segment);
-      }
-
-      return Array.from(normalized);
     };
 
     const countCompletedWords = (value) => {
@@ -676,35 +668,4 @@ function safeVisualKey(value) {
 
 function iconSvg(key) {
   return `<svg class="kw-icon" aria-hidden="true" focusable="false"><use href="/vendor/keywars-assets/keywars-icons.svg#kw-${safeVisualKey(key)}"></use></svg>`;
-}
-
-function normalizeTypingText(value) {
-  return String(value || "")
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n")
-    .normalize("NFC");
-}
-
-function renderTypingCharacters(container, expected, classForIndex) {
-  const nodes = [];
-  expected.forEach((char, index) => {
-    const span = document.createElement("span");
-    const stateClass = classForIndex(char, index);
-    if (stateClass) {
-      span.className = stateClass;
-    }
-
-    if (char === "\n") {
-      span.textContent = "\u21b5";
-      span.classList.add("typing-newline");
-      span.title = "Absatz: Enter drücken";
-      span.setAttribute("aria-label", "Absatz: Enter drücken");
-      nodes.push(span, document.createElement("br"));
-      return;
-    }
-
-    span.textContent = char;
-    nodes.push(span);
-  });
-  container.replaceChildren(...nodes);
 }

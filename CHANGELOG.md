@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.4.6 - 2026-08-01
+
+- Split the live-room backend into explicit contracts, synchronized state,
+  progress calculations and scoring modules while keeping orchestration in the
+  room manager.
+- Extract shared typing, arena view and SignalR browser helpers to remove
+  duplicated Unicode and connection logic.
+- Add a German development guide with module ownership, CSS cascade navigation,
+  comment conventions and a test-layer map for human contributors.
+
 ## v0.4.5 - 2026-08-01
 
 - Refresh the pinned Markdown lint, Actions lint, GitHub Release and OpenSSF

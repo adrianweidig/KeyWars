@@ -1,3 +1,30 @@
+import {
+  badge,
+  camelize,
+  connectionStatusText,
+  element,
+  formatDuration,
+  formatNumber,
+  initials,
+  isExactInput,
+  isPendingPersistenceState,
+  normalizePersistenceState,
+  persistenceStateFor,
+  persistenceStatusText,
+  phaseLabel,
+  podiumTitle,
+  setHidden,
+  setStatusText,
+  setText,
+  showConnectionError,
+  statusLabel,
+  statusPill,
+  tableCell,
+  teamName,
+  textSpan
+} from "./arena-view.js";
+import { SignalRConnection } from "./signalr-connection.js";
+import { renderTypingCharacters, splitGraphemes } from "./typing-text.js";
 import { resetTypingScroll, scrollCurrentCharacterIntoView } from "./typing-scroll.js";
 
 const persistencePollDelays = [250, 500, 1000, 2000, 3000, 5000];
@@ -1219,322 +1246,4 @@ export function attachArenaPages() {
       }
     });
   });
-}
-
-class SignalRConnection {
-  constructor(path) {
-    if (!window.signalR) {
-      throw new Error("Der lokale SignalR-Client wurde nicht geladen.");
-    }
-
-    this.reconnectingHandlers = [];
-    this.reconnectHandlers = [];
-    this.disconnectedHandlers = [];
-    this.connection = new window.signalR.HubConnectionBuilder()
-      .withUrl(path)
-      .withAutomaticReconnect([0, 1000, 2500, 5000, 10000])
-      .configureLogging(window.signalR.LogLevel.Warning)
-      .build();
-    this.connection.serverTimeoutInMilliseconds = 30000;
-    this.connection.keepAliveIntervalInMilliseconds = 10000;
-    this.connection.onreconnecting((error) => {
-      this.reconnectingHandlers.forEach((handler) => handler(error));
-    });
-    this.connection.onreconnected((connectionId) => {
-      this.reconnectHandlers.forEach((handler) => handler(connectionId));
-    });
-    this.connection.onclose((error) => {
-      this.disconnectedHandlers.forEach((handler) => handler(error));
-    });
-  }
-
-  on(target, handler) {
-    this.connection.on(target, handler);
-  }
-
-  onReconnect(handler) {
-    this.reconnectHandlers.push(handler);
-  }
-
-  onReconnecting(handler) {
-    this.reconnectingHandlers.push(handler);
-  }
-
-  onDisconnected(handler) {
-    this.disconnectedHandlers.push(handler);
-  }
-
-  async start() {
-    if (this.connection.state !== window.signalR.HubConnectionState.Disconnected) {
-      return;
-    }
-
-    await this.connection.start();
-  }
-
-  invoke(target, args) {
-    if (this.connection.state !== window.signalR.HubConnectionState.Connected) {
-      return Promise.reject(new Error("Arena-Verbindung ist nicht aktiv."));
-    }
-
-    return this.connection.invoke(target, ...(args || []));
-  }
-
-  isConnected() {
-    return this.connection.state === window.signalR.HubConnectionState.Connected;
-  }
-}
-
-function tableCell(content) {
-  const cell = document.createElement("td");
-  if (content instanceof Node) {
-    cell.append(content);
-  } else {
-    cell.textContent = content;
-  }
-
-  return cell;
-}
-
-function statusPill(status) {
-  const span = document.createElement("span");
-  span.className = "pill";
-  span.textContent = statusLabel(status);
-  return span;
-}
-
-function badge(text) {
-  const span = document.createElement("span");
-  span.className = "badge";
-  span.textContent = text;
-  return span;
-}
-
-function element(tagName, text) {
-  const node = document.createElement(tagName);
-  node.textContent = text;
-  return node;
-}
-
-function setText(node, text) {
-  if (node) {
-    node.textContent = text;
-  }
-}
-
-function setStatusText(node, text) {
-  if (node && node.textContent !== text) {
-    node.textContent = text;
-  }
-}
-
-function setHidden(node, hidden) {
-  if (node) {
-    node.classList.toggle("is-hidden", hidden);
-  }
-}
-
-function initials(value) {
-  const parts = String(value || "")
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2);
-  if (parts.length === 0) {
-    return "KW";
-  }
-
-  return parts.map((part) => part[0].toUpperCase()).join("");
-}
-
-function formatNumber(value) {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return "-";
-  }
-
-  return new Intl.NumberFormat("de-DE", {
-    minimumFractionDigits: 1,
-    maximumFractionDigits: 1
-  }).format(value);
-}
-
-function statusLabel(status) {
-  return {
-    Invited: "Eingeladen",
-    Joined: "Beigetreten",
-    Ready: "Bereit",
-    Running: "Läuft",
-    Finished: "Fertig",
-    LeftBeforeStart: "Vor dem Start verlassen",
-    Dnf: "Nicht beendet",
-    Disconnected: "Verbindung getrennt",
-    Declined: "Abgelehnt",
-    Cancelled: "Abgebrochen",
-    AbortedByServer: "Durch Serverabbruch beendet"
-  }[status] || status;
-}
-
-function phaseLabel(phase) {
-  return {
-    Lobby: "Lobby",
-    Countdown: "Countdown",
-    Running: "Rennen läuft",
-    RoundResults: "Rundenergebnis",
-    SeriesResults: "Ergebnisse",
-    Closed: "Geschlossen",
-    Aborted: "Abgebrochen"
-  }[phase] || "Arena";
-}
-
-function teamName(teamNumber) {
-  return Number(teamNumber) === 1 ? "Alpha" : Number(teamNumber) === 2 ? "Bravo" : "-";
-}
-
-function normalizePersistenceState(value) {
-  const normalized = String(value || "").toLowerCase();
-  return {
-    inactive: "Inactive",
-    running: "Running",
-    finishedpending: "FinishedPending",
-    pending: "Pending",
-    persisted: "Persisted",
-    failed: "Failed",
-    abortedunconfirmed: "AbortedUnconfirmed"
-  }[normalized] || null;
-}
-
-function persistenceStateFor(currentSnapshot) {
-  if (!currentSnapshot) {
-    return "Inactive";
-  }
-
-  if (!currentSnapshot.finished) {
-    return currentSnapshot.phase === "Running" ? "Running" : "Inactive";
-  }
-
-  return normalizePersistenceState(currentSnapshot.persistenceState) || "FinishedPending";
-}
-
-function isPendingPersistenceState(state) {
-  return state === "Pending" || state === "FinishedPending";
-}
-
-function persistenceStatusText(state, pollingExhausted = false) {
-  const text = {
-    Running: "Ergebnisstatus: Rennen läuft.",
-    FinishedPending: "Ergebnis vorläufig: Speicherung läuft. Rating und XP werden erst nach Bestätigung angezeigt.",
-    Pending: "Ergebnis vorläufig: Speicherung läuft. Rating und XP werden erst nach Bestätigung angezeigt.",
-    Persisted: "Ergebnis gespeichert. Rating und XP sind bestätigt.",
-    Failed: "Speicherung fehlgeschlagen. Rating und XP wurden nicht vergeben.",
-    AbortedUnconfirmed: "Ergebnis nach Serverabbruch unbestätigt. Rating und XP wurden nicht vergeben."
-  }[state] || "";
-  if (pollingExhausted && isPendingPersistenceState(state)) {
-    return `${text} Automatische Prüfung beendet; lade die Seite für einen neuen Status neu.`;
-  }
-
-  return text;
-}
-
-function podiumTitle(state) {
-  return {
-    Pending: "Podium (vorläufig)",
-    FinishedPending: "Podium (vorläufig)",
-    Failed: "Podium (Speicherung fehlgeschlagen)",
-    AbortedUnconfirmed: "Podium (unbestätigt)"
-  }[state] || "Podium";
-}
-
-function connectionStatusText(state) {
-  return {
-    connected: "Verbindung: aktiv",
-    reconnecting: "Verbindung: wird wiederhergestellt",
-    disconnected: "Verbindung: getrennt"
-  }[state] || "Verbindung: getrennt";
-}
-
-function formatDuration(milliseconds) {
-  const value = Math.max(0, milliseconds);
-  const minutes = Math.floor(value / 60000);
-  const seconds = Math.floor((value % 60000) / 1000);
-  const tenths = Math.floor((value % 1000) / 100);
-  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${tenths}`;
-}
-
-function splitGraphemes(value) {
-  const normalized = normalizeTypingText(value);
-  if (window.Intl && typeof window.Intl.Segmenter === "function") {
-    const segmenter = new window.Intl.Segmenter("de", { granularity: "grapheme" });
-    return Array.from(segmenter.segment(normalized), (segment) => segment.segment);
-  }
-
-  return Array.from(normalized);
-}
-
-function isExactInput(input, target) {
-  const inputElements = splitGraphemes(input);
-  const targetElements = splitGraphemes(target);
-  return inputElements.length === targetElements.length &&
-    inputElements.every((element, index) => element === targetElements[index]);
-}
-
-function textSpan(text, className) {
-  const span = document.createElement("span");
-  span.textContent = text;
-  span.className = className;
-  return span;
-}
-
-function normalizeTypingText(value) {
-  return String(value || "")
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n")
-    .normalize("NFC");
-}
-
-function renderTypingCharacters(container, expected, classForIndex) {
-  const nodes = [];
-  expected.forEach((char, index) => {
-    const span = document.createElement("span");
-    const stateClass = classForIndex(char, index);
-    if (stateClass) {
-      span.className = stateClass;
-    }
-
-    if (char === "\n") {
-      span.textContent = "\u21b5";
-      span.classList.add("typing-newline");
-      span.title = "Absatz: Enter drücken";
-      span.setAttribute("aria-label", "Absatz: Enter drücken");
-      nodes.push(span, document.createElement("br"));
-      return;
-    }
-
-    span.textContent = char;
-    nodes.push(span);
-  });
-  container.replaceChildren(...nodes);
-}
-
-function camelize(value) {
-  if (Array.isArray(value)) {
-    return value.map(camelize);
-  }
-
-  if (!value || typeof value !== "object") {
-    return value;
-  }
-
-  return Object.fromEntries(Object.entries(value).map(([key, entry]) => [
-    `${key.charAt(0).toLowerCase()}${key.slice(1)}`,
-    camelize(entry)
-  ]));
-}
-
-function showConnectionError(error) {
-  const message = error instanceof Error ? error.message : "Arena-Aktion fehlgeschlagen.";
-  const alert = document.querySelector("[data-arena-error]") || document.createElement("div");
-  alert.dataset.arenaError = "true";
-  alert.className = "alert";
-  alert.textContent = message;
-  document.querySelector("[data-arena-room]")?.before(alert);
 }

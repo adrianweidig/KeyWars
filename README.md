@@ -124,10 +124,16 @@ dotnet run --project src\KeyWars
 In `Development` ist ein lokaler Test-Login für Entwickler-Szenarien aktiv.
 In `Production` zählt nur die explizite LDAP-Konfiguration.
 
+Die [Entwicklungs- und Modulübersicht](docs/development.md) beschreibt
+Codegrenzen, wichtige Einstiegspunkte, Frontendmodule, CSS-Kaskade,
+Kommentarrichtlinien und die passende Testschicht für manuelle Änderungen.
+
 ## Betrieb und Dokumentation
 
 - [Architektur](docs/architecture.md): Container, Prozessmodell, SQLite,
   SignalR und Datenfluss.
+- [Entwicklung und Code-Navigation](docs/development.md): Modulkarte,
+  Zuständigkeiten, Kommentare und Fertig-Kriterien.
 - [Feature-Matrix](docs/features.md): Aktuell verfügbare, teilweise
   umgesetzte, geplante und blockierte Funktionen.
 - [Konfiguration](docs/configuration.md): Umgebungsvariablen,
