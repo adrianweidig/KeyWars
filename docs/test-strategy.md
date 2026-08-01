@@ -14,6 +14,7 @@ complete until the behavior is covered in the closest matching test layer.
 | Live arena persistence | Integration and concurrency tests | completion queue, abort handling, idempotency |
 | Security headers and HTTP smoke | E2E tests | auth redirects, CSP, health endpoints |
 | User-facing layout | Browser tests | desktop/mobile overflow, critical workflows |
+| Windows shell and rendered browser window | NUnit, FlaUI, OpenCV | UIA3 tree, real window, deterministic visual capture |
 
 ## Coverage Rule
 
@@ -39,3 +40,16 @@ Browser tests use Playwright and start the app through `tests/browser/start-keyw
 ```powershell
 npm run test:browser
 ```
+
+Windows UI tests complement Playwright with a real Edge or Chrome window,
+UIA3 inspection through FlaUI and OpenCV screenshot analysis. They run in the
+main CI workflow on Windows and skip explicitly on other operating systems:
+
+```powershell
+$env:KEYWARS_WINDOWS_UI_ARTIFACTS='F:\KeyWars\output\windows-ui'
+dotnet build .\tests\KeyWars.WindowsUiTests\KeyWars.WindowsUiTests.csproj -c Release --no-restore
+dotnet test .\tests\KeyWars.WindowsUiTests\KeyWars.WindowsUiTests.csproj -c Release --no-build --no-restore
+```
+
+Detailed prerequisites and overrides are documented in
+[`tests/KeyWars.WindowsUiTests/README.md`](../tests/KeyWars.WindowsUiTests/README.md).

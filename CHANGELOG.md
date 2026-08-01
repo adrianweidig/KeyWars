@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.4.4 - 2026-08-01
+
+- Add a Windows UI test layer with NUnit, FlaUI/UIA3, OpenCV screenshot
+  analysis, isolated application and browser processes, diagnostics and CI
+  artifacts.
+- Make the 200 percent browser zoom assertion use one coordinate system so it
+  remains stable across Windows and Linux Chrome runners.
+- Refresh direct .NET, SQLite, Playwright, Docker base image, Trivy and GitHub
+  Actions dependencies and regenerate all locked dependency graphs.
+- Group Dependabot updates by ecosystem and add npm coverage to prevent a new
+  backlog of stale one-package pull requests.
+- Publish curated release notes as a checksummed release artifact and use them
+  as the GitHub Release description.
+
 ## v0.4.3 - 2026-07-14
 
 - Restore clear Light Theme contrast for finish summaries, score cards and

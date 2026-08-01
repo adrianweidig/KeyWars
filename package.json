@@ -11,6 +11,6 @@
   "devDependencies": {
     "@axe-core/playwright": "^4.12.1",
     "@microsoft/signalr": "10.0.0",
-    "@playwright/test": "1.58.2"
+    "@playwright/test": "1.62.1"
   }
 }

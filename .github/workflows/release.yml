@@ -18,8 +18,8 @@ jobs:
       packages: write
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: 10.0.x
       - name: Restore
@@ -34,23 +34,35 @@ jobs:
         run: dotnet build -c Release --no-restore
       - name: Test
         run: dotnet test -c Release --no-build
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install browser test dependencies
+        run: npm ci
+      - name: Verify visual assets
+        run: npm run assets:verify
+      - name: Browser E2E
+        env:
+          KEYWARS_BROWSER_CHANNEL: chrome
+        run: npm run test:browser
       - name: Load test
         run: dotnet run --project tools/KeyWars.LoadTest -c Release --no-build -- 2 10 25 50 100
-      - uses: docker/setup-qemu-action@06116385d9baf250c9f4dcb4858b16962ea869c3 # v4
-      - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4
-      - uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4
+      - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Metadata
         id: meta
-        uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ghcr.io/${{ github.repository_owner }}/keywars
       - name: Build and push
         id: push-image
-        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -60,7 +72,7 @@ jobs:
           provenance: true
           sbom: true
       - name: Build offline amd64 image
-        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           platforms: linux/amd64
@@ -85,6 +97,7 @@ jobs:
           manifest = {
               "schema_version": 1,
               "version": version,
+              "release_notes": "RELEASE_NOTES.md",
               "image": {
                   "repository": "ghcr.io/${{ github.repository_owner }}/keywars",
                   "tags": tags,
@@ -101,11 +114,46 @@ jobs:
               ],
           }
           Path("artifacts/RELEASE_MANIFEST.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+          changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+          section_header = f"## {version} "
+          start = changelog.find(section_header)
+          if start < 0:
+              raise SystemExit(f"CHANGELOG.md has no section for {version}")
+          body_start = changelog.find("\n", start) + 1
+          body_end = changelog.find("\n## ", body_start)
+          if body_end < 0:
+              body_end = len(changelog)
+          changes = changelog[body_start:body_end].strip()
+          if not changes:
+              raise SystemExit(f"CHANGELOG.md section for {version} is empty")
+
+          release_notes = f"""# KeyWars {version}
+
+          {changes}
+
+          ## Container
+
+          - Repository: `ghcr.io/${{ github.repository_owner }}/keywars`
+          - Tags: {', '.join(f'`{tag}`' for tag in tags)}
+          - Multi-Arch-Digest: `{os.environ['IMAGE_DIGEST']}`
+          - Plattformen: `linux/amd64`, `linux/arm64`
+          - SBOM und Provenance: als Registry-Attestierungen veröffentlicht
+
+          ## Release-Artefakte
+
+          - Offline-Image für `linux/amd64`
+          - `compose.yaml` und Beispielkonfiguration
+          - `RELEASE_MANIFEST.json` mit Image-Digest und Tags
+          - `SHA256SUMS` zur Integritätsprüfung
+          """
+          release_notes = "\n".join(line.strip() for line in release_notes.strip().splitlines()) + "\n"
+          Path("artifacts/RELEASE_NOTES.md").write_text(release_notes, encoding="utf-8")
           PY
-          (cd artifacts && sha256sum keywars-${{ github.ref_name }}-linux-amd64.tar.gz compose.yaml .env.example RELEASE_MANIFEST.json > SHA256SUMS)
+          (cd artifacts && sha256sum keywars-${{ github.ref_name }}-linux-amd64.tar.gz compose.yaml .env.example RELEASE_MANIFEST.json RELEASE_NOTES.md > SHA256SUMS)
       - name: Verify release artifacts
         run: python scripts/check_release_artifacts.py artifacts "${{ github.ref_name }}"
-      - uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3
+      - uses: softprops/action-gh-release@fe965f7af51af5f2602596916f38a38df2e33de0 # v3.0.2
         with:
-          generate_release_notes: true
+          body_path: artifacts/RELEASE_NOTES.md
           files: artifacts/*

@@ -123,6 +123,7 @@ test("Arena-Zustände sind per Tastatur, mobil sowie in Dark und Light zugängli
     const target = document.querySelector("[data-arena-target]");
     const input = document.querySelector("[data-arena-input]");
     const persistence = document.querySelector("[data-arena-persistence-status]");
+    const viewportBounds = document.documentElement.getBoundingClientRect();
     const targetBounds = target?.getBoundingClientRect();
     const inputBounds = input?.getBoundingClientRect();
     return {
@@ -130,8 +131,10 @@ test("Arena-Zustände sind per Tastatur, mobil sowie in Dark und Light zugängli
       horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
       targetTextLength: target?.textContent?.trim().length || 0,
       persistenceTextLength: persistence?.textContent?.trim().length || 0,
-      targetWithinViewport: Boolean(targetBounds && targetBounds.left >= -1 && targetBounds.right <= window.innerWidth + 1),
-      inputWithinViewport: Boolean(inputBounds && inputBounds.left >= -1 && inputBounds.right <= window.innerWidth + 1)
+      targetWithinViewport: Boolean(targetBounds &&
+        targetBounds.left >= viewportBounds.left - 1 && targetBounds.right <= viewportBounds.right + 1),
+      inputWithinViewport: Boolean(inputBounds &&
+        inputBounds.left >= viewportBounds.left - 1 && inputBounds.right <= viewportBounds.right + 1)
     };
   });
   expect(zoomLayout).toEqual({

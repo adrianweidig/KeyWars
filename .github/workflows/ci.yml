@@ -19,8 +19,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: 10.0.x
       - name: Restore
@@ -31,7 +31,7 @@ jobs:
         run: dotnet build -c Release --no-restore
       - name: Test
         run: dotnet test -c Release --no-build --collect:"XPlat Code Coverage" --results-directory TestResults
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
           cache: npm
@@ -39,6 +39,8 @@ jobs:
         run: npm ci
       - name: Verify Chrome browser
         run: google-chrome --version
+      - name: Verify visual assets
+        run: npm run assets:verify
       - name: Browser E2E
         env:
           KEYWARS_BROWSER_CHANNEL: chrome
@@ -70,3 +72,41 @@ jobs:
             echo "External runtime asset reference found"
             exit 1
           fi
+
+  windows-ui:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+      - name: Verify Edge
+        shell: pwsh
+        run: |
+          $edge = "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe"
+          if (-not (Test-Path -LiteralPath $edge)) {
+            throw "Microsoft Edge was not found at $edge"
+          }
+          (Get-Item -LiteralPath $edge).VersionInfo.FileVersion
+      - name: Restore
+        run: dotnet restore --locked-mode
+      - name: Build Windows UI tests
+        run: dotnet build tests/KeyWars.WindowsUiTests/KeyWars.WindowsUiTests.csproj -c Release --no-restore
+      - name: Run NUnit, FlaUI and OpenCV tests
+        env:
+          KEYWARS_WINDOWS_UI_ARTIFACTS: ${{ github.workspace }}\output\windows-ui
+        run: >-
+          dotnet test tests/KeyWars.WindowsUiTests/KeyWars.WindowsUiTests.csproj
+          -c Release --no-build --no-restore
+          --logger "trx;LogFileName=windows-ui.trx"
+          --results-directory TestResults
+      - name: Upload Windows UI diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-ui-artifacts
+          path: |
+            output/windows-ui
+            TestResults
+          if-no-files-found: warn
