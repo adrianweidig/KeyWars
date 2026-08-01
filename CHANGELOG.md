@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.4.5 - 2026-08-01
+
+- Refresh the pinned Markdown lint, Actions lint, GitHub Release and OpenSSF
+  Scorecard actions after the v0.4.4 release validation.
+
 ## v0.4.4 - 2026-08-01
 
 - Add a Windows UI test layer with NUnit, FlaUI/UIA3, OpenCV screenshot
