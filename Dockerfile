@@ -11,6 +11,8 @@ COPY tests/KeyWars.ConcurrencyTests/KeyWars.ConcurrencyTests.csproj tests/KeyWar
 COPY tests/KeyWars.ConcurrencyTests/packages.lock.json tests/KeyWars.ConcurrencyTests/
 COPY tests/KeyWars.E2ETests/KeyWars.E2ETests.csproj tests/KeyWars.E2ETests/
 COPY tests/KeyWars.E2ETests/packages.lock.json tests/KeyWars.E2ETests/
+COPY tests/KeyWars.WindowsUiTests/KeyWars.WindowsUiTests.csproj tests/KeyWars.WindowsUiTests/
+COPY tests/KeyWars.WindowsUiTests/packages.lock.json tests/KeyWars.WindowsUiTests/
 COPY tools/KeyWars.LoadTest/KeyWars.LoadTest.csproj tools/KeyWars.LoadTest/
 COPY tools/KeyWars.LoadTest/packages.lock.json tools/KeyWars.LoadTest/
 RUN dotnet restore --locked-mode
