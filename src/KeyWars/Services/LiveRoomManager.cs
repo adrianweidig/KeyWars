@@ -5,72 +5,6 @@ using Microsoft.Extensions.Options;
 
 namespace KeyWars.Services;
 
-public sealed record LiveParticipantSnapshot(
-    Guid ProfileId,
-    string DisplayName,
-    ParticipantStatus Status,
-    bool Ready,
-    int Sequence,
-    int CorrectCharacters,
-    string TypedTextPreview,
-    double Wpm,
-    int? Placement,
-    int DurationMilliseconds,
-    double Accuracy,
-    int? TeamNumber = null,
-    int SeriesPoints = 0,
-    int RoundWins = 0);
-
-public sealed record LiveTeamSnapshot(
-    int TeamNumber,
-    string Name,
-    int Points,
-    int RoundWins,
-    int FinishedRounds,
-    int? Placement);
-
-public sealed record LiveRoomSnapshot(
-    Guid RoomId,
-    Guid CreatorProfileId,
-    string Code,
-    string Title,
-    string TargetText,
-    int TargetCharacterCount,
-    int MaxParticipants,
-    LiveRoomMode Mode,
-    LiveRoomVisibility Visibility,
-    int RoundCount,
-    int CurrentRound,
-    int RoundVersion,
-    LiveRoomPhase Phase,
-    bool Started,
-    bool Finished,
-    DateTimeOffset ServerNow,
-    DateTimeOffset PhaseChangedAt,
-    DateTimeOffset? CountdownStartsAt,
-    DateTimeOffset? RaceStartsAt,
-    DateTimeOffset? StartedAt,
-    DateTimeOffset? FinishedAt,
-    string? CloseReason,
-    IReadOnlyList<LiveParticipantSnapshot> Participants,
-    CompletionState? PersistenceState = null,
-    IReadOnlyList<LiveTeamSnapshot>? Teams = null,
-    DateTimeOffset? RoundEndsAt = null);
-
-public sealed record LiveProgressResult(
-    LiveProgressDelta? Delta,
-    LiveRoomSnapshot? Snapshot);
-
-public sealed record CreateLiveRoomRequest(
-    Guid CreatorProfileId,
-    string CreatorDisplayName,
-    string Title,
-    string Text,
-    LiveRoomMode Mode,
-    LiveRoomVisibility Visibility,
-    int RoundCount,
-    int MaxParticipants);
-
 public sealed class LiveRoomManager(
     IOptions<LiveOptions> options,
     TimeProvider timeProvider,
@@ -79,7 +13,6 @@ public sealed class LiveRoomManager(
     ILiveRoomCompletionSink? completionSink = null)
 {
     private const int MinimumParticipants = 2;
-    private const int MaxInputOverrunCharacters = 20;
     private const string RoomCodeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     private readonly object createGate = new();
     private readonly ConcurrentDictionary<Guid, LiveRoomState> rooms = new();
@@ -282,8 +215,8 @@ public sealed class LiveRoomManager(
                     throw new InvalidOperationException("Dieser Zieleinlauf ist für deinen aktuellen Status nicht gültig.");
                 }
 
-                var duration = NormalizeDuration(now - room.RaceStartsAt.Value);
-                var normalizedInput = NormalizeBoundedInput(room, input);
+                var duration = LiveRoomProgress.NormalizeDuration(now - room.RaceStartsAt.Value);
+                var normalizedInput = LiveRoomProgress.NormalizeBoundedInput(room, input);
                 var metrics = typingEngine.Analyze(room.Text, normalizedInput, duration, backspaces, focusLosses);
                 if (!metrics.Completed)
                 {
@@ -292,13 +225,15 @@ public sealed class LiveRoomManager(
 
                 participant.Status = ParticipantStatus.Finished;
                 participant.Ready = true;
-                participant.TypedTextPreview = BuildTypedTextPreview(room.TargetElements, TypingEngine.SplitGraphemes(normalizedInput));
+                participant.TypedTextPreview = LiveRoomProgress.BuildTypedTextPreview(
+                    room.TargetElements,
+                    TypingEngine.SplitGraphemes(normalizedInput));
                 participant.FinishedAt = now;
                 participant.DurationMilliseconds = metrics.DurationMilliseconds;
                 participant.Accuracy = metrics.Accuracy;
                 participant.Wpm = metrics.Wpm;
                 participant.CorrectCharacters = metrics.CorrectCharacters;
-                ApplyPlacements(room);
+                LiveRoomScoring.ApplyPlacements(room);
                 completed ??= TryCompleteRoom(room, now);
                 snapshot = SnapshotUnlocked(room, now);
             }
@@ -337,8 +272,9 @@ public sealed class LiveRoomManager(
                 participant.Status = ParticipantStatus.Dnf;
                 participant.Ready = true;
                 participant.FinishedAt = now;
-                participant.DurationMilliseconds = (int)Math.Round(NormalizeDuration(now - room.RaceStartsAt.Value).TotalMilliseconds);
-                ApplyPlacements(room);
+                participant.DurationMilliseconds = (int)Math.Round(
+                    LiveRoomProgress.NormalizeDuration(now - room.RaceStartsAt.Value).TotalMilliseconds);
+                LiveRoomScoring.ApplyPlacements(room);
                 completed ??= TryCompleteRoom(room, now);
                 snapshot = SnapshotUnlocked(room, now);
             }
@@ -434,9 +370,9 @@ public sealed class LiveRoomManager(
                     participant.Ready = false;
                     participant.FinishedAt = now;
                     participant.DurationMilliseconds = room.RaceStartsAt is { } raceStartsAt
-                        ? (int)Math.Round(NormalizeDuration(now - raceStartsAt).TotalMilliseconds)
+                        ? (int)Math.Round(LiveRoomProgress.NormalizeDuration(now - raceStartsAt).TotalMilliseconds)
                         : 0;
-                    ApplyPlacements(room);
+                    LiveRoomScoring.ApplyPlacements(room);
                     completed = TryCompleteRoom(room, now);
                 }
             }
@@ -470,7 +406,7 @@ public sealed class LiveRoomManager(
                     participant.Ready = false;
                     participant.FinishedAt = now;
                     participant.DurationMilliseconds = room.RaceStartsAt is { } raceStartsAt
-                        ? (int)Math.Round(NormalizeDuration(now - raceStartsAt).TotalMilliseconds)
+                        ? (int)Math.Round(LiveRoomProgress.NormalizeDuration(now - raceStartsAt).TotalMilliseconds)
                         : 0;
                 }
 
@@ -572,14 +508,14 @@ public sealed class LiveRoomManager(
             }
             else
             {
-                var normalizedInput = NormalizeBoundedInput(room, input);
+                var normalizedInput = LiveRoomProgress.NormalizeBoundedInput(room, input);
                 var inputElements = TypingEngine.SplitGraphemes(normalizedInput);
-                var correctCharacters = CountCorrectPrefix(room.TargetElements, inputElements);
+                var correctCharacters = LiveRoomProgress.CountCorrectPrefix(room.TargetElements, inputElements);
                 participant.Sequence = sequence;
                 participant.CorrectCharacters = correctCharacters;
-                participant.TypedTextPreview = BuildTypedTextPreview(room.TargetElements, inputElements);
-                participant.Accuracy = CalculateProgressAccuracy(correctCharacters, inputElements.Count);
-                participant.Wpm = CalculateWpm(participant.CorrectCharacters, room.RaceStartsAt, now);
+                participant.TypedTextPreview = LiveRoomProgress.BuildTypedTextPreview(room.TargetElements, inputElements);
+                participant.Accuracy = LiveRoomProgress.CalculateAccuracy(correctCharacters, inputElements.Count);
+                participant.Wpm = LiveRoomProgress.CalculateWpm(participant.CorrectCharacters, room.RaceStartsAt, now);
                 delta = new LiveProgressDelta(
                     room.Id,
                     room.RoundVersion,
@@ -588,7 +524,7 @@ public sealed class LiveRoomManager(
                     participant.TypedTextPreview,
                     participant.Wpm,
                     participant.Accuracy,
-                    CalculateRankHint(room, participant.ProfileId));
+                    LiveRoomProgress.CalculateRankHint(room, participant.ProfileId));
                 snapshot = includeSnapshot ? SnapshotUnlocked(room, now) : null;
             }
         }
@@ -634,7 +570,8 @@ public sealed class LiveRoomManager(
                 participant.Ready = false;
                 participant.FinishedAt = participant.DisconnectedAt;
                 participant.DurationMilliseconds = room.RaceStartsAt is { } raceStartsAt
-                    ? (int)Math.Round(NormalizeDuration(participant.DisconnectedAt.Value - raceStartsAt).TotalMilliseconds)
+                    ? (int)Math.Round(LiveRoomProgress.NormalizeDuration(
+                        participant.DisconnectedAt.Value - raceStartsAt).TotalMilliseconds)
                     : 0;
             }
 
@@ -643,7 +580,7 @@ public sealed class LiveRoomManager(
 
         if (changed)
         {
-            ApplyPlacements(room);
+            LiveRoomScoring.ApplyPlacements(room);
         }
 
         return TryCompleteRoom(room, now);
@@ -704,7 +641,7 @@ public sealed class LiveRoomManager(
             return null;
         }
 
-        ScoreCompletedRound(room, competingParticipants);
+        LiveRoomScoring.ScoreCompletedRound(room, competingParticipants);
         room.RoundEndsAt = now;
         room.Phase = room.CurrentRound < room.RoundCount
             ? LiveRoomPhase.RoundResults
@@ -719,7 +656,7 @@ public sealed class LiveRoomManager(
 
         room.Finished = true;
         room.FinishedAt = now;
-        ApplyOverallPlacements(room);
+        LiveRoomScoring.ApplyOverallPlacements(room);
         room.PersistenceState = CompletionState.Pending;
         return BuildPersistenceRecord(room);
     }
@@ -750,134 +687,6 @@ public sealed class LiveRoomManager(
             rooms.TryRemove(room.Id, out _);
             roomCodes.TryRemove(room.Code, out _);
         }
-    }
-
-    private static void ApplyPlacements(LiveRoomState room)
-    {
-        var ranked = RaceRanking.RankClassic(room.Participants.Values
-            .Where(item =>
-                !room.ExcludedProfileIds.Contains(item.ProfileId) &&
-                item.Status is ParticipantStatus.Finished or ParticipantStatus.Dnf)
-            .Select(item => new RaceResult(
-                item.ProfileId,
-                item.Status,
-                item.DurationMilliseconds,
-                item.Accuracy,
-                0,
-                100,
-                item.Wpm,
-                item.CorrectCharacters)));
-
-        foreach (var rankedResult in ranked)
-        {
-            room.Participants[rankedResult.Result.UserProfileId].Placement = rankedResult.Placement;
-        }
-    }
-
-    private static void ScoreCompletedRound(LiveRoomState room, IReadOnlyCollection<LiveParticipantState> participants)
-    {
-        var participantCount = participants.Count;
-        foreach (var participant in participants)
-        {
-            var points = ArenaScoring.PointsForRound(participant.Status, participant.Placement, participantCount);
-            participant.SeriesPoints += points;
-            participant.RoundWins += participant.Status == ParticipantStatus.Finished && participant.Placement == 1 ? 1 : 0;
-            participant.FinishedRounds += participant.Status == ParticipantStatus.Finished ? 1 : 0;
-            participant.CompletedRounds++;
-            participant.TotalDurationMilliseconds += participant.DurationMilliseconds;
-            participant.TotalWpm += participant.Wpm;
-            participant.TotalAccuracy += participant.Accuracy;
-        }
-
-        if (room.Mode != LiveRoomMode.Team)
-        {
-            return;
-        }
-
-        var roundScores = participants
-            .Where(item => item.TeamNumber is not null)
-            .GroupBy(item => item.TeamNumber!.Value)
-            .ToDictionary(group => group.Key, group => group.Sum(item => ArenaScoring.PointsForRound(item.Status, item.Placement, participantCount)));
-        if (roundScores.Count == 0)
-        {
-            return;
-        }
-
-        var winningScore = roundScores.Values.Max();
-        foreach (var teamNumber in roundScores.Where(item => item.Value == winningScore).Select(item => item.Key))
-        {
-            room.TeamRoundWins[teamNumber] = room.TeamRoundWins.GetValueOrDefault(teamNumber) + 1;
-        }
-    }
-
-    private static void ApplyOverallPlacements(LiveRoomState room)
-    {
-        var active = room.Participants.Values
-            .Where(item => !room.ExcludedProfileIds.Contains(item.ProfileId) && item.Status != ParticipantStatus.LeftBeforeStart)
-            .ToArray();
-
-        if (room.Mode == LiveRoomMode.Team)
-        {
-            var teams = BuildTeamStandings(room, active);
-            var placements = teams.ToDictionary(item => item.Score.TeamNumber, item => item.Placement);
-            foreach (var participant in active)
-            {
-                participant.Placement = participant.TeamNumber is { } teamNumber && placements.TryGetValue(teamNumber, out var placement)
-                    ? placement
-                    : null;
-            }
-
-            return;
-        }
-
-        var ranked = ArenaScoring.RankSeries(active.Select(ToSeriesScore));
-        foreach (var result in ranked)
-        {
-            room.Participants[result.Score.UserProfileId].Placement = result.Placement;
-        }
-    }
-
-    private static ArenaSeriesScore ToSeriesScore(LiveParticipantState participant) => new(
-        participant.ProfileId,
-        participant.SeriesPoints,
-        participant.RoundWins,
-        participant.FinishedRounds,
-        participant.TotalDurationMilliseconds,
-        participant.AverageAccuracy);
-
-    private static IReadOnlyList<RankedArenaTeamScore> BuildTeamStandings(
-        LiveRoomState room,
-        IEnumerable<LiveParticipantState>? source = null)
-    {
-        var participants = source ?? room.Participants.Values.Where(item =>
-            !room.ExcludedProfileIds.Contains(item.ProfileId) && item.Status != ParticipantStatus.LeftBeforeStart);
-        return ArenaScoring.RankTeams(participants
-            .Where(item => item.TeamNumber is not null)
-            .GroupBy(item => item.TeamNumber!.Value)
-            .Select(group => new ArenaTeamScore(
-                group.Key,
-                group.Sum(item => item.SeriesPoints),
-                room.TeamRoundWins.GetValueOrDefault(group.Key),
-                group.Sum(item => item.FinishedRounds),
-                group.Sum(item => item.TotalDurationMilliseconds))));
-    }
-
-    private static IReadOnlyList<LiveTeamSnapshot> BuildTeamSnapshots(LiveRoomState room)
-    {
-        if (room.Mode != LiveRoomMode.Team)
-        {
-            return [];
-        }
-
-        return BuildTeamStandings(room)
-            .Select(item => new LiveTeamSnapshot(
-                item.Score.TeamNumber,
-                item.Score.TeamNumber == 1 ? "Team Alpha" : "Team Bravo",
-                item.Score.Points,
-                item.Score.RoundWins,
-                item.Score.FinishedRounds,
-                item.Placement))
-            .ToArray();
     }
 
     private static int NextTeamNumber(LiveRoomState room)
@@ -1013,7 +822,7 @@ public sealed class LiveRoomManager(
                     item.RoundWins))
                 .ToList(),
             persistenceState,
-            BuildTeamSnapshots(room),
+            LiveRoomScoring.BuildTeamSnapshots(room),
             room.RoundEndsAt);
     }
 
@@ -1066,83 +875,6 @@ public sealed class LiveRoomManager(
             }
         }
     }
-
-    private static int CountCorrectPrefix(IReadOnlyList<string> targetElements, IReadOnlyList<string> inputElements)
-    {
-        var count = 0;
-        for (var index = 0; index < Math.Min(targetElements.Count, inputElements.Count); index++)
-        {
-            if (!StringComparer.Ordinal.Equals(targetElements[index], inputElements[index]))
-            {
-                break;
-            }
-
-            count++;
-        }
-
-        return count;
-    }
-
-    private static string BuildTypedTextPreview(IReadOnlyList<string> targetElements, IReadOnlyList<string> inputElements)
-    {
-        var length = Math.Min(targetElements.Count, inputElements.Count);
-        if (length == 0)
-        {
-            return "";
-        }
-
-        return string.Create(length, (targetElements, inputElements), (buffer, state) =>
-        {
-            for (var index = 0; index < buffer.Length; index++)
-            {
-                buffer[index] = StringComparer.Ordinal.Equals(state.targetElements[index], state.inputElements[index])
-                    ? 'c'
-                    : 'w';
-            }
-        });
-    }
-
-    private static double CalculateWpm(int correctCharacters, DateTimeOffset? startedAt, DateTimeOffset now)
-    {
-        if (startedAt is null)
-        {
-            return 0;
-        }
-
-        var minutes = Math.Max((now - startedAt.Value).TotalMinutes, 1d / 60d);
-        return Math.Round(correctCharacters / 5d / minutes, 2);
-    }
-
-    private static double CalculateProgressAccuracy(int correctCharacters, int inputCharacters)
-    {
-        return inputCharacters == 0 ? 100 : Math.Round(correctCharacters * 100d / inputCharacters, 2);
-    }
-
-    private static string NormalizeBoundedInput(LiveRoomState room, string input)
-    {
-        var normalized = TypingEngine.NormalizeText(input);
-        var inputLength = TypingEngine.SplitGraphemes(normalized).Count;
-        if (inputLength > room.TargetElements.Count + MaxInputOverrunCharacters)
-        {
-            throw new InvalidOperationException("Die Eingabe ist zu lang.");
-        }
-
-        return normalized;
-    }
-
-    private static int CalculateRankHint(LiveRoomState room, Guid profileId)
-    {
-        var ranked = room.Participants.Values
-            .OrderByDescending(item => item.CorrectCharacters)
-            .ThenByDescending(item => item.Wpm)
-            .ThenBy(item => item.JoinedAt)
-            .ThenBy(item => item.ProfileId)
-            .Select((participant, index) => new { participant.ProfileId, Rank = index + 1 })
-            .FirstOrDefault(item => item.ProfileId == profileId);
-        return ranked?.Rank ?? room.Participants.Count;
-    }
-
-    private static TimeSpan NormalizeDuration(TimeSpan duration) => duration < TimeSpan.FromSeconds(1) ? TimeSpan.FromSeconds(1) : duration;
 
     private string GenerateUniqueCode()
     {
@@ -1244,104 +976,3 @@ public sealed class LiveRoomManager(
         }
     }
 }
-
-internal sealed class LiveRoomState(
-    Guid id,
-    Guid creatorProfileId,
-    string code,
-    string title,
-    string text,
-    LiveRoomMode mode,
-    LiveRoomVisibility visibility,
-    int roundCount,
-    int maxParticipants,
-    DateTimeOffset createdAt)
-{
-    public Guid Id { get; } = id;
-    public Guid CreatorProfileId { get; set; } = creatorProfileId;
-    public string Code { get; } = code;
-    public string Title { get; } = title;
-    public string Text { get; } = text;
-    public IReadOnlyList<string> TargetElements { get; } = TypingEngine.SplitGraphemes(text);
-    public int TargetCharacterCount => TargetElements.Count;
-    public LiveRoomMode Mode { get; } = mode;
-    public LiveRoomVisibility Visibility { get; } = visibility;
-    public int RoundCount { get; } = roundCount;
-    public int MaxParticipants { get; } = maxParticipants;
-    public DateTimeOffset CreatedAt { get; } = createdAt;
-    public object Gate { get; } = new();
-    public Dictionary<Guid, LiveParticipantState> Participants { get; } = [];
-    public HashSet<Guid> ExcludedProfileIds { get; } = [];
-    public Dictionary<int, int> TeamRoundWins { get; } = [];
-    public LiveRoomPhase Phase { get; set; } = LiveRoomPhase.Lobby;
-    public int CurrentRound { get; set; } = 1;
-    public int RoundVersion { get; set; } = 1;
-    public DateTimeOffset PhaseChangedAt { get; set; } = createdAt;
-    public DateTimeOffset? CountdownStartsAt { get; set; }
-    public DateTimeOffset? RaceStartsAt { get; set; }
-    public DateTimeOffset? RoundEndsAt { get; set; }
-    public string? CloseReason { get; set; }
-    public bool Started { get; set; }
-    public bool Finished { get; set; }
-    public CompletionReceipt? CompletionReceipt { get; set; }
-    public CompletionState? PersistenceState { get; set; }
-    public DateTimeOffset? StartedAt { get; set; }
-    public DateTimeOffset? FinishedAt { get; set; }
-}
-
-internal sealed class LiveParticipantState(
-    Guid profileId,
-    string displayName,
-    ParticipantStatus status,
-    DateTimeOffset joinedAt,
-    int? teamNumber)
-{
-    public Guid ProfileId { get; } = profileId;
-    public DateTimeOffset JoinedAt { get; } = joinedAt;
-    public string DisplayName { get; set; } = displayName;
-    public ParticipantStatus Status { get; set; } = status;
-    public int? TeamNumber { get; } = teamNumber;
-    public bool Ready { get; set; }
-    public int Sequence { get; set; }
-    public int CorrectCharacters { get; set; }
-    public string TypedTextPreview { get; set; } = "";
-    public double Wpm { get; set; }
-    public int? Placement { get; set; }
-    public DateTimeOffset? FinishedAt { get; set; }
-    public DateTimeOffset? DisconnectedAt { get; set; }
-    public int DurationMilliseconds { get; set; }
-    public double Accuracy { get; set; }
-    public int SeriesPoints { get; set; }
-    public int RoundWins { get; set; }
-    public int FinishedRounds { get; set; }
-    public int CompletedRounds { get; set; }
-    public int TotalDurationMilliseconds { get; set; }
-    public double TotalWpm { get; set; }
-    public double TotalAccuracy { get; set; }
-    public double AverageWpm => CompletedRounds == 0 ? 0 : Math.Round(TotalWpm / CompletedRounds, 2);
-    public double AverageAccuracy => CompletedRounds == 0 ? 0 : Math.Round(TotalAccuracy / CompletedRounds, 2);
-}
-
-public sealed record CompletedRoomRecord(
-    Guid Id,
-    int RoundNumber,
-    int RoundVersion,
-    string IdempotencyKey,
-    Guid CreatorProfileId,
-    string RoomCode,
-    LiveRoomMode Mode,
-    LiveRoomVisibility Visibility,
-    int RoundCount,
-    DateTimeOffset CreatedAt,
-    DateTimeOffset? StartedAt,
-    DateTimeOffset? FinishedAt,
-    IReadOnlyList<CompletedParticipantRecord> Participants);
-
-public sealed record CompletedParticipantRecord(
-    Guid UserProfileId,
-    ParticipantStatus Status,
-    int? Placement,
-    int DurationMilliseconds,
-    double Wpm,
-    double Accuracy,
-    int? TeamNumber = null);

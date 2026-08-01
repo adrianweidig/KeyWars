@@ -1,31 +1,53 @@
-# Contributing
+# Mitwirken
 
-Thanks for improving KeyWars.
+Danke, dass du KeyWars verbesserst. Die ausführliche Modulkarte und Hinweise
+zur Code-Navigation stehen in [docs/development.md](docs/development.md).
 
-## Development
+## Entwicklungsumgebung
 
 ```powershell
 $env:DOTNET_ROOT='F:\KeyWars\.dotnet'
 $env:PATH='F:\KeyWars\.dotnet;' + $env:PATH
-dotnet restore --locked-mode
-dotnet build -c Release --no-restore
-dotnet test -c Release --no-build
-dotnet format --verify-no-changes --no-restore
+dotnet restore .\KeyWars.slnx --locked-mode
+dotnet build .\KeyWars.slnx -c Release --no-restore
+dotnet test .\KeyWars.slnx -c Release --no-build --no-restore
+dotnet format .\KeyWars.slnx --verify-no-changes --no-restore
+npm run test:browser
 ```
+
+Nutze für eine Änderung die kleinste passende Testschicht. Browser-, Layout-
+und Interaktionsänderungen benötigen zusätzlich eine gerenderte Prüfung.
+
+## Codeänderungen
+
+- Lege Fachlogik in `Domain` oder einem klar zuständigen Service ab.
+- Halte Razor-Handler und Browsermodule frei von eigener XP-, Ranking- oder
+  Persistenzautorität.
+- Extrahiere gemeinsam genutzte Logik, statt sie zwischen Featuredateien zu
+  kopieren.
+- Kommentiere Invarianten und nicht offensichtliche Entscheidungen, nicht den
+  unmittelbar lesbaren Programmablauf.
+- Erzeuge für Schemaänderungen eine neue EF-Core-Migration; ändere bestehende
+  Migrationen und Snapshots nicht von Hand.
 
 ## Pull Requests
 
-- Keep changes scoped and explain operational impact.
-- Update documentation when behavior, configuration or deployment changes.
-- Add or update tests for changed behavior.
-- Do not commit generated archives, databases, logs, secrets or local runtime files.
-- Keep production authentication tied to LDAP/AD; Development login must remain non-production only.
+- Halte Änderungen fokussiert und beschreibe betriebliche Auswirkungen.
+- Aktualisiere Dokumentation bei Verhaltens-, Konfigurations- oder
+  Deploymentänderungen.
+- Ergänze Tests auf der niedrigsten sinnvollen Ebene.
+- Committe keine Archive, Datenbanken, Logs, Secrets oder lokale
+  Laufzeitdateien.
+- Produktionsauthentifizierung bleibt an LDAP oder Active Directory gebunden;
+  der Entwicklungslogin darf nicht in Produktion aktiv werden.
+- Prüfe bei Docker- oder Releaseänderungen GHCR, Offline-Artefakte und
+  Release Notes mit.
 
-## Commit Style
+## Commit-Stil
 
-Use short imperative commit messages, for example:
+Verwende kurze, imperative Commit-Nachrichten, zum Beispiel:
 
 ```text
-Add container vulnerability scan
-Fix LDAP startup validation
+Arena-Wertung in eigenes Modul verschieben
+LDAP-Startvalidierung korrigieren
 ```

@@ -1,3 +1,4 @@
+/* Basis: Design-Tokens, öffentlicher Seitenrahmen und gemeinsame Komponenten. */
 :root {
   color-scheme: dark;
   --bg: #070a0d;
@@ -3694,6 +3695,7 @@ select:focus-visible {
   transition: none;
 }
 
+/* Produktoberflächen: Training, Arena, Ergebnisse und gemeinsame Verfeinerungen. */
 :root {
   --surface-strong: #111c28;
   --surface-action: #0b1825;
@@ -4520,7 +4522,7 @@ button.tertiary {
   transform: none;
 }
 
-/* App cockpit shell based on the accepted KeyWars reference screen. */
+/* Authentifizierter App-Rahmen mit Sidebar, Cockpit und Light-Theme-Tokens. */
 :root {
   --app-bg: #050b12;
   --app-panel: rgba(8, 20, 32, 0.92);
@@ -6136,7 +6138,7 @@ body.app-authenticated::before {
   }
 }
 
-/* Vision-audit responsive pass: these late rules lock the app shell to the intended breakpoints. */
+/* Responsive Korrekturen: Diese späten Regeln sichern die geprüften Breakpoints. */
 .competition-board-peek {
   grid-column: 1 / -1;
   min-height: auto !important;
@@ -6961,6 +6963,7 @@ body.app-public.auth-exit-page .shell {
   }
 }
 
+/* Challenge-Abschluss, Ergebnisdarstellung und Motivation. */
 .app-authenticated.challenge-play-page .shell {
   width: min(1160px, 100%);
 }
@@ -7229,7 +7232,7 @@ body.app-public.auth-exit-page .shell {
   }
 }
 
-/* Typing focus layout */
+/* Gemeinsamer Fokus- und Zen-Modus für alle Tippoberflächen. */
 .typing-focus-page {
   --typing-focus-max-width: var(--app-content-max);
   --typing-readable-measure: 1320px;
@@ -7451,7 +7454,7 @@ body.app-public.auth-exit-page .shell {
   }
 }
 
-/* Persistent desktop navigation and distraction-free typing mode. */
+/* Persistente Desktop-Navigation und ablenkungsfreier Tippmodus. */
 .zen-mode-toggle {
   position: fixed;
   right: 22px;
@@ -7568,6 +7571,7 @@ body.app-public.auth-exit-page .shell {
   color: var(--app-green);
 }
 
+/* Abschließende Light-Theme-Overrides bleiben bewusst am Ende der Kaskade. */
 :root[data-theme="light"] body {
   background:
     linear-gradient(135deg, rgba(8, 127, 146, 0.08), transparent 28rem),
