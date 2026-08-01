@@ -36,5 +36,5 @@ dotnet test .\tests\KeyWars.WindowsUiTests\KeyWars.WindowsUiTests.csproj -c Rele
 
 Ein alternativer Browser kann über `KEYWARS_WINDOWS_UI_BROWSER` als absoluter
 Pfad zu `msedge.exe` oder `chrome.exe` angegeben werden. In GitHub Actions
-läuft die Testschicht auf einem Windows-Runner; auf anderen Betriebssystemen
-wird sie explizit übersprungen.
+läuft die Testschicht ausschließlich auf einem Windows-Runner. Linux baut die
+gesamte Solution, führt dieses Windows-spezifische Testprojekt aber nicht aus.
