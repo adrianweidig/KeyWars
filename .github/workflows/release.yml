@@ -94,7 +94,8 @@ jobs:
         run: |
           mkdir -p artifacts
           docker save keywars:${{ github.ref_name }} | gzip -c > artifacts/keywars-${{ github.ref_name }}-linux-amd64.tar.gz
-          cp compose.yaml .env.example artifacts/
+          cp compose.yaml artifacts/
+          cp .env.example artifacts/default.env.example
           python - <<'PY'
           import json
           import os
@@ -120,6 +121,7 @@ jobs:
                       "format": "docker-save-tar-gzip",
                   }
               ],
+              "deployment_files": ["compose.yaml", "default.env.example"],
           }
           Path("artifacts/RELEASE_MANIFEST.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
@@ -151,14 +153,14 @@ jobs:
           ## Release-Artefakte
 
           - Offline-Image für `linux/amd64`
-          - `compose.yaml` und Beispielkonfiguration
+          - `compose.yaml` und `default.env.example`
           - `RELEASE_MANIFEST.json` mit Image-Digest und Tags
           - `SHA256SUMS` zur Integritätsprüfung
           """
           release_notes = "\n".join(line.strip() for line in release_notes.strip().splitlines()) + "\n"
           Path("artifacts/RELEASE_NOTES.md").write_text(release_notes, encoding="utf-8")
           PY
-          (cd artifacts && sha256sum keywars-${{ github.ref_name }}-linux-amd64.tar.gz compose.yaml .env.example RELEASE_MANIFEST.json RELEASE_NOTES.md > SHA256SUMS)
+          (cd artifacts && sha256sum keywars-${{ github.ref_name }}-linux-amd64.tar.gz compose.yaml default.env.example RELEASE_MANIFEST.json RELEASE_NOTES.md > SHA256SUMS)
       - name: Verify release artifacts
         run: python scripts/check_release_artifacts.py artifacts "${{ github.ref_name }}"
       - uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2

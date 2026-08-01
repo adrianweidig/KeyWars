@@ -6,6 +6,8 @@ obj/
 .dotnet/
 .dotnet-install/
 node_modules/
+__pycache__/
+*.py[cod]
 App_Data/
 TestResults/
 coverage/
