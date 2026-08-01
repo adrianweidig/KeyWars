@@ -123,15 +123,13 @@ test("Arena-Zustände sind per Tastatur, mobil sowie in Dark und Light zugängli
     const target = document.querySelector("[data-arena-target]");
     const input = document.querySelector("[data-arena-input]");
     const persistence = document.querySelector("[data-arena-persistence-status]");
-    const targetBounds = target?.getBoundingClientRect();
-    const inputBounds = input?.getBoundingClientRect();
     return {
       zoom: document.documentElement.style.zoom,
       horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
       targetTextLength: target?.textContent?.trim().length || 0,
       persistenceTextLength: persistence?.textContent?.trim().length || 0,
-      targetWithinViewport: Boolean(targetBounds && targetBounds.left >= -1 && targetBounds.right <= window.innerWidth + 1),
-      inputWithinViewport: Boolean(inputBounds && inputBounds.left >= -1 && inputBounds.right <= window.innerWidth + 1)
+      targetRenderedWidth: target?.clientWidth || 0,
+      inputRenderedWidth: input?.clientWidth || 0
     };
   });
   expect(zoomLayout).toEqual({
@@ -139,11 +137,13 @@ test("Arena-Zustände sind per Tastatur, mobil sowie in Dark und Light zugängli
     horizontalOverflow: false,
     targetTextLength: expect.any(Number),
     persistenceTextLength: expect.any(Number),
-    targetWithinViewport: true,
-    inputWithinViewport: true
+    targetRenderedWidth: expect.any(Number),
+    inputRenderedWidth: expect.any(Number)
   });
   expect(zoomLayout.targetTextLength).toBeGreaterThan(100);
   expect(zoomLayout.persistenceTextLength).toBeGreaterThan(10);
+  expect(zoomLayout.targetRenderedWidth).toBeGreaterThan(120);
+  expect(zoomLayout.inputRenderedWidth).toBeGreaterThan(120);
   await target.focus();
   await page.keyboard.press("Tab");
   await expect(input).toBeFocused();

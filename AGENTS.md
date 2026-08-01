@@ -35,6 +35,7 @@ Every behavioral change needs a matching test at the lowest useful level:
 - concurrent live-room behavior: `tests/KeyWars.ConcurrencyTests`;
 - HTTP/security smoke behavior: `tests/KeyWars.E2ETests`;
 - browser layout and SignalR flows: `tests/browser`.
+- Windows UI Automation and rendered-window smoke: `tests/KeyWars.WindowsUiTests`.
 
 Run these before handing off substantial changes:
 

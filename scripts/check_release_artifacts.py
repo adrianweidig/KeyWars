@@ -37,11 +37,14 @@ def parse_checksums(path: Path) -> dict[str, str]:
 def validate(artifact_dir: Path, version: str) -> list[str]:
     errors: list[str] = []
     expected_archive = artifact_dir / f"keywars-{version}-linux-amd64.tar.gz"
+    dot_env_example = artifact_dir / ".env.example"
+    env_example = dot_env_example if dot_env_example.exists() else artifact_dir / "default.env.example"
     required = [
         expected_archive,
         artifact_dir / "compose.yaml",
-        artifact_dir / ".env.example",
+        env_example,
         artifact_dir / "RELEASE_MANIFEST.json",
+        artifact_dir / "RELEASE_NOTES.md",
         artifact_dir / "SHA256SUMS",
     ]
 
@@ -56,9 +59,10 @@ def validate(artifact_dir: Path, version: str) -> list[str]:
 
     checksums = parse_checksums(artifact_dir / "SHA256SUMS")
     for path in required[:-1]:
-        expected = checksums.get(path.name)
+        checksum_name = ".env.example" if path == env_example else path.name
+        expected = checksums.get(checksum_name)
         if expected is None:
-            errors.append(f"SHA256SUMS does not cover {path.name}")
+            errors.append(f"SHA256SUMS does not cover {checksum_name}")
             continue
         actual = sha256(path)
         if actual != expected:
@@ -72,6 +76,8 @@ def validate(artifact_dir: Path, version: str) -> list[str]:
 
     if manifest.get("version") != version:
         errors.append(f"Release manifest version is {manifest.get('version')!r}, expected {version!r}")
+    if manifest.get("release_notes") != "RELEASE_NOTES.md":
+        errors.append("Release manifest must reference RELEASE_NOTES.md")
     image = manifest.get("image", {})
     digest = image.get("digest", "")
     if not isinstance(digest, str) or not digest.startswith("sha256:"):
@@ -121,12 +127,14 @@ def self_test() -> int:
         create_sample_archive(archive)
         write_file(artifact_dir / "compose.yaml", "services:\n  keywars:\n    image: ghcr.io/example/keywars:v0.0.0-test\n")
         write_file(artifact_dir / ".env.example", "ASPNETCORE_ENVIRONMENT=Production\n")
+        write_file(artifact_dir / "RELEASE_NOTES.md", f"# KeyWars {version}\n\nVerified release notes.\n")
         write_file(
             artifact_dir / "RELEASE_MANIFEST.json",
             json.dumps(
                 {
                     "schema_version": 1,
                     "version": version,
+                    "release_notes": "RELEASE_NOTES.md",
                     "image": {
                         "repository": "ghcr.io/example/keywars",
                         "tags": ["ghcr.io/example/keywars:v0.0.0-test"],
@@ -149,6 +157,14 @@ def self_test() -> int:
         errors = validate(artifact_dir, version)
         if errors:
             print("Release artifact self-test failed:")
+            for error in errors:
+                print(f"  {error}")
+            return 1
+
+        (artifact_dir / ".env.example").rename(artifact_dir / "default.env.example")
+        errors = validate(artifact_dir, version)
+        if errors:
+            print("Release artifact downloaded-name self-test failed:")
             for error in errors:
                 print(f"  {error}")
             return 1

@@ -4,7 +4,11 @@
   },
   "globs": [
     "**/*.md",
+    "!**/.dotnet/**",
     "!**/bin/**",
-    "!**/obj/**"
+    "!**/node_modules/**",
+    "!**/obj/**",
+    "!**/output/**",
+    "!**/TestResults/**"
   ]
 }
