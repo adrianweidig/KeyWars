@@ -1,12 +1,12 @@
 # Air-Gap-Installation
 
 Ein KeyWars-Release enthält ein echtes Docker-Imagearchiv im Format
-`docker save | gzip`, die Compose-Datei, `.env.example`, `SHA256SUMS` und
+`docker save | gzip`, die Compose-Datei, `default.env.example`, `SHA256SUMS` und
 `RELEASE_MANIFEST.json`. Das Zielsystem benötigt für den Import keine
 Internetverbindung.
 
 1. Release-Artefakte auf einem Internetrechner laden:
-   `keywars-vX.Y.Z-linux-amd64.tar.gz`, `compose.yaml`, `.env.example`,
+   `keywars-vX.Y.Z-linux-amd64.tar.gz`, `compose.yaml`, `default.env.example`,
    `RELEASE_MANIFEST.json` und `SHA256SUMS`.
 2. Prüfsummen auf dem Internetrechner oder Transferhost prüfen:
 
@@ -20,6 +20,12 @@ gzip -t keywars-vX.Y.Z-linux-amd64.tar.gz
 
 ```bash
 docker load -i keywars-vX.Y.Z-linux-amd64.tar.gz
+```
+
+1. Beispielkonfiguration übernehmen:
+
+```bash
+cp default.env.example .env
 ```
 
 1. Den in `RELEASE_MANIFEST.json` dokumentierten versionierten Tag oder Digest

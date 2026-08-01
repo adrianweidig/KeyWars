@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.4.7 - 2026-08-01
+
+- Publish the example environment file under the stable
+  `default.env.example` asset name and cover that exact downloaded name in the
+  release manifest, checksums, validator and air-gap instructions.
+
 ## v0.4.6 - 2026-08-01
 
 - Split the live-room backend into explicit contracts, synchronized state,

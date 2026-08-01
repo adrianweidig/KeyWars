@@ -37,8 +37,7 @@ def parse_checksums(path: Path) -> dict[str, str]:
 def validate(artifact_dir: Path, version: str) -> list[str]:
     errors: list[str] = []
     expected_archive = artifact_dir / f"keywars-{version}-linux-amd64.tar.gz"
-    dot_env_example = artifact_dir / ".env.example"
-    env_example = dot_env_example if dot_env_example.exists() else artifact_dir / "default.env.example"
+    env_example = artifact_dir / "default.env.example"
     required = [
         expected_archive,
         artifact_dir / "compose.yaml",
@@ -59,10 +58,9 @@ def validate(artifact_dir: Path, version: str) -> list[str]:
 
     checksums = parse_checksums(artifact_dir / "SHA256SUMS")
     for path in required[:-1]:
-        checksum_name = ".env.example" if path == env_example else path.name
-        expected = checksums.get(checksum_name)
+        expected = checksums.get(path.name)
         if expected is None:
-            errors.append(f"SHA256SUMS does not cover {checksum_name}")
+            errors.append(f"SHA256SUMS does not cover {path.name}")
             continue
         actual = sha256(path)
         if actual != expected:
@@ -87,6 +85,8 @@ def validate(artifact_dir: Path, version: str) -> list[str]:
     archives = manifest.get("offline_archives", [])
     if not any(item.get("file") == expected_archive.name and item.get("platform") == "linux/amd64" for item in archives):
         errors.append("Release manifest must list the linux/amd64 offline image archive")
+    if manifest.get("deployment_files") != ["compose.yaml", "default.env.example"]:
+        errors.append("Release manifest must list compose.yaml and default.env.example as deployment files")
 
     try:
         with gzip.open(expected_archive, "rb") as gzipped:
@@ -126,7 +126,7 @@ def self_test() -> int:
         archive = artifact_dir / f"keywars-{version}-linux-amd64.tar.gz"
         create_sample_archive(archive)
         write_file(artifact_dir / "compose.yaml", "services:\n  keywars:\n    image: ghcr.io/example/keywars:v0.0.0-test\n")
-        write_file(artifact_dir / ".env.example", "ASPNETCORE_ENVIRONMENT=Production\n")
+        write_file(artifact_dir / "default.env.example", "ASPNETCORE_ENVIRONMENT=Production\n")
         write_file(artifact_dir / "RELEASE_NOTES.md", f"# KeyWars {version}\n\nVerified release notes.\n")
         write_file(
             artifact_dir / "RELEASE_MANIFEST.json",
@@ -145,6 +145,7 @@ def self_test() -> int:
                     "offline_archives": [
                         {"file": archive.name, "platform": "linux/amd64", "format": "docker-save-tar-gzip"}
                     ],
+                    "deployment_files": ["compose.yaml", "default.env.example"],
                 },
                 indent=2,
             )
@@ -161,12 +162,10 @@ def self_test() -> int:
                 print(f"  {error}")
             return 1
 
-        (artifact_dir / ".env.example").rename(artifact_dir / "default.env.example")
+        (artifact_dir / "default.env.example").rename(artifact_dir / ".env.example")
         errors = validate(artifact_dir, version)
-        if errors:
-            print("Release artifact downloaded-name self-test failed:")
-            for error in errors:
-                print(f"  {error}")
+        if "Missing release artifact: default.env.example" not in errors:
+            print("Release artifact published-name self-test failed")
             return 1
 
     print("Release artifact self-test: OK")
