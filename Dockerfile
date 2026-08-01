@@ -36,7 +36,7 @@ RUN apt-get update \
     && mkdir -p /data/dataprotection-keys /data/backups \
     && chown -R app:app /data
 COPY --from=build /app/publish .
-USER app
+USER 1654
 EXPOSE 8080
 ENV ASPNETCORE_HTTP_PORTS=8080 \
     KEYWARS__DATA__DIRECTORY=/data
