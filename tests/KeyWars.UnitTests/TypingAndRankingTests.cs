@@ -42,6 +42,7 @@ public sealed class TypingAndRankingTests
         Assert.Equal(TypingEngine.SplitGraphemes("Schlüssel").Count, metrics.CorrectCharacters);
         Assert.Equal(0, metrics.IncorrectCharacters);
         Assert.Equal(100, metrics.Accuracy);
+        Assert.Empty(metrics.Errors);
     }
 
     [Fact]
@@ -98,6 +99,91 @@ public sealed class TypingAndRankingTests
         Assert.Equal(2, error.Position);
         Assert.Equal("c", error.Expected);
         Assert.Equal("", error.Actual);
+    }
+
+    [Fact]
+    public void AlignmentHandlesTwentyThousandGraphemesWithAMiddleEdit()
+    {
+        var engine = new TypingEngine(TimeProvider.System);
+        var target = new string('a', 20_000);
+        var input = target[..10_000] + "b" + target[10_001..];
+
+        var metrics = engine.Analyze(target, input, TimeSpan.FromMinutes(1), 0, 0);
+
+        Assert.Equal(20_000, TypingEngine.SplitGraphemes(target).Count);
+        Assert.Equal(20_000, TypingEngine.SplitGraphemes(input).Count);
+        Assert.Equal(20_000, metrics.TotalCharacters);
+        Assert.Equal(19_999, metrics.CorrectCharacters);
+        Assert.Equal(1, metrics.IncorrectCharacters);
+        Assert.False(metrics.Completed);
+        var error = Assert.Single(metrics.Errors);
+        Assert.Equal(TypingErrorKind.Substitution, error.Kind);
+        Assert.Equal(10_000, error.Position);
+        Assert.Equal("a", error.Expected);
+        Assert.Equal("b", error.Actual);
+        Assert.Equal("aa", error.Pattern);
+    }
+
+    [Fact]
+    public void AlignmentKeepsAmbiguousEditRoutesStable()
+    {
+        var engine = new TypingEngine(TimeProvider.System);
+
+        var repeated = engine.Analyze("aa", "a", TimeSpan.FromSeconds(10), 0, 0);
+        var shifted = engine.Analyze("aba", "bab", TimeSpan.FromSeconds(10), 0, 0);
+        var swapped = engine.Analyze("ab", "ba", TimeSpan.FromSeconds(10), 0, 0);
+
+        var repeatedError = Assert.Single(repeated.Errors);
+        Assert.Equal(1, repeated.CorrectCharacters);
+        Assert.Equal(1, repeated.IncorrectCharacters);
+        Assert.Equal(50, repeated.Accuracy);
+        Assert.Equal(TypingErrorKind.Deletion, repeatedError.Kind);
+        Assert.Equal(0, repeatedError.Position);
+
+        var shiftedError = Assert.Single(shifted.Errors);
+        Assert.Equal(2, shifted.CorrectCharacters);
+        Assert.Equal(1, shifted.IncorrectCharacters);
+        Assert.Equal(TypingErrorKind.Insertion, shiftedError.Kind);
+        Assert.Equal(0, shiftedError.Position);
+
+        Assert.Equal(0, swapped.CorrectCharacters);
+        Assert.Equal(2, swapped.IncorrectCharacters);
+        Assert.All(swapped.Errors, error => Assert.Equal(TypingErrorKind.Substitution, error.Kind));
+        Assert.Equal([0, 1], swapped.Errors.Select(error => error.Position).ToArray());
+    }
+
+    [Fact]
+    public void AlignmentKeepsDenseLargeEditsExactBeyondTheBand()
+    {
+        var engine = new TypingEngine(TimeProvider.System);
+        var target = new string('a', 500) + "c" + new string('b', 500);
+        var input = new string('b', 500) + "c" + new string('a', 500);
+
+        var metrics = engine.Analyze(target, input, TimeSpan.FromMinutes(1), 0, 0);
+
+        Assert.Equal(1, metrics.CorrectCharacters);
+        Assert.Equal(1_000, metrics.IncorrectCharacters);
+        Assert.Equal(1_000, metrics.Errors.Count);
+        Assert.All(metrics.Errors, error => Assert.Equal(TypingErrorKind.Substitution, error.Kind));
+    }
+
+    [Fact]
+    public void AlignmentMatchesTheReferenceMatrixForShortBinaryWords()
+    {
+        var engine = new TypingEngine(TimeProvider.System);
+        var words = BinaryWords(4).ToArray();
+
+        foreach (var target in words)
+        {
+            foreach (var input in words)
+            {
+                var actual = engine.Analyze(target, input, TimeSpan.FromSeconds(10), 0, 0);
+
+                Assert.Equal(
+                    ReferenceSnapshot(target, input),
+                    MetricsSnapshot(target, input, actual));
+            }
+        }
     }
 
     [Fact]
@@ -289,5 +375,146 @@ public sealed class TypingAndRankingTests
         Assert.Contains('.', text);
         Assert.Contains("Training", text, StringComparison.OrdinalIgnoreCase);
         Assert.False(text.StartsWith("aber achten Änderung", StringComparison.Ordinal));
+    }
+
+    private static IEnumerable<string> BinaryWords(int maximumLength)
+    {
+        yield return string.Empty;
+        for (var length = 1; length <= maximumLength; length++)
+        {
+            for (var mask = 0; mask < 1 << length; mask++)
+            {
+                var characters = new char[length];
+                for (var index = 0; index < length; index++)
+                {
+                    characters[index] = (mask & (1 << index)) == 0 ? 'a' : 'b';
+                }
+
+                yield return new string(characters);
+            }
+        }
+    }
+
+    private static string MetricsSnapshot(string target, string input, TypingMetrics metrics)
+    {
+        var errors = string.Join(',', metrics.Errors.Select(error => $"{error.Kind}@{error.Position}"));
+        return $"{target}->{input}|{metrics.CorrectCharacters}|{metrics.IncorrectCharacters}|" +
+            $"{metrics.Completed}|{metrics.Accuracy}|{errors}";
+    }
+
+    private static string ReferenceSnapshot(string target, string input)
+    {
+        var steps = ReferenceAlignment(target, input);
+        var lastInputStepIndex = steps.FindLastIndex(step => step.Operation != 3);
+        var correct = 0;
+        var incorrect = 0;
+        var errors = new List<string>();
+        for (var index = 0; index < steps.Count; index++)
+        {
+            var step = steps[index];
+            if (step.Operation == 0)
+            {
+                correct++;
+                continue;
+            }
+
+            if (step.Operation == 3 && index > lastInputStepIndex)
+            {
+                continue;
+            }
+
+            incorrect++;
+            var kind = step.Operation switch
+            {
+                2 => TypingErrorKind.Insertion,
+                3 => TypingErrorKind.Deletion,
+                _ => TypingErrorKind.Substitution
+            };
+            errors.Add($"{kind}@{Math.Max(0, step.TargetIndex)}");
+        }
+
+        var attempted = correct + incorrect;
+        var accuracy = attempted == 0 ? 0 : Math.Round((double)correct / attempted * 100, 2);
+        var completed = target.Length == correct && incorrect == 0 && input.Length == target.Length;
+        return $"{target}->{input}|{correct}|{incorrect}|{completed}|{accuracy}|" +
+            string.Join(',', errors);
+    }
+
+    private static List<(byte Operation, int TargetIndex, int InputIndex)> ReferenceAlignment(
+        string target,
+        string input)
+    {
+        var distance = new int[target.Length + 1, input.Length + 1];
+        var operations = new byte[target.Length + 1, input.Length + 1];
+        FillReferenceMatrix(target, input, distance, operations);
+
+        var steps = new List<(byte Operation, int TargetIndex, int InputIndex)>();
+        var targetCursor = target.Length;
+        var inputCursor = input.Length;
+        while (targetCursor > 0 || inputCursor > 0)
+        {
+            var operation = operations[targetCursor, inputCursor];
+            if (operation is 0 or 1)
+            {
+                targetCursor--;
+                inputCursor--;
+                steps.Add((operation, targetCursor, inputCursor));
+            }
+            else if (operation == 3)
+            {
+                targetCursor--;
+                steps.Add((operation, targetCursor, -1));
+            }
+            else
+            {
+                inputCursor--;
+                steps.Add((operation, targetCursor, inputCursor));
+            }
+        }
+
+        steps.Reverse();
+        return steps;
+    }
+
+    private static void FillReferenceMatrix(
+        string target, string input, int[,] distance, byte[,] operations)
+    {
+        for (var targetIndex = 1; targetIndex <= target.Length; targetIndex++)
+        {
+            distance[targetIndex, 0] = targetIndex;
+            operations[targetIndex, 0] = 3;
+        }
+
+        for (var inputIndex = 1; inputIndex <= input.Length; inputIndex++)
+        {
+            distance[0, inputIndex] = inputIndex;
+            operations[0, inputIndex] = 2;
+        }
+
+        for (var targetIndex = 1; targetIndex <= target.Length; targetIndex++)
+        {
+            for (var inputIndex = 1; inputIndex <= input.Length; inputIndex++)
+            {
+                var matches = target[targetIndex - 1] == input[inputIndex - 1];
+                var bestCost = distance[targetIndex - 1, inputIndex - 1] + (matches ? 0 : 1);
+                byte operation = matches ? (byte)0 : (byte)1;
+                var deleteCost = distance[targetIndex - 1, inputIndex] + 1;
+                if (deleteCost < bestCost)
+                {
+                    bestCost = deleteCost;
+                    operation = 3;
+                }
+
+                var insertCost = distance[targetIndex, inputIndex - 1] + 1;
+                if (insertCost < bestCost)
+                {
+                    bestCost = insertCost;
+                    operation = 2;
+                }
+
+                distance[targetIndex, inputIndex] = bestCost;
+                operations[targetIndex, inputIndex] = operation;
+            }
+        }
     }
 }

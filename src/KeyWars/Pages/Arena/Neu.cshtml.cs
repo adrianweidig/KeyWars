@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text;
 using KeyWars.Auth;
 using KeyWars.Domain;
 using KeyWars.Services;
@@ -14,6 +15,8 @@ public sealed class NeuModel(CurrentUser currentUser, TextLibraryService texts, 
     public IReadOnlyList<ArenaTextOption> TextOptions { get; private set; } = [];
     public ArenaTextOption? SelectedTextOption => TextOptions.FirstOrDefault(text => text.Id == Input.TrainingTextId) ?? TextOptions.FirstOrDefault();
     public int MaxParticipantsLimit { get; private set; }
+    public int MaxArenaTargetGraphemes { get; private set; }
+    public int ExcludedTextCount { get; private set; }
 
     [BindProperty]
     public RoomInput Input { get; set; } = new();
@@ -24,7 +27,7 @@ public sealed class NeuModel(CurrentUser currentUser, TextLibraryService texts, 
         var profile = await currentUser.RequireProfileAsync(User, cancellationToken);
         Texts = await texts.ListVisibleAsync(profile.Id, cancellationToken);
         BuildTextOptions();
-        Input.TrainingTextId = Texts.FirstOrDefault()?.Id ?? Guid.Empty;
+        Input.TrainingTextId = TextOptions.FirstOrDefault()?.Id ?? Guid.Empty;
         Input.MaxParticipants = Math.Min(Input.MaxParticipants, MaxParticipantsLimit);
     }
 
@@ -56,9 +59,20 @@ public sealed class NeuModel(CurrentUser currentUser, TextLibraryService texts, 
         {
             ModelState.AddModelError(string.Empty, "Erstelle zuerst einen Trainingstext, bevor du einen Live-Raum startest.");
         }
-        else if (Texts.All(text => text.Id != Input.TrainingTextId))
+        else if (TextOptions.Count == 0)
         {
-            ModelState.AddModelError($"{nameof(Input)}.{nameof(Input.TrainingTextId)}", "Der ausgewählte Text ist nicht verfügbar.");
+            ModelState.AddModelError(
+                string.Empty,
+                $"Kein sichtbarer Text erfüllt die Arena-Grenzen von {MaxArenaTargetGraphemes} Graphemen und {LiveOptions.MaximumSafeArenaTargetUtf8Bytes / 1024} KiB UTF-8.");
+        }
+        else if (TextOptions.All(text => text.Id != Input.TrainingTextId))
+        {
+            var visibleButTooLarge = Texts.Any(text => text.Id == Input.TrainingTextId);
+            ModelState.AddModelError(
+                $"{nameof(Input)}.{nameof(Input.TrainingTextId)}",
+                visibleButTooLarge
+                    ? "Der ausgewählte Text ist für eine Live-Arena zu lang. Kürze ihn oder wähle einen anderen Text."
+                    : "Der ausgewählte Text ist nicht verfügbar.");
         }
 
         if (!ModelState.IsValid)
@@ -67,11 +81,21 @@ public sealed class NeuModel(CurrentUser currentUser, TextLibraryService texts, 
         }
 
         var text = await texts.GetVisibleAsync(profile.Id, Input.TrainingTextId, cancellationToken);
+        var normalizedTarget = TypingEngine.NormalizeText(text.Body);
+        if (!IsArenaSafeTarget(normalizedTarget))
+        {
+            ModelState.AddModelError(
+                $"{nameof(Input)}.{nameof(Input.TrainingTextId)}",
+                "Der ausgewählte Text überschreitet inzwischen die Arena-Grenze. Lade die Seite neu und wähle einen kürzeren Text.");
+            BuildTextOptions();
+            return Page();
+        }
+
         var snapshot = rooms.CreateRoom(new CreateLiveRoomRequest(
             profile.Id,
             profile.DisplayName,
             string.IsNullOrWhiteSpace(Input.Title) ? text.Title : Input.Title,
-            text.Body,
+            normalizedTarget,
             Input.Mode,
             Input.Visibility,
             Input.RoundCount,
@@ -82,25 +106,45 @@ public sealed class NeuModel(CurrentUser currentUser, TextLibraryService texts, 
     private void ApplyConfiguredLimits()
     {
         MaxParticipantsLimit = Math.Max(2, liveOptions.Value.MaxParticipantsPerRoom);
+        MaxArenaTargetGraphemes = Math.Clamp(
+            liveOptions.Value.MaxArenaTargetGraphemes,
+            1,
+            LiveOptions.MaximumSafeArenaTargetGraphemes);
     }
 
     private void BuildTextOptions()
     {
-        TextOptions = Texts.Select(ToTextOption).ToArray();
+        TextOptions = Texts
+            .Select(ToTextOption)
+            .Where(option => option is not null)
+            .Cast<ArenaTextOption>()
+            .ToArray();
+        ExcludedTextCount = Texts.Count - TextOptions.Count;
     }
 
-    private static ArenaTextOption ToTextOption(TrainingText text)
+    private ArenaTextOption? ToTextOption(TrainingText text)
     {
-        var words = TypingEngine.CountWords(text.Body);
+        var normalized = TypingEngine.NormalizeText(text.Body);
+        if (!IsArenaSafeTarget(normalized))
+        {
+            return null;
+        }
+
+        var characterCount = TypingEngine.SplitGraphemes(normalized).Count;
+        var words = TypingEngine.CountWords(normalized);
         var estimatedSeconds = Math.Max(10, (int)Math.Ceiling(words / 45d * 60d));
         return new ArenaTextOption(
             text.Id,
             text.Title,
-            text.CharacterCount,
+            characterCount,
             words,
             estimatedSeconds,
-            BuildPreview(text.Body));
+            BuildPreview(normalized));
     }
+
+    private bool IsArenaSafeTarget(string normalized) =>
+        TypingEngine.SplitGraphemes(normalized).Count <= MaxArenaTargetGraphemes &&
+        Encoding.UTF8.GetByteCount(normalized) <= LiveOptions.MaximumSafeArenaTargetUtf8Bytes;
 
     private static string BuildPreview(string body)
     {

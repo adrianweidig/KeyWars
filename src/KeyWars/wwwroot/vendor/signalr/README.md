@@ -1,7 +1,7 @@
 # SignalR Browser Client
 
 This directory contains the locally vendored browser build of
-`@microsoft/signalr` version `10.0.0`.
+`@microsoft/signalr` version `10.0.11`.
 
 - Source package: `@microsoft/signalr`
 - License: MIT

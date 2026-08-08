@@ -52,6 +52,44 @@ public sealed class LiveProgressBroadcastTests
         Assert.Equal(1, broadcaster.Snapshot().DroppedProgressMessages);
     }
 
+    [Fact]
+    public async Task RemovingRoomClearsOnlyItsBufferAndPreservesActiveRoomInterval()
+    {
+        var sender = new RecordingProgressSender();
+        var time = new FixedTimeProvider(DateTimeOffset.Parse("2026-06-18T12:00:00Z"));
+        var broadcaster = new LiveProgressBroadcaster(
+            sender,
+            Options.Create(new LiveOptions { ProgressBroadcastHz = 1, RoomCommandQueueCapacity = 8 }),
+            time,
+            NullLogger<LiveProgressBroadcaster>.Instance);
+        var activeRoomId = Guid.CreateVersion7();
+        var removedRoomId = Guid.CreateVersion7();
+
+        await broadcaster.PublishAsync(CreateDelta(activeRoomId, Guid.CreateVersion7(), 1), CancellationToken.None);
+        await broadcaster.PublishAsync(CreateDelta(removedRoomId, Guid.CreateVersion7(), 1), CancellationToken.None);
+        await broadcaster.PublishAsync(CreateDelta(removedRoomId, Guid.CreateVersion7(), 2), CancellationToken.None);
+
+        var beforeRemoval = broadcaster.Snapshot();
+        Assert.Equal(2, beforeRemoval.ActiveRooms);
+        Assert.Equal(1, beforeRemoval.PendingProgressMessages);
+        Assert.True(broadcaster.RemoveRoom(removedRoomId));
+
+        var afterRemoval = broadcaster.Snapshot();
+        Assert.Equal(1, afterRemoval.ActiveRooms);
+        Assert.Equal(0, afterRemoval.PendingProgressMessages);
+        Assert.Equal(2, afterRemoval.BroadcastCount);
+
+        await broadcaster.PublishAsync(CreateDelta(activeRoomId, Guid.CreateVersion7(), 2), CancellationToken.None);
+
+        Assert.Single(sender.Batches, batch => batch.RoomId == activeRoomId);
+        Assert.Equal(1, broadcaster.Snapshot().PendingProgressMessages);
+        Assert.True(broadcaster.RemoveRoom(activeRoomId));
+        var final = broadcaster.Snapshot();
+        Assert.Equal(0, final.ActiveRooms);
+        Assert.Equal(0, final.PendingProgressMessages);
+        Assert.Equal(2, final.BroadcastCount);
+    }
+
     private static LiveProgressDelta CreateDelta(Guid roomId, Guid participantId, int correctCharacters) => new(
         roomId,
         2,
@@ -61,6 +99,11 @@ public sealed class LiveProgressBroadcastTests
         42,
         100,
         1);
+
+    private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => utcNow;
+    }
 
     private sealed class RecordingProgressSender : ILiveProgressSender
     {

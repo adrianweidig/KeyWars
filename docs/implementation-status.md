@@ -1,47 +1,46 @@
-# KeyWars Arena & Gamification v1 Status
+# Implementierungsstatus
 
-Dieser Tracker folgt dem Audit-Paket `2f3379490dcd`. Der für `v0.3.0`
-implementierte Code steht auf `602225c`; die lokale Release-Abnahme vom
-12. Juli 2026 umfasst 270 .NET-Tests, 26 vollständige Browsertests, 30
-Wiederholungen der drei kritischen Browserverträge und einen echten
-64-Client-SignalR-Lauf. Produktions-, Real-LDAPS- und Container-Evidenz wird
-erst nach dem Rollout des getaggten Images als Releasebeleg gewertet.
+Referenzstand ist Release `v0.4.8`. Die Matrix trennt vorhandene
+Repository-Capabilities von noch offenen Betreiber- oder Langzeitabnahmen. Die
+ausführliche Produktsicht steht in
+[features.md](features.md); Prüfskripte und Workflows bleiben die maßgebliche
+Evidenz.
 
-| Issue | Status | PR | Testevidenz | Restpunkte |
-| --- | --- | --- | --- | --- |
-| KW-000 | teilweise | offen | `scripts/check_implementation_status.py` | Milestone/PR-Struktur fehlt |
-| KW-001 | teilweise | offen | `scripts/check_repository_hygiene.py` | Historienrotation dokumentieren |
-| KW-002 | erledigt | offen | `docs/configuration.md`, Build/Test grün | keine |
-| KW-003 | teilweise | offen | Build/Test grün | Browser-E2E und Container-Smoke fehlen |
-| KW-010 | teilweise | offen | Concurrency-Tests für Lobby-Vertrag, idempotenten Start, parallelen Start, einmaligen Countdown-zu-Running-Übergang, Serienabschluss und Serverabbruch ohne doppelte Persistenz | Rollen-/Fehlerpfad-Matrix, Hub-/Browser-E2E und Fuzzer für erlaubte Zustandsübergänge fehlen |
-| KW-011 | teilweise | offen | Offizieller SignalR-.NET-Client, Zwei-Kontext-Browserfluss sowie Reconnect-/Persistenzstatus-E2E; Build/Test grün | Langzeit-Reconnect und Proxy-Fault-Injection fehlen |
-| KW-012 | teilweise | offen | Concurrency-Tests für Presence, Limit, Raumwechsel, Hosttransfer und Grace-Sweep | Zwei-Tab-Browser-E2E und Presence-Deltas fehlen |
-| KW-013 | teilweise | offen | Concurrency-Tests und echter Zwei-Kontext-Browser-E2E über SignalR, zehnmal wiederholt | Mehrraum- und Langzeit-Browser-Evidenz fehlen |
-| KW-014 | teilweise | offen | Concurrency-Tests für Backspace-Fortschritt, falschen Finish ohne DNF, expliziten GiveUp-DNF, NFC-Grapheme, Oversize-Ablehnung und alte Sequenzen; Build/Test grün | Frequenz-/Sprungheuristiken, echter Hub-/Browser-E2E und umfassende Fuzztests fehlen |
-| KW-015 | teilweise | offen | Unit-Tests für Progress-Koaleszierung und Pending-Drop; Concurrency-Test für Delta-Pfad; echter 64-Client-SignalR-Netzlauf mit 64 Finishes, 64 Platzierungen, 0 Fehlern und 0 Drops | 30-/60-Minuten-Soak, Mehrraum-Baseline und CPU-/RAM-/GC-Auswertung fehlen |
-| KW-016 | teilweise | offen | Completion-Receipt und Zustände Pending/Persisted/Failed/AbortedUnconfirmed; einmalige aggregierte Serienpersistenz; Integrationstests für Idempotenz, Runtime-Retry, Queue-Full, Drain und Fehler; Concurrency-Tests; Browser-Persistenzstatus zehnmal grün | Längere DB-/Shutdown-Fault-Injection fehlt |
-| KW-017 | teilweise | offen | Unit-Tests für Raumcodevalidierung; HTTP-Smoke für Redirect der alten `/arena/{id}/rennen`-Route, kanonische Seite ohne manuellen Finish-Fallback und Raumcode-Copy/Share-Markup; Playwright prüft Raumcode-Clipboard, Share-Fallback, Zwei-Kontext-Arena und Doppel-Submit-Guard; JS-Syntaxcheck für Copy-/Share- und Ready-/Start-In-Flight-Guards; Build/Test grün; DNF-Aktion und differenzierte Raumfehler umgesetzt | Vollständige rollenbasierte Browser-E2E, Web-Share-API auf unterstützten Geräten und Slow-network-Evidenz fehlen |
-| KW-018 | teilweise | offen | Serienrennen über drei oder fünf Runden mit Platzierungspunkten, Rundensiegen, Gesamtwertung und aggregierter Persistenz; Teamwertung mit automatischer Alpha-/Bravo-Verteilung und Teamrang; Unit- und Concurrency-Tests | Revanche, asynchrone Challenge-Best-of-Serie und breiter Mehrnutzer-Browser-E2E fehlen |
-| KW-020 | teilweise | offen | HTTP-Smokes für App-Shell-Änderungen; Navy/Cyan/Violett-Tokens, aktive Navigation, Nutzerchip, Badge-, Empty-State- und Raumkarten-Komponenten umgesetzt; Build/Test grün | Vollständiges Komponenteninventar, Kontrast-/Zoom-/Visualtests und breite Tabellenumstellung fehlen |
-| KW-021 | teilweise | offen | HTTP-Smoke für Tagesfokus, 30-Tage-Übersicht und deutsche Challenge-Statusnamen; Dashboard nutzt ProfileInsights statt vollständigem Attempt-Load; Build/Test grün | Browser-Visualtests, Backendfehlerzustand, Skeletons, Wochenziel-Ring und vollständige Progressionsmechaniken fehlen |
-| KW-022 | teilweise | offen | HTTP-Smokes für Lobby ohne Infrastrukturtext, Einstiegspfade, Raumkapazität, konfiguriertes Teilnehmerlimit, Copy-/Share-Hooks und Submit-Guard; Playwright deckt Zwei-Nutzer-Browserfluss, Raumcode-Clipboard, Share-Fallback und Create-Submit-Guard ab; Build/Test grün | Voller Raum, Web-Share-API auf unterstützten Geräten, Live-Aktualisierung außerhalb aktiver Raumseite und Visualtests fehlen |
-| KW-023 | teilweise | offen | HTTP-Smoke für kanonische Arena-Seite mit Rennstrecke, Meilensteinen und Reduced-Motion-fähigen CSS-Transforms; Build/Test grün | Visualtests bei 2/8/24/64 Teilnehmenden, Performanceprofil, echte Überhol-/Rückschritt-E2E und kompakte Großraumdarstellung fehlen |
-| KW-024 | teilweise | offen | HTTP-Smoke für Live-HUD-Markup; Arena-Client aktualisiert Rangliste, HUD, Live-Region und Track aus serverbestätigten Snapshots/Deltas; Build/Test grün | Zwei-Nutzer-Überhol-E2E, Stale-/Reconnect-Anzeige, Nutzereinstellung für Live-Werte und DOM-Update-Messung fehlen |
-| KW-025 | teilweise | offen | Podium bleibt vorläufig bis zum bestätigten Commit; Pending/Persisted/Failed/AbortedUnconfirmed sind getrennt; XP und Rating erscheinen erst nach Persisted; HTTP-, Integrations- und Browsertests grün | Revanche-/Nächste-Runde-Aktionen, PB-Logik und breite Visualmatrix fehlen |
-| KW-026 | teilweise | offen | Motion-Tokens, Profilsettings, Web-Audio nach Nutzerinteraktion und begrenzte Reaktionen; Playwright prüft Login, Typing, Arena und Privacy mit Axe, Tastatur, Dark/Light, Reduced Motion, Mobile und 200-%-Reflow | NVDA mit realer Sprachausgabe, echtes Mobilgerät, Browser-Soundabnahme und Performanceprofil fehlen |
-| KW-027 | teilweise | offen | HTTP-Smoke für fokussierte 32er-Arena; Server- und Client-Fensterung für Detail-, Kompakt- und Fokusansicht; Kapazitäts-/Verbindungsanzeige vorbereitet; In-Process-Lasttest für 2/8/24/64 Teilnehmende; Build/Test grün | 64er Browser-Visual-/Performance-Evidenz, echte Zuschauerrolle, Update-Priorisierung für Zuschauer und Browser-Soak fehlen |
-| KW-030 | teilweise | offen | Serialisierter Prepare/Begin/Finish-Vertrag, serverabgeleitete Sprintfrist, typisierte Fehler und kanonischer Retry; Unit-, Integration-, HTTP- und Browser-E2E einschließlich verlorener Finish-Antwort grün | Vollständige Abbruch-UX und Langzeit-Fokusverlustmatrix fehlen |
-| KW-031 | teilweise | offen | Golden-Master-Unit-Tests für Alignment/Formeln/Konsistenz; Integrationstest für persistierte Fehler, Wortzeitaggregate und echte Schwächenmuster; Build/Test grün | Langzeitgewichtung, Browser-Visual-E2E und vollständige Resultatseiten-Abnahme fehlen |
-| KW-032 | teilweise | offen | Integrationstests für Reward-Ledger-Idempotenz, stabile Mission-Keys, Tages-/Wochenmissionen, Arena-XP, Achievement-Definitionen und Ultrakurz-Farm-Schutz; Build/Test grün | Vollständige Achievement-Auswertung für alle Kategorien, Wochen-/Team-UI, Browser-E2E für sichtbaren XP-/Levelanstieg und alle Auditkriterien fehlen |
-| KW-033 | teilweise | offen | Integrationstests für große Attempt-Datensätze, Empty State, Aktivität, Bestwerte und paginierte Historie; HTTP-Smoke für Profilabschnitte und lokalisierte Modusnamen | Zeitraumwahl im UI, vollständige Visual-/Accessibility-Tests, persönliche Zieländerung und Rivalenbilanz nach KW-034 fehlen |
-| KW-034 | teilweise | offen | Unit-Test für RatingChange-Before/Delta/After; Integrationstest für persistierte Arena-Rating-Auditwerte; Challenge- und Arena-Ratingpfade nutzen zentrale Pairwise-Elo-Change-Berechnung; Build/Test grün | Saisonentity, Saisonabschluss/Soft-Reset, Rivalenmodell, direkte Bilanz, Datenschutz-/Pagination-Abnahme und Browser-E2E fehlen |
-| KW-040 | teilweise | offen | Gebundener Challenge-Start, manipulationssichere offizielle Texte, transaktionaler Abschluss und idempotente Parallel-Finishes sind integrationstestgedeckt; Build/Test grün | Best-of/mehrere Runden und breiter Challenge-Browser-E2E fehlen |
-| KW-041 | teilweise | offen | Integrationstests für striktes UTF-8, NFC-/Limitvalidierung, unsichtbare/Steuerzeichen, Ownership bei Edit/Delete, POST-Kopie, Sammlungsschutz und Filter/Paging; Build/Test grün | Browser-E2E für CRUD/Upload/Sammlung, echte Pagination-UI und vollständige Direktaktionen fehlen |
-| KW-042 | teilweise | offen | de-DE RequestLocalization mit Content-Language, DisplayName-Tests für alle public Domain-Enums, gruppierte Settings mit AD/LDAP-Identitätsbereich und Speicher-Erfolgsmeldung, HTTP-Smoke für Settings/Arena-Attribute; UTF-8-/Umlaut-Sweep für sichtbare deutsche Texte; Hygiene-Guard gegen Mojibake; Build/Test grün | Zentrale Formatierungs-Helper, Fehlerfallmatrix, Toast/Dialog-Regeln, Pluralisierungsmatrix und vollständige Browser-/Visualabnahme fehlen |
-| KW-043 | teilweise | offen | Profil-Gate drainiert aktive Requests, Attempts, Arenateilnahmen und Completion-Jobs vor Reset/Löschung; Tombstone widerruft Sitzungen; Unit-, Integrations-, Concurrency- und HTTP-E2E decken Rennen und Re-Provisioning ab | Produktiver Zwei-Browser-Smoke und Export-Download-UX bleiben Betreiberabnahmen |
-| KW-050 | erledigt | offen | `npm run test:real-ad` gegen `10.10.10.213`/LDAPS mit temporären AD-Nutzern: ungültiges Passwort, deaktivierter Nutzer, zwei echte AD-Logins, Raum erstellen/beitreten, Duplicate-Tab, Reload/Reconnect, Ready/Start/Podium; DB-Evidenz mit zwei `objectGUID`-Profilen, persistiertem Raum und zwei `Finished`-Teilnehmern; AD-Testnutzer anschließend gelöscht | keine |
-| KW-051 | teilweise | offen | Playwright 1.58.2: 26 Chrome-Browsertests für Kernflüsse, Desktop/Mobile/Tablet, Dark/Light, 200-%-Reflow, Axe, Tastatur, Theme-Fallback, Finish-Retry, Persistenzstatus und Zwei-Kontext-Arena; drei kritische Verträge jeweils zehnmal grün | Edge-Abnahme, Screenshot-Baselines, Fehler-Video, NVDA und reales Mobilgerät fehlen |
-| KW-052 | teilweise | offen | `tools/KeyWars.LoadTest` lokal bis 100 Teilnehmende; echter 64-Client-SignalR-Lauf gegen den RC-Arbeitsstand mit 64 Finishes, 64 Platzierungen, 0 Fehlern, 0 Drops und bestätigter Persistenz | 1/5/20-Raum-Matrix, 30-/60-Minuten-Soak, Fault Injection, CPU/RAM/GC-Auswertung und Baselinevergleich fehlen |
-| KW-053 | teilweise | offen | Rate-Limits, CSP, HSTS, bekannte Proxies, Secure-/HttpOnly-/SameSite-/Host-Cookies, LDAP-CA/Hostname und Production-Fail-Closed sind Unit-/HTTP-E2E-getestet; Compose fordert Read-only-Root-FS, `cap_drop: ALL` und `no-new-privileges` | Getaggter Container-Smoke und Real-LDAPS-Refresh gegen den finalen Release-SHA fehlen |
-| KW-054 | erledigt | offen | Release-Workflow erzeugt `RELEASE_MANIFEST.json`, SHA256SUMS, Compose/env-Artefakte, amd64-Offline-Imagearchiv und GHCR-Multiarch-Image für `v0.1.0`; `scripts/check_release_artifacts.py --self-test` und Release-Gate verifizieren die Artefakte | keine |
-| KW-055 | erledigt | offen | Release-Workflow mit Hygiene-, Status-, Test-, Load-, GHCR-, SBOM-/Provenance- und Artefakt-Gates für `v0.1.0` | keine |
+| Prüfpunkt | Status | Capability und Evidenz |
+| --- | --- | --- |
+| KW-000 | teilweise | Vollständige Audit-ID-Matrix wird durch `scripts/check_implementation_status.py` geprüft; Projektsteuerung bleibt extern. |
+| KW-001 | teilweise | Repository-Hygiene wird automatisiert geprüft; Rotation historischer Betriebsartefakte bleibt Betreiberaufgabe. |
+| KW-002 | erledigt | Konfigurationsbindung, Startvalidierung und Referenzdokumentation sind vorhanden. |
+| KW-003 | teilweise | SQLite-Initialisierung, Datenpfade und Wartungsbackups sind abgedeckt; breite Container-E2E bleibt offen. |
+| KW-010 | teilweise | Arena-Zustandsübergänge und idempotenter Start sind concurrency-getestet; Rollen- und Fuzzmatrix bleibt offen. |
+| KW-011 | teilweise | SignalR-Client, Zwei-Browser-Fluss, Reconnect und Persistenzstatus sind getestet; Langzeitfehler bleiben offen. |
+| KW-012 | teilweise | Presence, Limits, Raumwechsel, Hosttransfer und gebroadcasteter Grace-Sweep sind concurrency- und browsergetestet; Mehrtab-Matrix bleibt offen. |
+| KW-013 | teilweise | Deltaübertragung sowie Zwei- und Vier-Browser-Flüsse sind getestet; Mehrraum- und Langzeitevidenz bleibt offen. |
+| KW-014 | teilweise | Graphemfortschritt, Reihenfolge und Eingabegrenzen sind getestet; breites Fuzzing bleibt offen. |
+| KW-015 | teilweise | Begrenzte Progress-Pipeline mit Koaleszierung und Drop-Zählern ist getestet; Ressourcenprofil und Soak bleiben offen. |
+| KW-016 | teilweise | Idempotente Completion-Queue mit Retry, Drain und Statusmodell ist getestet; lange Fault-Injection bleibt offen. |
+| KW-017 | teilweise | Kanonische Raumroute, Teilen, DNF und Submit-Guards sind getestet; breite Gerätematrix bleibt offen. |
+| KW-018 | teilweise | Serien- und Teamwertung sowie Hostübergabe zwischen Serienrunden sind concurrency- und browsergetestet; Revanche bleibt offen. |
+| KW-020 | teilweise | App-Rahmen, Themes und Kernkomponenten sind HTTP-getestet; vollständige Komponenten- und Visualmatrix bleibt offen. |
+| KW-021 | teilweise | Dashboard-Aggregate, Tagesfokus und Challenge-Status sind getestet; visuelle Fehlerzustände bleiben offen. |
+| KW-022 | teilweise | Lobby-Einstiege, Kapazität, Teilen und Submit-Guard sind getestet; Vollraum- und Live-Update-Abnahme bleibt offen. |
+| KW-023 | teilweise | Rennstrecke, Meilensteine und Reduced Motion sind vorhanden; Großraum-Visualprofil bleibt offen. |
+| KW-024 | teilweise | HUD, Rangliste und Live-Region folgen bestätigten Serverdaten; Überhol- und Reconnect-Matrix bleibt offen. |
+| KW-025 | teilweise | Podium trennt vorläufiges Ergebnis und Commitstatus; Revanche-, Bestwert- und Visualmatrix bleibt offen. |
+| KW-026 | teilweise | Axe, Tastatur, Themes, Reduced Motion, Mobilansicht und Reflow sind automatisiert; NVDA und echtes Gerät bleiben offen. |
+| KW-027 | teilweise | Vier isolierte Browserkontexte, 2-vs-2-Wertung, Mobilansicht und Last-Smoke sind geprüft; 64er-Visualabnahme bleibt offen. |
+| KW-030 | teilweise | Prepare/Begin/Finish, Serverfrist und kanonischer Retry sind getestet; breite Abbruchmatrix bleibt offen. |
+| KW-031 | teilweise | Speicherbegrenztes exaktes Alignment, Formeln und persistierte Fehleraggregate sind getestet; Langzeitgewichtung bleibt offen. |
+| KW-032 | teilweise | Reward-Ledger, Missionen, Arena-XP und Farm-Schutz sind getestet; vollständige Achievement-UX bleibt offen. |
+| KW-033 | teilweise | Gruppierte 90-Tage-Trends, Bestwerte und paginierte Historie sind getestet; Zeitraumwahl und Visualabnahme bleiben offen. |
+| KW-034 | teilweise | Paarweises Elo und transaktionale Auditwerte sind getestet; Saisons und Rivalen bleiben offen. |
+| KW-040 | teilweise | Gebundene Challenge-Versuche und idempotente Abschlüsse sind getestet; Best-of und breite Browserabnahme bleiben offen. |
+| KW-041 | teilweise | UTF-8, NFC, Graphem-/Payload-Limits, Manipulationsschutz, Ownership, Kopie, Filter und Paging sind getestet; Browser-CRUD bleibt offen. |
+| KW-042 | teilweise | de-DE, Enum-Anzeigenamen, Einstellungen und Mojibake-Hygiene sind getestet; UX- und Pluralmatrix bleibt offen. |
+| KW-043 | teilweise | Profil-Gate, Drain, Tombstone und Re-Provisionierung sind getestet; produktive Zwei-Browser-Abnahme bleibt offen. |
+| KW-050 | erledigt | Real-LDAPS deckt Fehlerkonten, zwei echte Logins und einen Arena-Fluss ab; Netzdetails bleiben privat. |
+| KW-051 | teilweise | Playwright sowie ein aktiver FlaUI-/UIA3-/OpenCV-Lauf decken Kernflüsse, Breakpoints, Reflow, Axe und Tastatur ab; Geräte- und Screenreader-Matrix bleibt offen. |
+| KW-052 | teilweise | In-Process-Lasttest bis 100 und ein fehlerfreier 64-Client-Netzlauf sind dokumentiert; Mehrraum, Soak und Ressourcenprofil bleiben offen. |
+| KW-053 | teilweise | Rate-Limits, Sicherheitsheader, Proxy-Vertrauen und Production-Fail-Closed sind getestet; finaler Real-LDAPS-Refresh bleibt offen. |
+| KW-054 | erledigt | Release `v0.4.8` enthält Compose/env, Offline-Archiv, Manifest, Prüfsummen und ein Multiarch-GHCR-Image mit OCI-Metadaten. |
+| KW-055 | erledigt | Release-, Qualitäts-, Windows-UI- und Sicherheitsworkflows bilden die veröffentlichten Gates für `v0.4.8`. |

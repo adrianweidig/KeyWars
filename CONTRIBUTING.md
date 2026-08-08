@@ -5,15 +5,17 @@ zur Code-Navigation stehen in [docs/development.md](docs/development.md).
 
 ## Entwicklungsumgebung
 
+Voraussetzungen sind das .NET 10 SDK sowie Node.js/npm im `PATH`. Führe die
+Befehle im Repository-Stamm aus:
+
 ```powershell
-$env:DOTNET_ROOT='F:\KeyWars\.dotnet'
-$env:PATH='F:\KeyWars\.dotnet;' + $env:PATH
-dotnet restore .\KeyWars.slnx --locked-mode
-dotnet build .\KeyWars.slnx -c Release --no-restore
-dotnet test .\KeyWars.slnx -c Release --no-build --no-restore
-dotnet format .\KeyWars.slnx --verify-no-changes --no-restore
+dotnet restore ./KeyWars.slnx --locked-mode
+dotnet build ./KeyWars.slnx -c Release --no-restore
+dotnet test ./KeyWars.slnx -c Release --no-build --no-restore
+dotnet format ./KeyWars.slnx --verify-no-changes --no-restore
 npm run test:browser
 ```
+
 
 Nutze für eine Änderung die kleinste passende Testschicht. Browser-, Layout-
 und Interaktionsänderungen benötigen zusätzlich eine gerenderte Prüfung.

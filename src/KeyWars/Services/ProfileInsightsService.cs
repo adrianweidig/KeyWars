@@ -236,6 +236,8 @@ public sealed class ProfileInsightsService(KeyWarsDbContext db, TimeProvider tim
     {
         var endDate = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
         var startDate = endDate.AddDays(-(days - 1));
+        var periodStart = new DateTimeOffset(startDate.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+        var periodEnd = new DateTimeOffset(endDate.AddDays(1).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
         var goalCounts = await db.Missions
             .AsNoTracking()
             .Where(mission => mission.UserProfileId == profileId &&
@@ -245,20 +247,82 @@ public sealed class ProfileInsightsService(KeyWarsDbContext db, TimeProvider tim
             .GroupBy(mission => mission.MissionDate)
             .Select(group => new { Date = group.Key, Count = group.Count() })
             .ToDictionaryAsync(item => item.Date, item => item.Count, cancellationToken);
+        var trainingCounts = await ReadTrainingActivityCountsAsync(profileId, periodStart, periodEnd, cancellationToken);
+        var arenaCounts = await ReadArenaActivityCountsAsync(profileId, periodStart, periodEnd, cancellationToken);
 
         var activity = new List<ProfileActivityDay>(days);
         for (var offset = 0; offset < days; offset++)
         {
             var date = startDate.AddDays(offset);
-            var start = new DateTimeOffset(date.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
-            var end = start.AddDays(1);
-            var trainingAttempts = await CompletedAttemptsBetween(profileId, start, end)
-                .CountAsync(cancellationToken);
-            var arenaRuns = await CountArenaRunsBetweenAsync(profileId, start, end, cancellationToken);
-            activity.Add(new ProfileActivityDay(date, trainingAttempts, arenaRuns, goalCounts.GetValueOrDefault(date)));
+            activity.Add(new ProfileActivityDay(
+                date,
+                trainingCounts.GetValueOrDefault(date),
+                arenaCounts.GetValueOrDefault(date),
+                goalCounts.GetValueOrDefault(date)));
         }
 
         return activity;
+    }
+
+    private async Task<IReadOnlyDictionary<DateOnly, int>> ReadTrainingActivityCountsAsync(
+        Guid profileId,
+        DateTimeOffset start,
+        DateTimeOffset end,
+        CancellationToken cancellationToken)
+    {
+        var profileKey = FormatSqliteGuid(profileId);
+        var phase = AttemptPhase.Finished.ToString();
+        var startValue = FormatSqliteDateTimeOffset(start);
+        var endValue = FormatSqliteDateTimeOffset(end);
+        var counts = await db.Database
+            .SqlQuery<ActivityCountRow>($"""
+                SELECT substr(CreatedAt, 1, 10) AS ActivityDate, COUNT(*) AS "Count"
+                FROM TypingAttempts
+                WHERE UserProfileId = {profileKey}
+                  AND Phase = {phase}
+                  AND Completed = 1
+                  AND substr(CreatedAt, 1, 19) >= {startValue}
+                  AND substr(CreatedAt, 1, 19) < {endValue}
+                GROUP BY substr(CreatedAt, 1, 10)
+                """)
+            .ToListAsync(cancellationToken);
+
+        return counts.ToDictionary(
+            item => DateOnly.ParseExact(item.ActivityDate, "yyyy-MM-dd", CultureInfo.InvariantCulture),
+            item => item.Count);
+    }
+
+    private async Task<IReadOnlyDictionary<DateOnly, int>> ReadArenaActivityCountsAsync(
+        Guid profileId,
+        DateTimeOffset start,
+        DateTimeOffset end,
+        CancellationToken cancellationToken)
+    {
+        var profileKey = FormatSqliteGuid(profileId);
+        var startValue = FormatSqliteDateTimeOffset(start);
+        var endValue = FormatSqliteDateTimeOffset(end);
+        var counts = await db.Database
+            .SqlQuery<ActivityCountRow>($"""
+                SELECT substr(r.FinishedAt, 1, 10) AS ActivityDate, COUNT(*) AS "Count"
+                FROM LiveRoomParticipantSummaries p
+                INNER JOIN LiveRoomSummaries r ON p.LiveRoomSummaryId = r.Id
+                WHERE p.UserProfileId = {profileKey}
+                  AND r.FinishedAt IS NOT NULL
+                  AND substr(r.FinishedAt, 1, 19) >= {startValue}
+                  AND substr(r.FinishedAt, 1, 19) < {endValue}
+                GROUP BY substr(r.FinishedAt, 1, 10)
+                """)
+            .ToListAsync(cancellationToken);
+
+        return counts.ToDictionary(
+            item => DateOnly.ParseExact(item.ActivityDate, "yyyy-MM-dd", CultureInfo.InvariantCulture),
+            item => item.Count);
+    }
+
+    private sealed class ActivityCountRow
+    {
+        public string ActivityDate { get; set; } = "";
+        public int Count { get; set; }
     }
 
     private async Task<IReadOnlyList<ProfileAttemptHistoryRow>> ReadHistoryPageAsync(
@@ -384,42 +448,6 @@ public sealed class ProfileInsightsService(KeyWarsDbContext db, TimeProvider tim
                   AND substr(CreatedAt, 1, 19) < {endValue}
                 """)
             .AsNoTracking();
-    }
-
-    private async Task<int> CountArenaRunsBetweenAsync(Guid profileId, DateTimeOffset start, DateTimeOffset end, CancellationToken cancellationToken)
-    {
-        var connection = db.Database.GetDbConnection();
-        var shouldClose = connection.State == ConnectionState.Closed;
-        if (shouldClose)
-        {
-            await connection.OpenAsync(cancellationToken);
-        }
-
-        try
-        {
-            await using var command = connection.CreateCommand();
-            command.CommandText = """
-                SELECT COUNT(*)
-                FROM LiveRoomParticipantSummaries p
-                INNER JOIN LiveRoomSummaries r ON p.LiveRoomSummaryId = r.Id
-                WHERE p.UserProfileId = $profileId
-                  AND r.FinishedAt IS NOT NULL
-                  AND substr(r.FinishedAt, 1, 19) >= $start
-                  AND substr(r.FinishedAt, 1, 19) < $end
-                """;
-            AddParameter(command, "$profileId", FormatSqliteGuid(profileId));
-            AddParameter(command, "$start", FormatSqliteDateTimeOffset(start));
-            AddParameter(command, "$end", FormatSqliteDateTimeOffset(end));
-            var result = await command.ExecuteScalarAsync(cancellationToken);
-            return Convert.ToInt32(result, CultureInfo.InvariantCulture);
-        }
-        finally
-        {
-            if (shouldClose)
-            {
-                await connection.CloseAsync();
-            }
-        }
     }
 
     private static void AddParameter(DbCommand command, string name, object value)

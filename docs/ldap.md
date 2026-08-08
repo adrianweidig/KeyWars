@@ -1,39 +1,63 @@
 # LDAP und Active Directory
 
-Production benötigt:
+KeyWars bindet direkt mit Benutzername und Passwort. Es gibt kein Servicekonto
+und keine Gruppenfreigabe. Das Passwort wird weder gespeichert noch geloggt.
 
-```env
-KEYWARS__LDAP__URLS=ldaps://dc01.example.local:636
-KEYWARS__LDAP__BASE_DN=DC=example,DC=local
-KEYWARS__LDAP__UPN_SUFFIX=example.local
+## Erforderliche `.env`-Werte
+
+| Variable | Inhalt |
+| --- | --- |
+| `KEYWARS_LDAP_URLS` | ein oder mehrere `ldaps://`-Ziele, getrennt durch Semikolon |
+| `KEYWARS_LDAP_BASE_DN` | Verzeichniswurzel für die Benutzersuche |
+| `KEYWARS_LDAP_UPN_SUFFIX` | Suffix für kurze Anmeldenamen |
+
+Optional:
+
+| Variable | Standard | Verwendung |
+| --- | --- | --- |
+| `KEYWARS_LDAP_USER_BASE_DN` | leer | engere Suchwurzel für Benutzer; sonst Base-DN |
+| `KEYWARS_LDAP_CA_CERTIFICATE_PATH` | leer | CA-Datei im Container, üblicherweise `/data/certs/ad-root-ca.pem` |
+| `KEYWARS_LDAP_CONNECT_TIMEOUT_SECONDS` | 5 | Verbindungs-/Bind-Timeout, 1 bis 60 Sekunden |
+| `KEYWARS_LDAP_OPERATION_TIMEOUT_SECONDS` | 10 | Such-Timeout, 1 bis 120 Sekunden |
+| `KEYWARS_LDAP_ALLOW_STARTTLS` | `false` | muss für jedes `ldap://`-Ziel `true` sein |
+
+LDAPS ist der Standard. Bei einer eigenen CA müssen die LDAP-DNS-Namen zum
+Zertifikat passen. Ohne eigenen CA-Pfad gilt der Zertifikatsspeicher des
+Containers.
+
+## Eigene CA vor dem Start hinterlegen
+
+Die PEM-kodierte CA-Datei neben `compose.yaml` unter dem Namen
+`ad-root-ca.pem` ablegen. `.env` zuerst vollständig ausfüllen. Verwende für
+CLI-Initialisierung und Portainer denselben Compose-Projektnamen `keywars`,
+damit beide dasselbe Volume verwenden:
+
+```bash
+docker compose --project-name keywars --env-file .env run --rm --no-deps \
+  --entrypoint sh \
+  -v "$PWD/ad-root-ca.pem:/import/ad-root-ca.pem:ro" \
+  keywars -c 'mkdir -p /data/certs && cp /import/ad-root-ca.pem /data/certs/ad-root-ca.pem && chmod 0444 /data/certs/ad-root-ca.pem'
+
+docker compose --project-name keywars --env-file .env run --rm --no-deps \
+  --entrypoint sh keywars \
+  -c 'test -r /data/certs/ad-root-ca.pem'
 ```
 
-Mehrere Domain Controller werden mit Semikolon getrennt. `ldap://` ist nur
-erlaubt, wenn `KEYWARS__LDAP__ALLOW_STARTTLS=true` gesetzt ist. Es gibt kein
-Servicekonto und keine Gruppenzulassung.
-
-Optionale TLS- und Timeout-Variablen:
+Danach setzen:
 
 ```env
-KEYWARS__LDAP__CA_CERTIFICATE_PATH=/data/certs/ad-root-ca.pem
-KEYWARS__LDAP__CONNECT_TIMEOUT_SECONDS=5
-KEYWARS__LDAP__OPERATION_TIMEOUT_SECONDS=10
+KEYWARS_LDAP_CA_CERTIFICATE_PATH=/data/certs/ad-root-ca.pem
 ```
 
-Wenn `KEYWARS__LDAP__CA_CERTIFICATE_PATH` gesetzt ist, muss die Datei beim
-Start existieren. KeyWars baut dann eine Zertifikatskette gegen diese Root-CA
-und prüft den Hostnamen des Domain Controllers. Ohne diese Variable gilt die
-Zertifikatsprüfung des Betriebssystems.
-In Linux-Containern wird der Pfad für OpenLDAP zusätzlich als `LDAPTLS_CACERT`
-gesetzt; unter Windows nutzt KeyWars den .NET-Zertifikatscallback.
+Erst jetzt `docker compose --project-name keywars --env-file .env up -d`
+ausführen.
 
-Ablauf:
+## Abnahme
 
-1. Benutzername wird normalisiert.
-2. Verbindung zu einem konfigurierten Domain Controller wird aufgebaut.
-3. Bind erfolgt mit Nutzername und Passwort.
-4. Mit derselben Verbindung wird das eigene Benutzerobjekt gesucht.
-5. `objectGUID`, `objectSid`, `sAMAccountName`, `userPrincipalName`, Anzeigename und optionale Stammdaten werden gelesen.
-6. Das lokale Profil wird anhand `objectGUID` erstellt oder aktualisiert.
+1. `docker compose --project-name keywars --env-file .env config` endet ohne fehlende Variablen.
+2. `docker compose --project-name keywars --env-file .env logs keywars` zeigt keinen Zertifikats- oder Startfehler.
+3. Ein echter Login mit kurzem Namen und – falls zugelassen – UPN gelingt.
+4. Ein kontrolliert nicht erreichbares zweites LDAP-Ziel bestätigt das Failover.
 
-Das Passwort wird weder gespeichert noch geloggt.
+`/health/ready` prüft LDAP absichtlich nicht. Bei Verzeichnisausfall bleibt die
+Anwendung bereit, neue Logins schlagen jedoch fehl.

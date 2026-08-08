@@ -1,101 +1,88 @@
 # Konfiguration
 
-KeyWars liest Konfiguration aus `KEYWARS`-Abschnitten. In Umgebungsvariablen
-wird der Doppelunterstrich verwendet, zum Beispiel
-`KEYWARS__LDAP__BASE_DN`.
+Für Compose gilt `.env.example` als vollständige Vorlage:
 
-## LDAP
+```bash
+cp .env.example .env
+docker compose --env-file .env config
+```
 
-| Variable | Standard | Verbraucher | Regel |
-| --- | --- | --- | --- |
-| `KEYWARS__LDAP__URLS` | leer | `LdapAuthenticator` | außerhalb Development erforderlich |
-| `KEYWARS__LDAP__BASE_DN` | leer | `LdapAuthenticator` | außerhalb Development erforderlich |
-| `KEYWARS__LDAP__UPN_SUFFIX` | leer | `LdapAuthenticator` | außerhalb Development erforderlich |
-| `KEYWARS__LDAP__NETBIOS_DOMAIN` | leer | `LdapAuthenticator` | optional |
-| `KEYWARS__LDAP__USER_BASE_DN` | leer | `LdapAuthenticator` | optional |
-| `KEYWARS__LDAP__CA_CERTIFICATE_PATH` | leer | `LdapAuthenticator`, `StartupValidator` | optionaler Root-CA-Pfad, Datei muss existieren |
-| `KEYWARS__LDAP__CONNECT_TIMEOUT_SECONDS` | `5` | `LdapAuthenticator`, `StartupValidator` | 1 bis 60 Sekunden |
-| `KEYWARS__LDAP__OPERATION_TIMEOUT_SECONDS` | `10` | `LdapAuthenticator`, `StartupValidator` | 1 bis 120 Sekunden |
-| `KEYWARS__LDAP__ALLOW_STARTTLS` | `false` | `StartupValidator` | für `ldap://` außerhalb Development erforderlich |
+`compose.yaml` übersetzt die kurzen `.env`-Namen in die internen
+`KEYWARS__...`-Variablen. Änderungen werden erst nach einem Container-Neustart
+wirksam.
 
-## Auth
+## Für jeden produktiven Start
 
-| Variable | Standard | Verbraucher | Regel |
-| --- | --- | --- | --- |
-| `KEYWARS__AUTH__COOKIE_LIFETIME_HOURS` | `8` | Cookie-Auth | 1 bis 12 Stunden |
-| `KEYWARS__AUTH__DEVELOPMENT_LOGIN` | `false` | `StartupValidator` | außerhalb Development verboten |
+| `.env`-Variable | Zweck |
+| --- | --- |
+| `KEYWARS_IMAGE`, `KEYWARS_VERSION` | Image und exakter Release-Tag; in Produktion nicht `latest` verwenden |
+| `KEYWARS_BIND_ADDRESS` | standardmäßig `127.0.0.1` für einen Proxy auf demselben Host |
+| `KEYWARS_PORT` | Host-Port, standardmäßig `8080` |
+| `KEYWARS_LDAP_URLS` | Semikolonliste der `ldaps://`-Domain-Controller |
+| `KEYWARS_LDAP_BASE_DN` | Suchwurzel des Verzeichnisses |
+| `KEYWARS_LDAP_UPN_SUFFIX` | ergänzt kurze Anmeldenamen zu einem UPN |
+| `KEYWARS_TIME_ZONE` | IANA-Zeitzone des Containers, standardmäßig `Europe/Berlin` |
 
-In der Umgebung `Development` wird der lokale Test-Login aktiv. In allen
-anderen Umgebungen wird ausschließlich LDAP/LDAPS verwendet.
+LDAP-Details einschließlich `USER_BASE_DN`, StartTLS, Timeouts und eigener CA:
+[LDAP und Active Directory](ldap.md).
 
 ## Reverse Proxy
 
-| Variable | Standard | Verbraucher | Regel |
-| --- | --- | --- | --- |
-| `KEYWARS__PROXY__KNOWN_PROXIES` | leer | Forwarded-Headers-Middleware | Semikolonliste exakter vertrauenswürdiger Proxy-IP-Adressen |
-| `KEYWARS__PROXY__KNOWN_NETWORKS` | leer | Forwarded-Headers-Middleware | Semikolonliste minimaler vertrauenswürdiger Proxy-Netze in CIDR-Notation |
-
-Sobald mindestens eine Liste konfiguriert ist, vertraut KeyWars nur den dort
-genannten IP-Adressen und Netzen. Ungültige IP- oder CIDR-Einträge verhindern
-den Start. Ohne explizite Liste gelten ausschließlich die Loopback-Defaults von
-ASP.NET Core. `X-Forwarded-For` und `X-Forwarded-Proto` werden höchstens über
-einen Proxy-Hop ausgewertet.
-
-## Live-Arena
-
-| Variable | Standard | Verbraucher | Regel |
-| --- | --- | --- | --- |
-| `KEYWARS__LIVE__MAX_PARTICIPANTS_PER_ROOM` | `64` | `LiveRoomManager` | mindestens 2 |
-| `KEYWARS__LIVE__MAX_SPECTATORS_PER_ROOM` | `128` | geplant KW-027 | noch nicht verfügbar |
-| `KEYWARS__LIVE__MAX_CONCURRENT_ROOMS` | `200` | `LiveRoomManager` | mindestens 1 |
-| `KEYWARS__LIVE__MAX_CONNECTIONS_PER_USER` | `3` | `LivePresenceTracker` | 1 bis 20 aktive Arena-Verbindungen pro Profil |
-| `KEYWARS__LIVE__PROGRESS_BROADCAST_HZ` | `10` | `LiveProgressBroadcaster` | maximaler Progress-Broadcast-Takt je Raum |
-| `KEYWARS__LIVE__COUNTDOWN_SECONDS` | `3` | `LiveRoomManager` | 1 bis 10 Sekunden |
-| `KEYWARS__LIVE__RECONNECT_GRACE_SECONDS` | `30` | `LiveRoomManager` | 0 bis 300 Sekunden |
-| `KEYWARS__LIVE__ROOM_COMMAND_QUEUE_CAPACITY` | `4096` | `LiveProgressBroadcaster` | Pending-Kapazität für koaleszierte Progress-Deltas |
-| `KEYWARS__LIVE__COMPLETION_QUEUE_CAPACITY` | `4096` | `LiveRoomCompletionQueue` | begrenzte Queue für Arena-Abschlussjobs; mindestens so groß wie `MAX_CONCURRENT_ROOMS` |
-| `KEYWARS__LIVE__COMPLETION_DRAIN_TIMEOUT_SECONDS` | `10` | `ProfilePrivacyService` | 1 bis 300 Sekunden für den profilbezogenen Drain vor Reset/Löschung |
-| `KEYWARS__LIVE__COMPLETED_ROOM_RETENTION_MINUTES` | `60` | `LiveRoomManager` | Cleanup-Retention |
-| `KEYWARS__LIVE__LOBBY_ROOM_RETENTION_MINUTES` | `720` | `LiveRoomManager` | Cleanup-Retention |
-
-## Inhalte und Challenges
-
-| Variable | Standard | Verbraucher | Regel |
-| --- | --- | --- | --- |
-| `KEYWARS__CONTENT__MAX_UPLOAD_BYTES` | `131072` | `TextLibraryService` | Importlimit |
-| `KEYWARS__CONTENT__MAX_TEXT_CHARACTERS` | `20000` | `TextLibraryService` | maximale UTF-16-Zeichen nach NFC-Normalisierung |
-| `KEYWARS__CONTENT__MAX_TEXT_GRAPHEMES` | `20000` | `TextLibraryService` | maximale Grapheme nach NFC-Normalisierung |
-| `KEYWARS__CONTENT__MAX_TEXT_LINES` | `400` | `TextLibraryService` | maximale Zeilenanzahl |
-| `KEYWARS__CHALLENGES__MAX_PARTICIPANTS` | `64` | `ChallengeService` | mindestens 2 |
-
-## Daten
-
-| Variable | Standard | Verbraucher | Regel |
-| --- | --- | --- | --- |
-| `KEYWARS__DATA__DIRECTORY` | `/data` in Production | `DataPaths` | muss schreibbar sein |
-
-SQLite liegt unter `KEYWARS__DATA__DIRECTORY/keywars.db`.
-Data-Protection-Schlüssel und Backups liegen ebenfalls unter diesem
-Verzeichnis.
-
-## Schutzgrenzen
-
-KeyWars setzt feste Rate-Limits ohne Zusatzkonfiguration:
-
-| Bereich | Limit | Schlüssel |
+| `.env`-Variable | Standard | Bedeutung |
 | --- | --- | --- |
-| Login | 10 POST-Versuche pro Minute | Remote-IP |
-| API | 180 Requests pro Minute | Profil-ID, sonst Remote-IP |
+| `KEYWARS_PROXY_KNOWN_PROXIES` | leer | Semikolonliste exakter Proxy-IP-Adressen |
+| `KEYWARS_PROXY_KNOWN_NETWORKS` | leer | Semikolonliste enger Proxy-Netze in CIDR-Notation |
 
-Der Content-Security-Policy-Header erlaubt Scripts und Styles nur von `self`.
-SignalR-Verbindungen werden auf `self` und den aktuellen WebSocket-Host
-beschränkt.
+Ohne Eintrag vertraut ASP.NET Core nur Loopback-Proxys. Ungültige IP- oder
+CIDR-Werte verhindern den Start. Es wird höchstens ein Proxy-Hop ausgewertet.
+Siehe [Reverse Proxy](reverse-proxy.md).
 
-## Diagnosen
+## Live-Arena und Kapazität
 
-| Pfad | Zweck |
+Die ausgelieferten Werte sind für einen einzelnen, selbst gehosteten Container
+konservativ. Erst nach Messung ändern:
+
+| `.env`-Variable | Standard | Bedeutung |
+| --- | ---: | --- |
+| `KEYWARS_MAX_LIVE_PARTICIPANTS` | 64 | maximale Personen pro Raum |
+| `KEYWARS_MAX_LIVE_ROOMS` | 200 | gleichzeitig im Speicher gehaltene Räume |
+| `KEYWARS_MAX_CONNECTIONS_PER_USER` | 3 | parallele Arena-Verbindungen pro Profil; wirksam 1 bis 20 |
+| `KEYWARS_LIVE_BROADCAST_HZ` | 10 | maximale Progress-Broadcasts pro Sekunde und Raum |
+| `KEYWARS_LIVE_COUNTDOWN_SECONDS` | 3 | Countdown; wirksam 1 bis 10 Sekunden |
+| `KEYWARS_LIVE_RECONNECT_SECONDS` | 30 | Zeit für Wiederverbindungen; wirksam 0 bis 300 Sekunden |
+| `KEYWARS_LIVE_COMMAND_QUEUE_CAPACITY` | 4096 | Pending-Kapazität koaleszierter Progress-Deltas |
+| `KEYWARS_LIVE_COMPLETION_QUEUE_CAPACITY` | 4096 | Abschlussjobs; muss mindestens `KEYWARS_MAX_LIVE_ROOMS` entsprechen |
+| `KEYWARS_LIVE_COMPLETION_DRAIN_TIMEOUT_SECONDS` | 10 | Drain vor Profilreset/-löschung; 1 bis 300 Sekunden |
+| `KEYWARS_LIVE_COMPLETED_ROOM_RETENTION_MINUTES` | 60 | Aufbewahrung abgeschlossener Räume im Speicher |
+| `KEYWARS_LIVE_LOBBY_ROOM_RETENTION_MINUTES` | 720 | Aufbewahrung inaktiver Lobbys im Speicher |
+| `KEYWARS_MAX_ARENA_TARGET_GRAPHEMES` | 2800 | maximale Länge eines Arena-Zieltexts; wirksam 1 bis 2800 |
+
+Es gibt keine produktive Zuschauerrolle und deshalb kein Zuschauerlimit. Details:
+[Live-Arena](live-arena.md).
+
+## Weitere wirksame Anwendungsvariablen
+
+Diese Werte werden bei Bedarf direkt unter `environment:` ergänzt:
+
+| Variable | Standard | Grenze |
+| --- | ---: | --- |
+| `KEYWARS__AUTH__COOKIE_LIFETIME_HOURS` | 8 | 1 bis 12 Stunden |
+| `KEYWARS__CONTENT__MAX_UPLOAD_BYTES` | 131072 | Importgröße |
+| `KEYWARS__CONTENT__MAX_TEXT_CHARACTERS` | 20000 | UTF-16-Zeichen nach Normalisierung |
+| `KEYWARS__CONTENT__MAX_TEXT_GRAPHEMES` | 20000 | Grapheme nach Normalisierung |
+| `KEYWARS__CONTENT__MAX_TEXT_LINES` | 400 | Zeilen je importiertem Text |
+| `KEYWARS__CHALLENGES__MAX_PARTICIPANTS` | 64 | mindestens 2 |
+
+`KEYWARS__AUTH__DEVELOPMENT_LOGIN=true` ist in Production gesperrt.
+`KEYWARS__DATA__DIRECTORY` bleibt im Container `/data`; dort liegen SQLite,
+Data-Protection-Schlüssel und Backups. Es gibt keinen automatischen
+Backup-Zeitplan – der Betreiber plant und exportiert Backups selbst.
+
+## Betriebsprüfungen
+
+| Pfad | Aussage |
 | --- | --- |
-| `/health/live` | Prozess lebt |
-| `/health/ready` | SQLite ist erreichbar |
-| `/health/arena-persistence` | Pending Jobs, Kapazität und Fehlversuche der Arena-Abschlussqueue |
-| `/health/arena-progress` | aktive Progress-Räume, Pending Deltas, Koaleszierungen, Drops und Broadcastzähler |
+| `/health/live` | Prozess läuft |
+| `/health/ready` | Datenverzeichnis und SQLite sind erreichbar |
+| `/health/arena-persistence` | Abschlussqueue, Fehler und Persistenzdauer |
+| `/health/arena-progress` | aktive Räume, Deltas, Koaleszierungen, Drops und Broadcasts |

@@ -140,6 +140,138 @@ public sealed class ProfileInsightsServiceTests
     }
 
     [Fact]
+    public async Task ActivityReturnsContinuousNinetyDayWindowWithCorrectSumsAndBoundaries()
+    {
+        var now = DateTimeOffset.Parse("2026-06-19T12:00:00Z");
+        var endDate = DateOnly.FromDateTime(now.UtcDateTime);
+        var startDate = endDate.AddDays(-89);
+        var periodStart = new DateTimeOffset(startDate.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+        var periodEnd = new DateTimeOffset(endDate.AddDays(1).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+        var middleDate = startDate.AddDays(45);
+        var middleInstant = new DateTimeOffset(middleDate.ToDateTime(new TimeOnly(8, 30)), TimeSpan.Zero);
+
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<KeyWarsDbContext>().UseSqlite(connection).Options;
+        await using var db = new KeyWarsDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        var profile = new UserProfile
+        {
+            DisplayName = "Ada Aktiv",
+            SamAccountName = "aaktiv",
+            DirectoryObjectGuid = Guid.NewGuid().ToString(),
+            DirectorySid = "S-activity",
+            CreatedAt = periodStart.AddDays(-1)
+        };
+        db.UserProfiles.Add(profile);
+
+        TypingAttempt CreateAttempt(DateTimeOffset createdAt, AttemptPhase phase = AttemptPhase.Finished, bool completed = true) =>
+            new()
+            {
+                UserProfileId = profile.Id,
+                Mode = TrainingMode.Sprint60,
+                Phase = phase,
+                Completed = completed,
+                CreatedAt = createdAt,
+                PreparedAt = createdAt.AddMinutes(-1),
+                StartedAt = createdAt.AddSeconds(-30),
+                FinishedAt = createdAt,
+                DurationMilliseconds = 30_000,
+                CorrectCharacters = 100,
+                TotalCharacters = 100,
+                Wpm = 40,
+                RawWpm = 40,
+                Accuracy = 100,
+                Consistency = 100,
+                ConsistencySampleCount = 2
+            };
+
+        db.TypingAttempts.AddRange(
+            CreateAttempt(periodStart.AddSeconds(-1)),
+            CreateAttempt(periodStart),
+            CreateAttempt(periodStart.AddHours(12)),
+            CreateAttempt(middleInstant),
+            CreateAttempt(periodEnd.AddSeconds(-1)),
+            CreateAttempt(periodEnd),
+            CreateAttempt(middleInstant.AddMinutes(1), AttemptPhase.Prepared),
+            CreateAttempt(middleInstant.AddMinutes(2), completed: false));
+
+        var arenaFinishes = new DateTimeOffset?[]
+        {
+            periodStart.AddSeconds(-1),
+            periodStart,
+            periodStart.AddHours(2),
+            middleInstant,
+            periodEnd.AddSeconds(-1),
+            periodEnd,
+            null
+        };
+        for (var index = 0; index < arenaFinishes.Length; index++)
+        {
+            var room = new LiveRoomSummary
+            {
+                Id = Guid.CreateVersion7(),
+                CreatorProfileId = profile.Id,
+                IdempotencyKey = $"profile-activity-{index}",
+                RoomCode = $"ACT{index:000}",
+                Mode = LiveRoomMode.Classic,
+                Visibility = LiveRoomVisibility.InternalOpen,
+                FinishedAt = arenaFinishes[index]
+            };
+            db.LiveRoomSummaries.Add(room);
+            db.LiveRoomParticipantSummaries.Add(new LiveRoomParticipantSummary
+            {
+                LiveRoomSummaryId = room.Id,
+                UserProfileId = profile.Id,
+                Status = ParticipantStatus.Finished,
+                Placement = 1,
+                DurationMilliseconds = 30_000,
+                Wpm = 50,
+                Accuracy = 99
+            });
+        }
+
+        Mission CreateMission(DateOnly date, string key, bool completed = true) =>
+            new()
+            {
+                UserProfileId = profile.Id,
+                Key = key,
+                Title = key,
+                Description = key,
+                MissionDate = date,
+                TargetValue = 1,
+                CurrentValue = completed ? 1 : 0,
+                Completed = completed
+            };
+
+        db.Missions.AddRange(
+            CreateMission(startDate.AddDays(-1), "before"),
+            CreateMission(startDate, "start-one"),
+            CreateMission(startDate, "start-two"),
+            CreateMission(middleDate, "incomplete", completed: false),
+            CreateMission(endDate, "end"),
+            CreateMission(endDate.AddDays(1), "after"));
+        await db.SaveChangesAsync();
+        var service = new ProfileInsightsService(db, new ManualTimeProvider(now));
+
+        var insights = await service.GetAsync(profile, 1, 10, CancellationToken.None);
+
+        var expectedDates = Enumerable.Range(0, 90).Select(startDate.AddDays).ToArray();
+        Assert.Equal(expectedDates, insights.ActivityDays.Select(day => day.Date));
+        Assert.Equal(4, insights.ActivityDays.Sum(day => day.TrainingAttempts));
+        Assert.Equal(4, insights.ActivityDays.Sum(day => day.ArenaRuns));
+        Assert.Equal(3, insights.ActivityDays.Sum(day => day.CompletedGoals));
+
+        var firstDay = insights.ActivityDays[0];
+        Assert.Equal((2, 2, 2), (firstDay.TrainingAttempts, firstDay.ArenaRuns, firstDay.CompletedGoals));
+        Assert.Equal(0, insights.ActivityDays[1].Intensity);
+        var middleDay = insights.ActivityDays.Single(day => day.Date == middleDate);
+        Assert.Equal((1, 1, 0), (middleDay.TrainingAttempts, middleDay.ArenaRuns, middleDay.CompletedGoals));
+        var lastDay = insights.ActivityDays[^1];
+        Assert.Equal((1, 1, 1), (lastDay.TrainingAttempts, lastDay.ArenaRuns, lastDay.CompletedGoals));
+    }
+
+    [Fact]
     public async Task InsightsReturnStableEmptyStateForNewProfile()
     {
         var now = DateTimeOffset.Parse("2026-06-19T12:00:00Z");

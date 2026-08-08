@@ -20,18 +20,17 @@ im konfigurierten Artefaktverzeichnis erhalten.
 
 - Windows 10 oder neuer;
 - Microsoft Edge oder Google Chrome;
-- das Repository-lokale .NET 10 SDK;
+- ein .NET 10 SDK im `PATH`;
 - ein Release-Build des Testprojekts.
 
 ## Lokaler Lauf
 
 ```powershell
-$env:DOTNET_ROOT='F:\KeyWars\.dotnet'
-$env:PATH='F:\KeyWars\.dotnet;' + $env:PATH
-$env:KEYWARS_WINDOWS_UI_ARTIFACTS='F:\KeyWars\output\windows-ui'
-dotnet restore .\KeyWars.slnx --locked-mode
-dotnet build .\tests\KeyWars.WindowsUiTests\KeyWars.WindowsUiTests.csproj -c Release --no-restore
-dotnet test .\tests\KeyWars.WindowsUiTests\KeyWars.WindowsUiTests.csproj -c Release --no-build --no-restore
+$repoRoot = (Resolve-Path .).Path
+$env:KEYWARS_WINDOWS_UI_ARTIFACTS = Join-Path $repoRoot 'output/windows-ui'
+dotnet restore ./KeyWars.slnx --locked-mode
+dotnet build ./tests/KeyWars.WindowsUiTests/KeyWars.WindowsUiTests.csproj -c Release --no-restore
+dotnet test ./tests/KeyWars.WindowsUiTests/KeyWars.WindowsUiTests.csproj -c Release --no-build --no-restore
 ```
 
 Ein alternativer Browser kann über `KEYWARS_WINDOWS_UI_BROWSER` als absoluter

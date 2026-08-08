@@ -119,6 +119,8 @@ public sealed class LiveProgressBroadcaster(
         await SendBatchAsync(roomId, dueDeltas, now, cancellationToken);
     }
 
+    public bool RemoveRoom(Guid roomId) => rooms.TryRemove(roomId, out _);
+
     public LiveProgressMetrics Snapshot()
     {
         return new LiveProgressMetrics(

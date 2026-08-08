@@ -14,7 +14,6 @@ public static class ConfigurationAliases
         SetString(section, "URLS", value => options.Urls = value);
         SetString(section, "BASE_DN", value => options.BaseDn = value);
         SetString(section, "UPN_SUFFIX", value => options.UpnSuffix = value);
-        SetString(section, "NETBIOS_DOMAIN", value => options.NetbiosDomain = value);
         SetString(section, "USER_BASE_DN", value => options.UserBaseDn = value);
         SetString(section, "CA_CERTIFICATE_PATH", value => options.CaCertificatePath = value);
         SetInt(section, "CONNECT_TIMEOUT_SECONDS", value => options.ConnectTimeoutSeconds = value);
@@ -90,7 +89,6 @@ public static class ConfigurationAliases
         var section = configuration.GetSection("KEYWARS:LIVE");
         section.Bind(options);
         SetInt(section, "MAX_PARTICIPANTS_PER_ROOM", value => options.MaxParticipantsPerRoom = value);
-        SetInt(section, "MAX_SPECTATORS_PER_ROOM", value => options.MaxSpectatorsPerRoom = value);
         SetInt(section, "MAX_CONCURRENT_ROOMS", value => options.MaxConcurrentRooms = value);
         SetInt(section, "MAX_CONNECTIONS_PER_USER", value => options.MaxConnectionsPerUser = value);
         SetInt(section, "PROGRESS_BROADCAST_HZ", value => options.ProgressBroadcastHz = value);
@@ -101,6 +99,12 @@ public static class ConfigurationAliases
         SetInt(section, "COMPLETION_DRAIN_TIMEOUT_SECONDS", value => options.CompletionDrainTimeoutSeconds = value);
         SetInt(section, "COMPLETED_ROOM_RETENTION_MINUTES", value => options.CompletedRoomRetentionMinutes = value);
         SetInt(section, "LOBBY_ROOM_RETENTION_MINUTES", value => options.LobbyRoomRetentionMinutes = value);
+        SetIntInRange(
+            section,
+            "MAX_ARENA_TARGET_GRAPHEMES",
+            1,
+            LiveOptions.MaximumSafeArenaTargetGraphemes,
+            value => options.MaxArenaTargetGraphemes = value);
     }
 
     public static void BindChallenges(IConfiguration configuration, ChallengeOptions options)
@@ -143,6 +147,23 @@ public static class ConfigurationAliases
         {
             set(value);
         }
+    }
+
+    private static void SetIntInRange(IConfiguration section, string key, int minimum, int maximum, Action<int> set)
+    {
+        var configured = section[key];
+        if (string.IsNullOrWhiteSpace(configured))
+        {
+            return;
+        }
+
+        if (!int.TryParse(configured, out var value) || value < minimum || value > maximum)
+        {
+            throw new InvalidOperationException(
+                $"KEYWARS__LIVE__{key} muss zwischen {minimum} und {maximum} liegen.");
+        }
+
+        set(value);
     }
 
     private static string[] SplitProxyEntries(string? value, string key)

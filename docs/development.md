@@ -6,19 +6,20 @@ vor einem Pull Request sinnvoll sind.
 
 ## Schnellstart
 
+Voraussetzungen sind das .NET 10 SDK sowie Node.js/npm im `PATH`. Führe die
+Befehle im Repository-Stamm aus:
+
 ```powershell
-$env:DOTNET_ROOT='F:\KeyWars\.dotnet'
-$env:PATH='F:\KeyWars\.dotnet;' + $env:PATH
-dotnet restore .\KeyWars.slnx --locked-mode
-dotnet build .\KeyWars.slnx -c Release --no-restore
-dotnet test .\KeyWars.slnx -c Release --no-build --no-restore
+dotnet restore ./KeyWars.slnx --locked-mode
+dotnet build ./KeyWars.slnx -c Release --no-restore
+dotnet test ./KeyWars.slnx -c Release --no-build --no-restore
 npm run test:browser
 ```
 
 Die lokale Anwendung startet mit:
 
 ```powershell
-dotnet run --project .\src\KeyWars\KeyWars.csproj
+dotnet run --project ./src/KeyWars/KeyWars.csproj
 ```
 
 Der Entwicklungslogin ist ausschließlich für `Development` vorgesehen.
