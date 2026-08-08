@@ -36,6 +36,7 @@ public sealed class WindowsUiSmokeTests
     }
 
     [Test]
+    [Order(1)]
     public void FlaUiFindsTheKeyWarsWindow()
     {
         var window = RequiredEnvironment.MainWindow;
@@ -50,13 +51,13 @@ public sealed class WindowsUiSmokeTests
     }
 
     [Test]
+    [Order(2)]
     public void Uia3ExposesTheLoginControls()
     {
         var window = RequiredEnvironment.MainWindow!;
         var document = window.FindFirstDescendant(factory => factory.ByControlType(ControlType.Document));
-        var inputFields = window.FindAllDescendants(factory => factory.ByControlType(ControlType.Edit));
-        var loginButton = window.FindAllDescendants(factory => factory.ByControlType(ControlType.Button))
-            .FirstOrDefault(element => element.Name.Equals("Anmelden", StringComparison.OrdinalIgnoreCase));
+        var inputFields = WaitForLoginInputs(window);
+        var loginButton = WaitForVisibleElement(window, ControlType.Button, "Anmelden");
 
         Assert.Multiple(() =>
         {
@@ -68,6 +69,7 @@ public sealed class WindowsUiSmokeTests
     }
 
     [Test]
+    [Order(3)]
     public async Task OpenCvConfirmsStructuredRenderedContent()
     {
         var screenshot = await RequiredEnvironment.CaptureRenderedPageAsync("keywars-rendered-page.png");
@@ -89,6 +91,7 @@ public sealed class WindowsUiSmokeTests
     }
 
     [Test]
+    [Order(4)]
     public void DevelopmentLoginAndNavigationProduceVisibleChange()
     {
         var window = RequiredEnvironment.MainWindow!;
@@ -97,36 +100,29 @@ public sealed class WindowsUiSmokeTests
         var beforePath = CaptureWindow(window, "active-login-before.png");
         TestContext.AddTestAttachment(beforePath, "Loginseite vor der aktiven Bedienung");
 
-        try
+        EnterText(inputs[0], sessionName);
+        EnterText(inputs[1], "ui-test-only");
+        var enteredPath = CaptureWindow(window, "active-login-entered.png");
+        TestContext.AddTestAttachment(enteredPath, "Ausgefüllte Loginmaske vor dem Absenden");
+        WaitForVisibleElement(window, ControlType.Button, "Anmelden").Click();
+
+        WaitForWindowTitle(window, "Start");
+        WaitForVisibleElement(window, ControlType.Hyperlink, "Spielen").Click();
+        WaitForWindowTitle(window, "Spielen");
+        var heading = WaitForVisibleNamedElement(window, "Sofortrunde");
+
+        var visualChange = WaitForVisualChange(window, beforePath, "active-playing-after.png");
+        TestContext.AddTestAttachment(visualChange.Path, "Sichtbarer Zustand nach Login und Navigation");
+        TestContext.Progress.WriteLine(
+            $"OpenCV-Zustandswechsel: mittlere absolute Differenz={visualChange.Mean:F2}; " +
+            $"geänderte Pixel={visualChange.ChangedRatio:P2}");
+
+        Assert.Multiple(() =>
         {
-            EnterText(inputs[0], sessionName);
-            EnterText(inputs[1], "ui-test-only");
-            var enteredPath = CaptureWindow(window, "active-login-entered.png");
-            TestContext.AddTestAttachment(enteredPath, "Ausgefüllte Loginmaske vor dem Absenden");
-            WaitForVisibleElement(window, ControlType.Button, "Anmelden").Click();
-
-            WaitForWindowTitle(window, "Start");
-            WaitForVisibleElement(window, ControlType.Hyperlink, "Spielen").Click();
-            WaitForWindowTitle(window, "Spielen");
-            var heading = WaitForVisibleNamedElement(window, "Sofortrunde");
-
-            var visualChange = WaitForVisualChange(window, beforePath, "active-playing-after.png");
-            TestContext.AddTestAttachment(visualChange.Path, "Sichtbarer Zustand nach Login und Navigation");
-            TestContext.Progress.WriteLine(
-                $"OpenCV-Zustandswechsel: mittlere absolute Differenz={visualChange.Mean:F2}; " +
-                $"geänderte Pixel={visualChange.ChangedRatio:P2}");
-
-            Assert.Multiple(() =>
-            {
-                Assert.That(heading.IsOffscreen, Is.False, "Die Sofortrunde muss sichtbar sein.");
-                Assert.That(visualChange.Mean, Is.GreaterThan(2.5));
-                Assert.That(visualChange.ChangedRatio, Is.GreaterThan(0.03));
-            });
-        }
-        finally
-        {
-            RestoreLoginPage(window);
-        }
+            Assert.That(heading.IsOffscreen, Is.False, "Die Sofortrunde muss sichtbar sein.");
+            Assert.That(visualChange.Mean, Is.GreaterThan(2.5));
+            Assert.That(visualChange.ChangedRatio, Is.GreaterThan(0.03));
+        });
     }
 
     private string CaptureWindow(Window window, string name)
@@ -266,26 +262,6 @@ public sealed class WindowsUiSmokeTests
         using var changed = new Mat();
         Cv2.Threshold(grayscale, changed, 12, 255, ThresholdTypes.Binary);
         return (Cv2.Mean(grayscale).Val0, Cv2.CountNonZero(changed) / (double)before.Total());
-    }
-
-    private static void RestoreLoginPage(Window window)
-    {
-        try
-        {
-            var logout = FindVisibleElement(window, ControlType.Button, "Abmelden");
-            if (logout is null)
-            {
-                return;
-            }
-
-            logout.AsButton().Invoke();
-            WaitForVisibleElement(window, ControlType.Hyperlink, "Wieder anmelden").Click();
-            WaitForVisibleElement(window, ControlType.Button, "Anmelden");
-        }
-        catch (Exception exception)
-        {
-            TestContext.Progress.WriteLine($"UI-Cleanup konnte die Loginseite nicht wiederherstellen: {exception.Message}");
-        }
     }
 
     private WindowsUiTestEnvironment RequiredEnvironment =>

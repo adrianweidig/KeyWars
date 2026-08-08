@@ -16,7 +16,6 @@ dotnet format ./KeyWars.slnx --verify-no-changes --no-restore
 npm run test:browser
 ```
 
-
 Nutze für eine Änderung die kleinste passende Testschicht. Browser-, Layout-
 und Interaktionsänderungen benötigen zusätzlich eine gerenderte Prüfung.
 
