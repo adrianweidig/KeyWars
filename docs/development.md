@@ -13,6 +13,7 @@ Befehle im Repository-Stamm aus:
 dotnet restore ./KeyWars.slnx --locked-mode
 dotnet build ./KeyWars.slnx -c Release --no-restore
 dotnet test ./KeyWars.slnx -c Release --no-build --no-restore
+npm run test:assets
 npm run test:browser
 ```
 

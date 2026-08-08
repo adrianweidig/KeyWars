@@ -6,6 +6,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import zlib from "node:zlib";
 
+import { isAllowedIllustrationAssetUrl } from "./visual-asset-url-policy.mjs";
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const originalsDir = path.join(root, "third_party", "visual-assets", "originals");
 const licensesDir = path.join(root, "third_party", "visual-assets", "licenses");
@@ -311,7 +313,7 @@ async function fetchIllustrationSource(source) {
     const target = path.join(assetsDir, filename);
     if (!fs.existsSync(target)) {
       try {
-        await downloadFile(url, target);
+        await downloadFile(url, target, isAllowedIllustrationAssetUrl);
       } catch {
         continue;
       }
@@ -334,12 +336,7 @@ function extractAssetUrls(html) {
     .replace(/&amp;/g, "&")
     .replace(/\\u0026/g, "&");
   const matches = decoded.match(/https?:\/\/[^"'\s<>)]*\.(?:svg|png)(?:\?[^"'\s<>)]*)?/giu) || [];
-  const filtered = matches.filter(function(url) {
-    return url.indexOf("openpeeps") !== -1 ||
-      url.indexOf("humaaans") !== -1 ||
-      url.indexOf("website-files.com") !== -1 ||
-      url.indexOf("assets-global.website-files.com") !== -1;
-  });
+  const filtered = matches.filter(isAllowedIllustrationAssetUrl);
   return Array.from(new Set(filtered));
 }
 
@@ -816,10 +813,20 @@ function escapeXml(value) {
     .replace(/>/g, "&gt;");
 }
 
-function downloadFile(url, target) {
+function downloadFile(url, target, validateUrl) {
   return new Promise(function(resolve, reject) {
+    if (validateUrl && !validateUrl(url)) {
+      reject(new Error("Download URL is not allowed: " + url));
+      return;
+    }
+
     fs.mkdirSync(path.dirname(target), { recursive: true });
     const file = fs.createWriteStream(target);
+    const rejectDownload = function(error) {
+      file.destroy();
+      fs.rmSync(target, { force: true });
+      reject(error);
+    };
     requestUrl(url, function(response) {
       if (response.statusCode < 200 || response.statusCode >= 300) {
         file.close();
@@ -832,7 +839,7 @@ function downloadFile(url, target) {
       file.on("finish", function() {
         file.close(resolve);
       });
-    }, reject);
+    }, rejectDownload, 0, validateUrl);
   });
 }
 
@@ -851,9 +858,21 @@ function fetchText(url) {
   });
 }
 
-function requestUrl(url, onResponse, onError, redirects) {
+function requestUrl(url, onResponse, onError, redirects, validateUrl) {
   const count = redirects || 0;
-  const parsed = new URL(url);
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch (error) {
+    onError(error);
+    return;
+  }
+
+  if (validateUrl && !validateUrl(parsed)) {
+    onError(new Error("Request URL is not allowed: " + parsed.toString()));
+    return;
+  }
+
   const client = parsed.protocol === "http:" ? http : https;
   const request = client.get(parsed, {
     headers: {
@@ -862,7 +881,7 @@ function requestUrl(url, onResponse, onError, redirects) {
   }, function(response) {
     if ([301, 302, 303, 307, 308].indexOf(response.statusCode) !== -1 && response.headers.location && count < 5) {
       response.resume();
-      requestUrl(new URL(response.headers.location, parsed).toString(), onResponse, onError, count + 1);
+      requestUrl(new URL(response.headers.location, parsed).toString(), onResponse, onError, count + 1, validateUrl);
       return;
     }
 
