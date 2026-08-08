@@ -2,8 +2,10 @@ namespace KeyWars.Services;
 
 public sealed class LiveOptions
 {
+    public const int MaximumSafeArenaTargetGraphemes = 2800;
+    public const int MaximumSafeArenaTargetUtf8Bytes = 12 * 1024;
+
     public int MaxParticipantsPerRoom { get; set; } = 64;
-    public int MaxSpectatorsPerRoom { get; set; } = 128;
     public int MaxConcurrentRooms { get; set; } = 200;
     public int MaxConnectionsPerUser { get; set; } = 3;
     public int ProgressBroadcastHz { get; set; } = 10;
@@ -14,6 +16,7 @@ public sealed class LiveOptions
     public int CompletionDrainTimeoutSeconds { get; set; } = 10;
     public int CompletedRoomRetentionMinutes { get; set; } = 60;
     public int LobbyRoomRetentionMinutes { get; set; } = 720;
+    public int MaxArenaTargetGraphemes { get; set; } = MaximumSafeArenaTargetGraphemes;
 }
 
 public sealed class ChallengeOptions

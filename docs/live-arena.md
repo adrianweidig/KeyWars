@@ -1,110 +1,54 @@
 # Live-Arena
 
-Live-Räume unterstützen zwei bis n Personen. Raumzustände liegen im
-Arbeitsspeicher, Eingaben werden als Fortschrittsbatches verarbeitet und nicht
-pro Taste in SQLite geschrieben. Ein Host-Start führt zuerst in eine
-serverseitige Countdown-Phase; der Zieltext wird erst zur freigegebenen
-Startzeit im Snapshot ausgeliefert.
+Live-Räume laufen im Arbeitsspeicher und unterstützen standardmäßig bis zu 64
+Personen. Verfügbar sind Einzelrennen, Serien über drei oder fünf Runden und
+eine automatisch ausgeglichene Teamwertung über eine Runde.
 
-Der produktive Raumvertrag unterstützt drei auswählbare Formate:
+## Zustands- und Persistenzmodell
 
-- das klassische Einzelrennen über eine Runde;
-- das Serienrennen über drei oder fünf Runden;
-- die Teamwertung über eine Runde mit automatisch ausgeglichener Verteilung
-  auf Team Alpha und Team Bravo.
+- Tastenfortschritt bleibt flüchtig und wird nicht pro Taste in SQLite geschrieben.
+- Progress-Deltas werden pro Person koalesziert und höchstens mit der konfigurierten Broadcast-Rate gesendet.
+- Start, Finish, Leave und Phasenwechsel liefern zuverlässige Vollsnapshots.
+- Erst das Ende eines Rennens oder einer Serie erzeugt einen idempotenten Abschlussjob mit aggregierten Ergebnissen.
+- Rating, XP und Saisonpunkte gelten erst nach Status `Persisted` als bestätigt.
+- Bei Server-Shutdown werden laufende Rennen ohne Ratingänderung als abgebrochen gespeichert; Lobbys sind flüchtig.
 
-In einer Serie erhält ein fehlerfrei beendeter Lauf absteigende
-Platzierungspunkte; ein nicht beendeter Lauf erhält null Punkte. Die
-Gesamtwertung sortiert nach Punkten, Rundensiegen, beendeten Runden,
-Gesamtzeit und durchschnittlicher Genauigkeit. In der Teamwertung werden die
-Punkte aller Teammitglieder addiert. Bei Gleichstand entscheiden Rundensiege,
-beendete Läufe und Gesamtzeit. Diese Regeln werden serverseitig angewendet und
-als Teil jedes Raumsnapshots ausgeliefert.
+Mehrere Tabs derselben Person ergeben eine Teilnehmerzeile. Nach Verlust der
+letzten Verbindung läuft die Reconnect-Frist. Verlässt die Raumleitung Lobby
+oder Serienpause, übernimmt die älteste aktive Person und kann ohne Reload
+fortfahren.
 
-Präsenz wird pro Profil und aktiver SignalR-Connection geführt. Mehrere Tabs
-derselben Person erzeugen eine Teilnehmerzeile. Erst wenn die letzte
-Raumverbindung eines Profils verschwindet, startet die Reconnect-Grace. Ein
-periodischer Hintergrund-Sweep setzt abgelaufene Lobby-Verbindungen auf
-`Vor dem Start verlassen` und abgelaufene Rennverbindungen auf `Nicht beendet`.
-Verlässt die Raumleitung in der Lobby den Raum, geht die Leitung auf die
-älteste aktive Person über.
+Arena-Zieltexte werden vor der Auswahl normalisiert und auf Grapheme sowie
+UTF-8-Größe begrenzt. Zu lange Texte bleiben als Trainingsinhalt erhalten, sind
+aber nicht als Live-Ziel auswählbar. `KEYWARS_MAX_ARENA_TARGET_GRAPHEMES`
+begrenzt den administrativ wählbaren Wert auf höchstens 2800.
 
-Beendete Arena-Räume werden nicht per Fire-and-forget gespeichert. Bei einer
-Serie bleiben Zwischenergebnisse im flüchtigen Raumzustand; erst die
-Gesamtwertung erzeugt genau einen unveränderlichen Abschlussrecord mit Raum-ID, Runde,
-Raumversion und Idempotenzschlüssel. Eine begrenzte gehostete Queue schreibt
-die Zusammenfassung, Teamzuordnung und alle aggregierten Teilnehmerresultate in einer SQLite-Transaktion,
-berechnet das Arena-Rating genau einmal und aktualisiert Profilrating,
-Matchanzahl und Saisonpunkte atomar. Transiente SQLite-Fehler werden begrenzt
-mit Backoff wiederholt; dauerhaft fehlgeschlagene Jobs bleiben in der
-Queue-Diagnose sichtbar.
+## Skalierung
 
-Der Browser trennt das vorläufige Spielergebnis vom Commitstatus:
+Bis acht Personen zeigt die Strecke alle Details, bis 24 eine kompakte Ansicht.
+Ab 25 werden Top-Plätze, eigene Position und direkte Nachbarn priorisiert.
+Eine produktive Zuschauerrolle existiert nicht.
 
-- `Pending`: Podium/WPM sind vorläufig; Rating und XP sind noch unbestätigt;
-- `Persisted`: Summary, Rating und Rewards sind committed;
-- `Failed`: Speicherung ist fehlgeschlagen, Rating und XP wurden nicht vergeben;
-- `AbortedUnconfirmed`: nach Prozessverlust existiert weder eine bestätigte
-  Summary noch ein wiederaufnehmbarer Raum.
+Für hohe Last zuerst diese Endpunkte beobachten:
 
-Der authentifizierte Endpunkt `GET /api/arena/{roomId}/speicherstatus` prüft
-zuerst die persistierte Summary und danach den begrenzten Queue-Status. Er gibt
-nur den Zustand aus, keine Teilnehmenden-, Raumcode- oder Textdaten. Die
-anonyme Health-Diagnose `/health/arena-persistence` enthält ausschließlich
-niedrig-kardinale Aggregate für Pending/Failed, Retries, Persistenzdauer und
-Abbrüche.
+- `/health/arena-progress`: aktive Räume, Pending-Deltas, Koaleszierungen, Drops und Broadcasts;
+- `/health/arena-persistence`: Abschlussjobs, Wiederholungen, Fehler und Persistenzdauer.
 
-Beim Anwendungs-Shutdown werden laufende Countdown- und Rennräume als
-`AbortedByServer` abgeschlossen. Diese Abbrüche werden nachvollziehbar
-persistiert, verändern aber kein Rating. Lobby-Räume werden weiterhin nur als
-flüchtiger Arbeitsspeicherzustand verworfen.
+Drops nicht sofort mit größeren Queues überdecken. Zuerst Teilnehmerzahl,
+`KEYWARS_LIVE_BROADCAST_HZ`, CPU, Arbeitsspeicher und SQLite-Latenz messen.
+Alle wirksamen Grenzen stehen in der
+[Konfigurationsübersicht](configuration.md#live-arena-und-kapazität).
 
-Hochfrequenter Schreibfortschritt wird als kompaktes `progressChanged`-Batch
-übertragen: Raumversion, Profil-ID, Fortschritt, transiente Textpreview,
-WPM, Genauigkeit und Ranghinweis. Die Textpreview ist kein gespeichertes
-Keystroke-Replay, sondern ein flüchtiger Zustandsstring für die sichtbare
-10FastFingers-artige Zieltextmarkierung im aktiven Raum. SQLite erhält diese
-Preview nicht. Der Broadcast-Takt ist durch
-`KEYWARS__LIVE__PROGRESS_BROADCAST_HZ` begrenzt. Innerhalb eines Takts wird nur
-das neueste Delta je Person behalten; bei voller Pending-Kapazität werden neue
-nichtkritische Progress-Deltas verworfen und unter `/health/arena-progress`
-sichtbar. Zuverlässige Ereignisse wie Start, Finish, Leave und Phasenwechsel
-nutzen weiterhin Vollsnapshots.
+## Proxy- und Abnahmetest
 
-Die kanonische Raumseite rendert dieselben serverbestätigten Daten als
-oberen Tippbereich, Live-Textboard, Rennstrecke, persönliches HUD, Rangliste
-und Podium-Container. Deltas aktualisieren die Zieltextmarkierungen,
-Positionen per CSS-Transform und die textuelle Live-Region gedrosselt;
-Reduced-Motion deaktiviert gleitende Positionsübergänge.
+Der externe Proxy muss WebSocket-Upgrades für `/hubs/arena` erlauben. Nach
+Installation oder Update mindestens mit mehreren getrennten Browser-Sitzungen
+prüfen:
 
-Die Darstellung skaliert nach Teilnehmerfeld: bis acht Personen bleibt die
-Detailansicht aktiv, neun bis 24 Personen nutzen eine kompaktere Strecke, und
-ab 25 Personen rendert die fokussierte Ansicht nur Top-Plätze, eigene Position
-und direkte Rangnachbarn. Die UI zeigt dabei aktive Teilnehmende, Raumkapazität
-und Verbindungszustand. Eine echte Zuschauerrolle mit eigenen Berechtigungen
-und niedriger priorisierten Updates ist noch nicht produktiv implementiert.
-
-Das Motion-Budget nutzt zentrale CSS-Tokens: `instant` 80 ms, `fast` 180 ms,
-`normal` 260 ms und `celebration` 520 ms mit festgelegten Easing-Kurven.
-Laufende Arena-Bewegung ist auf Transform und Opacity beschränkt. Die
-Profiloption `ReducedMotion` und `prefers-reduced-motion` deaktivieren
-nichtessenzielle Bewegung. Sounds werden nicht als externe Assets geladen,
-sondern lokal per Web Audio erzeugt und erst nach expliziter Nutzerinteraktion
-aktiviert; Sound ist standardmäßig aus und besitzt eine separate
-Profil-Lautstärke. Reaktionen sind feste Presets ohne freien Chattext und
-werden serverseitig pro Profil/Raum begrenzt.
-
-Grenzen:
-
-- `KEYWARS__LIVE__MAX_PARTICIPANTS_PER_ROOM`
-- `KEYWARS__LIVE__MAX_SPECTATORS_PER_ROOM`
-- `KEYWARS__LIVE__MAX_CONCURRENT_ROOMS`
-- `KEYWARS__LIVE__MAX_CONNECTIONS_PER_USER`
-- `KEYWARS__LIVE__PROGRESS_BROADCAST_HZ`
-- `KEYWARS__LIVE__ROOM_COMMAND_QUEUE_CAPACITY`
-- `KEYWARS__LIVE__COUNTDOWN_SECONDS`
-- `KEYWARS__LIVE__RECONNECT_GRACE_SECONDS`
-- `KEYWARS__LIVE__COMPLETION_QUEUE_CAPACITY`
-- `KEYWARS__LIVE__COMPLETION_DRAIN_TIMEOUT_SECONDS`
-
-Bei erreichter Kapazität werden neue Räume oder Beitritte kontrolliert abgelehnt.
+1. Raum erstellen und beitreten;
+2. Countdown und Startzeit sind für alle gleich;
+3. Fortschritt und Rangfolge erscheinen gegenseitig;
+4. Reconnect innerhalb der Frist erhält die Teilnahme;
+5. Endstand und Persistenzstatus stimmen in allen Sitzungen überein;
+6. Teammitglieder werden ausgeglichen verteilt und dieselbe Teamwertung angezeigt;
+7. nach Verbindungsverlust der Raumleitung kann die älteste aktive Person die Serie fortsetzen.

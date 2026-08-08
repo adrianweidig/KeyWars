@@ -25,7 +25,7 @@
         </label>
         <label>
             Text
-            <select asp-for="Input.TrainingTextId" data-arena-text-select aria-describedby="text-preview-title text-preview-body">
+            <select asp-for="Input.TrainingTextId" data-arena-text-select aria-describedby="arena-text-limit text-preview-title text-preview-body">
                 @foreach (var text in Model.TextOptions)
                 {
                     <option value="@text.Id"
@@ -37,6 +37,13 @@
                 }
             </select>
             <span asp-validation-for="Input.TrainingTextId"></span>
+            <small id="arena-text-limit" class="muted">
+                Live-Texte sind auf @Model.MaxArenaTargetGraphemes Grapheme und @(KeyWars.Services.LiveOptions.MaximumSafeArenaTargetUtf8Bytes / 1024) KiB UTF-8 begrenzt.
+                @if (Model.ExcludedTextCount > 0)
+                {
+                    <span>@Model.ExcludedTextCount @(Model.ExcludedTextCount == 1 ? "sichtbarer Text wurde" : "sichtbare Texte wurden") deshalb ausgeblendet.</span>
+                }
+            </small>
         </label>
         <fieldset class="arena-mode-picker" aria-describedby="arena-mode-help">
             <legend>Modus</legend>

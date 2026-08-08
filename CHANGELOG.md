@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.4.8 - 2026-08-08
+
+- Keep multi-round arena series operable after a host disconnect, broadcast
+  grace-timeout transitions and cover the handoff with concurrency and real
+  two-browser tests.
+- Add a four-context 2-vs-2 browser race with desktop and mobile visual
+  evidence, synchronized participant counts and performance timings.
+- Bound normalized arena targets by graphemes and UTF-8 payload size, filter
+  unsafe choices and reject manipulated submissions with HTTP regression
+  coverage.
+- Reduce large typing-alignment memory usage, collapse the 90-day profile
+  activity view to grouped queries and remove a redundant database lookup from
+  the SignalR progress hot path.
+- Add an active Windows UI test that logs in and navigates through a real
+  browser with NUnit, FlaUI/UIA3, OpenCV change detection and reproducible
+  screenshots.
+- Harden locked CI and release builds, OCI metadata, multi-architecture GHCR
+  publication and independently validated offline release artifacts.
+- Refresh the vendored SignalR client to 10.0.11 and replace long operator
+  notes with concise installation, LDAP, Portainer, backup and troubleshooting
+  guides.
+
 ## v0.4.7 - 2026-08-01
 
 - Publish the example environment file under the stable

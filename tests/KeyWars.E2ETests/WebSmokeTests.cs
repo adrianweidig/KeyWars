@@ -499,7 +499,7 @@ public sealed partial class WebSmokeTests : IClassFixture<KeyWarsWebFactory>
         Assert.Contains("Fokussierte Ansicht", decodedPage);
         Assert.Contains("5 von 32 Teilnehmenden im Fokus", decodedPage);
         Assert.Contains("Kapazität 64", decodedPage);
-        Assert.Contains("Zuschauerrolle vorbereitet", decodedPage);
+        Assert.DoesNotContain("Zuschauer", decodedPage);
         Assert.Contains("Max Mustermann", decodedPage);
         Assert.Contains("Alpha 01", decodedPage);
         Assert.Contains("Alpha 03", decodedPage);
@@ -807,6 +807,74 @@ public sealed partial class WebSmokeTests : IClassFixture<KeyWarsWebFactory>
     }
 
     [Fact]
+    public async Task ArenaCreateFiltersUnsafeTargetsAndRejectsManipulatedSelection()
+    {
+        using var customFactory = new ConfiguredKeyWarsWebFactory(12, maxArenaTargetGraphemes: 8);
+        var client = customFactory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        await LoginAsync(client);
+
+        Guid safeId;
+        Guid tooLongId;
+        await using (var scope = customFactory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<KeyWarsDbContext>();
+            var profile = await db.UserProfiles.SingleAsync(item => item.SamAccountName == "max.mustermann");
+            var safe = new TrainingText
+            {
+                OwnerProfileId = profile.Id,
+                Title = "Arena-Grenze exakt",
+                Body = "12345678",
+                CharacterCount = 8,
+                Visibility = TrainingTextVisibility.Private
+            };
+            var tooLong = new TrainingText
+            {
+                OwnerProfileId = profile.Id,
+                Title = "Arena-Grenze überschritten",
+                Body = "123456789",
+                CharacterCount = 9,
+                Visibility = TrainingTextVisibility.Private
+            };
+            var tooLargeUtf8 = new TrainingText
+            {
+                OwnerProfileId = profile.Id,
+                Title = "Arena-UTF-8 überschritten",
+                Body = "a" + new string('\u0308', 7000),
+                CharacterCount = 1,
+                Visibility = TrainingTextVisibility.Private
+            };
+            db.TrainingTexts.AddRange(safe, tooLong, tooLargeUtf8);
+            await db.SaveChangesAsync();
+            safeId = safe.Id;
+            tooLongId = tooLong.Id;
+        }
+
+        var form = await client.GetStringAsync("/arena/neu");
+        var decodedForm = WebUtility.HtmlDecode(form);
+        Assert.Contains(safeId.ToString(), form, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Arena-Grenze exakt", decodedForm);
+        Assert.DoesNotContain("Arena-Grenze überschritten", decodedForm);
+        Assert.DoesNotContain("Arena-UTF-8 überschritten", decodedForm);
+        Assert.Contains("sichtbare Texte wurden", decodedForm);
+
+        var token = AntiForgeryRegex().Match(form).Groups["token"].Value;
+        var response = await client.PostAsync("/arena/neu", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["Input.Title"] = "Manipulierte Auswahl",
+            ["Input.TrainingTextId"] = tooLongId.ToString(),
+            ["Input.Visibility"] = LiveRoomVisibility.InternalOpen.ToString(),
+            ["Input.Mode"] = LiveRoomMode.Classic.ToString(),
+            ["Input.RoundCount"] = "1",
+            ["Input.MaxParticipants"] = "8",
+            ["__RequestVerificationToken"] = token
+        }));
+        var body = WebUtility.HtmlDecode(await response.Content.ReadAsStringAsync());
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("für eine Live-Arena zu lang", body);
+    }
+
+    [Fact]
     public async Task ArenaJoinFormUsesSixCharacterCodeContractAndSubmitGuard()
     {
         using var isolatedFactory = new KeyWarsWebFactory();
@@ -852,7 +920,9 @@ public sealed class KeyWarsWebFactory : WebApplicationFactory<Program>
     }
 }
 
-public sealed class ConfiguredKeyWarsWebFactory(int maxParticipantsPerRoom) : WebApplicationFactory<Program>
+public sealed class ConfiguredKeyWarsWebFactory(
+    int maxParticipantsPerRoom,
+    int maxArenaTargetGraphemes = LiveOptions.MaximumSafeArenaTargetGraphemes) : WebApplicationFactory<Program>
 {
     private readonly string dataDirectory = Path.Combine(Path.GetTempPath(), $"keywars-e2e-{Guid.NewGuid():N}");
 
@@ -862,5 +932,6 @@ public sealed class ConfiguredKeyWarsWebFactory(int maxParticipantsPerRoom) : We
         builder.UseSetting("KEYWARS:DATA:DIRECTORY", dataDirectory);
         builder.UseSetting("KEYWARS:AUTH:DEVELOPMENT_LOGIN", "true");
         builder.UseSetting("KEYWARS:LIVE:MAX_PARTICIPANTS_PER_ROOM", maxParticipantsPerRoom.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        builder.UseSetting("KEYWARS:LIVE:MAX_ARENA_TARGET_GRAPHEMES", maxArenaTargetGraphemes.ToString(System.Globalization.CultureInfo.InvariantCulture));
     }
 }

@@ -46,10 +46,10 @@ export function attachArenaPages() {
     const teamBoard = root.querySelector("[data-arena-team-board]");
     const teams = root.querySelector("[data-arena-teams]");
     const roundLabel = document.querySelector("[data-arena-round-label]");
+    const participantCountLabel = document.querySelector("[data-arena-participant-count]");
     const liveRegion = root.querySelector("[data-arena-live-region]");
     const modeLabel = root.querySelector("[data-arena-mode-label]");
     const rosterSummaryLabel = root.querySelector("[data-arena-roster-summary]");
-    const spectatorSummary = root.querySelector("[data-arena-spectator-summary]");
     const connectionQuality = root.querySelector("[data-arena-connection-quality]");
     const persistenceStatus = root.querySelector("[data-arena-persistence-status]");
     const hiddenCountLabel = root.querySelector("[data-arena-hidden-count]");
@@ -328,7 +328,7 @@ export function attachArenaPages() {
       });
       setText(modeLabel, modeTitle(mode));
       setText(rosterSummaryLabel, rosterSummary(ranked.length, visible.length));
-      setText(spectatorSummary, "Zuschauer: Rolle vorbereitet");
+      setText(participantCountLabel, `${ranked.length} ${ranked.length === 1 ? "Person" : "Personen"}`);
       setText(hiddenCountLabel, hiddenParticipantsText(hidden));
       setText(windowNote, hiddenParticipantsText(hidden));
       setHidden(hiddenCountLabel, hidden === 0);
@@ -726,16 +726,17 @@ export function attachArenaPages() {
       }
 
       const current = snapshot.participants?.find((participant) => participant.profileId === currentProfileId);
+      const canStart = (lobby || betweenRounds) && snapshot.creatorProfileId === currentProfileId;
       setHidden(readyForm, !lobby);
       if (readyButton) {
         readyButton.textContent = readyPending ? "Wird gespeichert..." : current?.ready ? "Nicht bereit" : "Bereit";
         readyButton.disabled = !connected || readyPending || !snapshot || !lobby;
       }
 
-      setHidden(startForm, !lobby && !betweenRounds);
+      setHidden(startForm, !canStart);
       if (startButton) {
         startButton.textContent = startPending ? "Startet..." : betweenRounds ? "Nächste Runde" : "Starten";
-        startButton.disabled = !connected || startPending || !snapshot || (!lobby && !betweenRounds);
+        startButton.disabled = !connected || startPending || !snapshot || !canStart;
       }
 
       if (leaveButton) {

@@ -40,10 +40,8 @@ Every behavioral change needs a matching test at the lowest useful level:
 Run these before handing off substantial changes:
 
 ```powershell
-$env:DOTNET_ROOT='F:\KeyWars\.dotnet'
-$env:PATH='F:\KeyWars\.dotnet;' + $env:PATH
-dotnet build .\KeyWars.slnx -c Release --no-restore
-dotnet test .\KeyWars.slnx -c Release --no-build --no-restore
+dotnet build ./KeyWars.slnx -c Release --no-restore
+dotnet test ./KeyWars.slnx -c Release --no-build --no-restore
 npm run test:browser
 ```
 

@@ -52,6 +52,7 @@ internal sealed class WindowsUiTestEnvironment : IAsyncDisposable
         Directory.CreateDirectory(environment.ArtifactDirectory);
         Directory.CreateDirectory(environment.appDataDirectory);
         Directory.CreateDirectory(environment.browserProfileDirectory);
+        PrepareBrowserProfile(environment.browserProfileDirectory);
 
         try
         {
@@ -250,6 +251,7 @@ internal sealed class WindowsUiTestEnvironment : IAsyncDisposable
         startInfo.ArgumentList.Add("--new-window");
         startInfo.ArgumentList.Add("--no-first-run");
         startInfo.ArgumentList.Add("--disable-default-apps");
+        startInfo.ArgumentList.Add("--disable-save-password-bubble");
         startInfo.ArgumentList.Add("--disable-features=msEdgeFirstRunExperience");
         startInfo.ArgumentList.Add("--force-renderer-accessibility");
         startInfo.ArgumentList.Add("--user-data-dir=" + browserProfileDirectory);
@@ -304,6 +306,26 @@ internal sealed class WindowsUiTestEnvironment : IAsyncDisposable
         }
 
         throw new TimeoutException("FlaUI fand innerhalb von 45 Sekunden kein KeyWars-Browserfenster.");
+    }
+
+    private static void PrepareBrowserProfile(string profileDirectory)
+    {
+        var defaultProfile = Path.Combine(profileDirectory, "Default");
+        Directory.CreateDirectory(defaultProfile);
+        File.WriteAllText(
+            Path.Combine(defaultProfile, "Preferences"),
+            """
+            {
+              "autofill": {
+                "credit_card_enabled": false,
+                "profile_enabled": false
+              },
+              "credentials_enable_service": false,
+              "profile": {
+                "password_manager_enabled": false
+              }
+            }
+            """);
     }
 
     private static string FindRepositoryRoot()

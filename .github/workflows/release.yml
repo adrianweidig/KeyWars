@@ -9,16 +9,59 @@ permissions:
   contents: read
 
 jobs:
-  image:
+  verify:
     runs-on: ubuntu-24.04
     permissions:
-      attestations: write
-      contents: write
-      id-token: write
-      packages: write
-    timeout-minutes: 45
+      contents: read
+    timeout-minutes: 35
+    outputs:
+      created: ${{ steps.release.outputs.created }}
+      image_repository: ${{ steps.release.outputs.image_repository }}
+      semver: ${{ steps.release.outputs.semver }}
+      version: ${{ steps.release.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate release tag and ancestry
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "Release tags must use stable SemVer: vMAJOR.MINOR.PATCH" >&2
+            exit 1
+          fi
+
+          git fetch --no-tags origin master
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/master; then
+            echo "The release commit must be part of origin/master." >&2
+            exit 1
+          fi
+
+          image_repository="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/keywars"
+          {
+            echo "created=$(git show -s --format=%cI "$GITHUB_SHA")"
+            echo "image_repository=$image_repository"
+            echo "semver=${GITHUB_REF_NAME#v}"
+            echo "version=$GITHUB_REF_NAME"
+          } >> "$GITHUB_OUTPUT"
+      - name: Validate changelog entry
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          version = re.escape(os.environ["RELEASE_VERSION"])
+          changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+          match = re.search(rf"(?ms)^## {version}(?:\s+-\s+[^\n]+)?\n(?P<body>.*?)(?=^## |\Z)", changelog)
+          if match is None or not match.group("body").strip():
+              raise SystemExit(f"CHANGELOG.md has no non-empty section for {os.environ['RELEASE_VERSION']}")
+          PY
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: 10.0.x
@@ -31,7 +74,15 @@ jobs:
       - name: Implementation status
         run: python scripts/check_implementation_status.py
       - name: Build
-        run: dotnet build -c Release --no-restore
+        env:
+          RELEASE_SEMVER: ${{ steps.release.outputs.semver }}
+        run: >-
+          dotnet build -c Release --no-restore
+          -p:Version="$RELEASE_SEMVER"
+          -p:InformationalVersion="$RELEASE_SEMVER+$GITHUB_SHA"
+          -p:SourceRevisionId="$GITHUB_SHA"
+          -p:IncludeSourceRevisionInInformationalVersion=false
+          -p:ContinuousIntegrationBuild=true
       - name: Test
         run: |
           for project in \
@@ -40,7 +91,7 @@ jobs:
             tests/KeyWars.ConcurrencyTests/KeyWars.ConcurrencyTests.csproj \
             tests/KeyWars.E2ETests/KeyWars.E2ETests.csproj
           do
-            dotnet test "$project" -c Release --no-build
+            dotnet test "$project" -c Release --no-build --no-restore
           done
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -55,7 +106,19 @@ jobs:
           KEYWARS_BROWSER_CHANNEL: chrome
         run: npm run test:browser
       - name: Load test
-        run: dotnet run --project tools/KeyWars.LoadTest -c Release --no-build -- 2 10 25 50 100
+        run: dotnet run --project tools/KeyWars.LoadTest -c Release --no-build --no-restore -- 2 10 25 50 100
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      packages: write
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
@@ -63,12 +126,15 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Metadata
+      - name: Container metadata
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
-          images: ghcr.io/${{ github.repository_owner }}/keywars
-      - name: Build and push
+          images: ${{ needs.verify.outputs.image_repository }}
+          tags: |
+            type=raw,value=${{ needs.verify.outputs.version }}
+            type=raw,value=latest
+      - name: Build and push multi-architecture image
         id: push-image
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
@@ -76,40 +142,71 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ needs.verify.outputs.semver }}
+            REVISION=${{ github.sha }}
+            CREATED=${{ needs.verify.outputs.created }}
           provenance: true
           sbom: true
-      - name: Build offline amd64 image
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        with:
-          context: .
-          platforms: linux/amd64
-          load: true
-          tags: keywars:${{ github.ref_name }}
-      - name: Create release notes
+      - name: Create release artifacts from published image
         env:
           IMAGE_DIGEST: ${{ steps.push-image.outputs.digest }}
-          IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
-          RELEASE_VERSION: ${{ github.ref_name }}
+          IMAGE_REPOSITORY: ${{ needs.verify.outputs.image_repository }}
+          RELEASE_VERSION: ${{ needs.verify.outputs.version }}
+        shell: bash
         run: |
+          set -euo pipefail
+          image_ref="${IMAGE_REPOSITORY}:${RELEASE_VERSION}"
           mkdir -p artifacts
-          docker save keywars:${{ github.ref_name }} | gzip -c > artifacts/keywars-${{ github.ref_name }}-linux-amd64.tar.gz
+
+          docker pull --platform linux/amd64 "$image_ref"
+          docker save "$image_ref" | gzip -c > "artifacts/keywars-${RELEASE_VERSION}-linux-amd64.tar.gz"
           cp compose.yaml artifacts/
           cp .env.example artifacts/default.env.example
+          cp docs/airgap-install.md artifacts/AIRGAP_INSTALL.md
+
           python - <<'PY'
           import json
           import os
+          import re
           from pathlib import Path
 
           version = os.environ["RELEASE_VERSION"]
-          tags = [line for line in os.environ["IMAGE_TAGS"].splitlines() if line]
+          repository = os.environ["IMAGE_REPOSITORY"]
+          image_ref = f"{repository}:{version}"
+
+          compose_path = Path("artifacts/compose.yaml")
+          compose = compose_path.read_text(encoding="utf-8")
+          compose, replacements = re.subn(
+              r"\$\{KEYWARS_IMAGE:-[^}]+\}",
+              "${KEYWARS_IMAGE:-" + repository + "}",
+              compose,
+              count=1,
+          )
+          if replacements != 1:
+              raise SystemExit("compose.yaml does not expose the KEYWARS_IMAGE default")
+          compose_path.write_text(compose, encoding="utf-8")
+
+          env_path = Path("artifacts/default.env.example")
+          env_text = env_path.read_text(encoding="utf-8")
+          env_text, image_replacements = re.subn(
+              r"(?m)^KEYWARS_IMAGE=.*$", f"KEYWARS_IMAGE={repository}", env_text, count=1
+          )
+          env_text, version_replacements = re.subn(
+              r"(?m)^KEYWARS_VERSION=.*$", f"KEYWARS_VERSION={version}", env_text, count=1
+          )
+          if image_replacements != 1 or version_replacements != 1:
+              raise SystemExit(".env.example must define KEYWARS_IMAGE and KEYWARS_VERSION")
+          env_path.write_text(env_text, encoding="utf-8")
+
           manifest = {
-              "schema_version": 1,
+              "schema_version": 2,
               "version": version,
               "release_notes": "RELEASE_NOTES.md",
               "image": {
-                  "repository": "ghcr.io/${{ github.repository_owner }}/keywars",
-                  "tags": tags,
+                  "repository": repository,
+                  "image_ref": image_ref,
+                  "tags": [image_ref, f"{repository}:latest"],
                   "digest": os.environ["IMAGE_DIGEST"],
                   "sbom": "registry-attached",
                   "provenance": "registry-attached",
@@ -119,24 +216,24 @@ jobs:
                       "file": f"keywars-{version}-linux-amd64.tar.gz",
                       "platform": "linux/amd64",
                       "format": "docker-save-tar-gzip",
+                      "image_ref": image_ref,
                   }
               ],
               "deployment_files": ["compose.yaml", "default.env.example"],
+              "documentation_files": ["AIRGAP_INSTALL.md", "RELEASE_NOTES.md"],
           }
-          Path("artifacts/RELEASE_MANIFEST.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+          Path("artifacts/RELEASE_MANIFEST.json").write_text(
+              json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+          )
 
           changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
-          section_header = f"## {version} "
-          start = changelog.find(section_header)
-          if start < 0:
-              raise SystemExit(f"CHANGELOG.md has no section for {version}")
-          body_start = changelog.find("\n", start) + 1
-          body_end = changelog.find("\n## ", body_start)
-          if body_end < 0:
-              body_end = len(changelog)
-          changes = changelog[body_start:body_end].strip()
-          if not changes:
-              raise SystemExit(f"CHANGELOG.md section for {version} is empty")
+          match = re.search(
+              rf"(?ms)^## {re.escape(version)}(?:\s+-\s+[^\n]+)?\n(?P<body>.*?)(?=^## |\Z)",
+              changelog,
+          )
+          if match is None or not match.group("body").strip():
+              raise SystemExit(f"CHANGELOG.md has no non-empty section for {version}")
+          changes = match.group("body").strip()
 
           release_notes = f"""# KeyWars {version}
 
@@ -144,8 +241,7 @@ jobs:
 
           ## Container
 
-          - Repository: `ghcr.io/${{ github.repository_owner }}/keywars`
-          - Tags: {', '.join(f'`{tag}`' for tag in tags)}
+          - Image: `{image_ref}`
           - Multi-Arch-Digest: `{os.environ['IMAGE_DIGEST']}`
           - Plattformen: `linux/amd64`, `linux/arm64`
           - SBOM und Provenance: als Registry-Attestierungen veröffentlicht
@@ -154,16 +250,39 @@ jobs:
 
           - Offline-Image für `linux/amd64`
           - `compose.yaml` und `default.env.example`
-          - `RELEASE_MANIFEST.json` mit Image-Digest und Tags
+          - `AIRGAP_INSTALL.md` für die Offline-Inbetriebnahme
+          - `RELEASE_MANIFEST.json` mit Image-Referenz und Digest
           - `SHA256SUMS` zur Integritätsprüfung
           """
           release_notes = "\n".join(line.strip() for line in release_notes.strip().splitlines()) + "\n"
           Path("artifacts/RELEASE_NOTES.md").write_text(release_notes, encoding="utf-8")
           PY
-          (cd artifacts && sha256sum keywars-${{ github.ref_name }}-linux-amd64.tar.gz compose.yaml default.env.example RELEASE_MANIFEST.json RELEASE_NOTES.md > SHA256SUMS)
-      - name: Verify release artifacts
-        run: python scripts/check_release_artifacts.py artifacts "${{ github.ref_name }}"
-      - uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+
+          (
+            cd artifacts
+            sha256sum \
+              "keywars-${RELEASE_VERSION}-linux-amd64.tar.gz" \
+              compose.yaml \
+              default.env.example \
+              AIRGAP_INSTALL.md \
+              RELEASE_MANIFEST.json \
+              RELEASE_NOTES.md > SHA256SUMS
+          )
+      - name: Verify release artifacts before publication
+        run: python scripts/check_release_artifacts.py artifacts "${{ needs.verify.outputs.version }}"
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           body_path: artifacts/RELEASE_NOTES.md
+          fail_on_unmatched_files: true
           files: artifacts/*
+      - name: Download published release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir published-artifacts
+          gh release download "${{ needs.verify.outputs.version }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir published-artifacts
+      - name: Verify published release assets
+        run: python scripts/check_release_artifacts.py published-artifacts "${{ needs.verify.outputs.version }}"

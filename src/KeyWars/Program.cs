@@ -88,6 +88,7 @@ builder.Services.AddSingleton<ILiveRoomCompletionSink>(services => services.GetR
 builder.Services.AddSingleton<IHostedService>(services => services.GetRequiredService<LiveRoomCompletionQueue>());
 builder.Services.AddSingleton<ILiveProgressSender, SignalRLiveProgressSender>();
 builder.Services.AddSingleton<LiveProgressBroadcaster>();
+builder.Services.AddSingleton<ILiveRoomUpdateSender, SignalRLiveRoomUpdateSender>();
 builder.Services.AddSingleton<LiveReactionService>();
 builder.Services.AddSingleton<LiveRoomManager>();
 builder.Services.AddSingleton<LivePresenceTracker>();

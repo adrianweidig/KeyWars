@@ -24,7 +24,7 @@
 <section class="page-header arena-page-header">
     <div>
         <h1>@Model.Snapshot.Title</h1>
-        <p class="lead">@DisplayNames.For(Model.Snapshot.Mode) · <span data-arena-round-label>Runde @Model.Snapshot.CurrentRound von @Model.Snapshot.RoundCount</span> · @Model.Snapshot.Participants.Count @(Model.Snapshot.Participants.Count == 1 ? "Person" : "Personen")</p>
+        <p class="lead">@DisplayNames.For(Model.Snapshot.Mode) · <span data-arena-round-label>Runde @Model.Snapshot.CurrentRound von @Model.Snapshot.RoundCount</span> · <span data-arena-participant-count>@Model.Snapshot.Participants.Count @(Model.Snapshot.Participants.Count == 1 ? "Person" : "Personen")</span></p>
         <div class="room-code-share">
             <span class="room-code">Code <strong>@Model.Snapshot.Code</strong></span>
             <button type="button" class="secondary compact-button" data-copy-text="@Model.Snapshot.Code" data-copy-success="Raumcode kopiert.">Code kopieren</button>
@@ -39,12 +39,9 @@
                 <button type="submit" class="secondary" disabled>@readyButtonText</button>
             </form>
         }
-        @if (isHost && (inLobby || betweenRounds))
-        {
-            <form method="post" asp-page-handler="Start" data-arena-start-form>
-                <button type="submit" disabled>@(betweenRounds ? "Nächste Runde" : "Starten")</button>
-            </form>
-        }
+        <form method="post" asp-page-handler="Start" data-arena-start-form class="@((isHost && (inLobby || betweenRounds)) ? "" : "is-hidden")">
+            <button type="submit" disabled>@(betweenRounds ? "Nächste Runde" : "Starten")</button>
+        </form>
         <button type="button" class="secondary arena-leave-button" data-arena-leave disabled>Raum verlassen</button>
     </div>
 </section>
@@ -154,7 +151,6 @@
             <div class="arena-scale-note">
                 <strong data-arena-mode-label>@DisplayModeLabel(displayMode)</strong>
                 <span data-arena-roster-summary>@RosterSummary(rankedParticipants.Count, visibleParticipants.Count, Model.Snapshot.MaxParticipants)</span>
-                <span data-arena-spectator-summary>Zuschauerrolle vorbereitet</span>
                 <span data-arena-connection-quality role="status" aria-live="polite" aria-atomic="true">Verbindung: wird aufgebaut</span>
             </div>
             <div class="race-track @displayMode" data-arena-track aria-label="Rennstrecke mit bestätigtem Fortschritt">

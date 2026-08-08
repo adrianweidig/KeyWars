@@ -26,13 +26,12 @@ test for any newly extracted business component.
 
 ## Local Verification
 
-Use the repository-local .NET runtime for `.slnx` support:
+Use a .NET 10 SDK from `PATH` and run the commands from the repository root:
 
 ```powershell
-$env:DOTNET_ROOT='F:\KeyWars\.dotnet'
-$env:PATH='F:\KeyWars\.dotnet;' + $env:PATH
-dotnet build .\KeyWars.slnx -c Release --no-restore
-dotnet test .\KeyWars.slnx -c Release --no-build --no-restore
+dotnet restore ./KeyWars.slnx --locked-mode
+dotnet build ./KeyWars.slnx -c Release --no-restore
+dotnet test ./KeyWars.slnx -c Release --no-build --no-restore
 ```
 
 Browser tests use Playwright and start the app through `tests/browser/start-keywars.mjs`:
@@ -46,9 +45,10 @@ UIA3 inspection through FlaUI and OpenCV screenshot analysis. They run in the
 main CI workflow on Windows and skip explicitly on other operating systems:
 
 ```powershell
-$env:KEYWARS_WINDOWS_UI_ARTIFACTS='F:\KeyWars\output\windows-ui'
-dotnet build .\tests\KeyWars.WindowsUiTests\KeyWars.WindowsUiTests.csproj -c Release --no-restore
-dotnet test .\tests\KeyWars.WindowsUiTests\KeyWars.WindowsUiTests.csproj -c Release --no-build --no-restore
+$repoRoot = (Resolve-Path .).Path
+$env:KEYWARS_WINDOWS_UI_ARTIFACTS = Join-Path $repoRoot 'output/windows-ui'
+dotnet build ./tests/KeyWars.WindowsUiTests/KeyWars.WindowsUiTests.csproj -c Release --no-restore
+dotnet test ./tests/KeyWars.WindowsUiTests/KeyWars.WindowsUiTests.csproj -c Release --no-build --no-restore
 ```
 
 Detailed prerequisites and overrides are documented in

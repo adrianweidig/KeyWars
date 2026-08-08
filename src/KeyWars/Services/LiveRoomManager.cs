@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
+using System.Text;
 using KeyWars.Domain;
 using Microsoft.Extensions.Options;
 
@@ -10,7 +11,8 @@ public sealed class LiveRoomManager(
     TimeProvider timeProvider,
     TypingEngine typingEngine,
     ILogger<LiveRoomManager> logger,
-    ILiveRoomCompletionSink? completionSink = null)
+    ILiveRoomCompletionSink? completionSink = null,
+    LiveProgressBroadcaster? progressBroadcaster = null)
 {
     private const int MinimumParticipants = 2;
     private const string RoomCodeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -30,16 +32,18 @@ public sealed class LiveRoomManager(
             throw new InvalidOperationException("Einladungsräume sind noch nicht implementiert. Verwende Code oder intern offene Räume.");
         }
 
+        var normalizedTarget = NormalizeArenaTarget(request.Text);
         var now = timeProvider.GetUtcNow();
         CleanupExpiredRooms(now);
         lock (createGate)
         {
-            if (completionSink is not null && !completionSink.CanAcceptNewRoom(rooms.Count))
+            var activeRoomCount = CountRoomsTowardCapacity();
+            if (completionSink is not null && !completionSink.CanAcceptNewRoom(activeRoomCount))
             {
                 throw new InvalidOperationException("Die Arena nimmt vorübergehend keine neuen Räume an, weil die Ergebnispersistenz ausgelastet ist.");
             }
 
-            if (rooms.Count >= options.Value.MaxConcurrentRooms)
+            if (activeRoomCount >= options.Value.MaxConcurrentRooms)
             {
                 throw new InvalidOperationException("Die maximale Anzahl gleichzeitiger Live-Räume ist erreicht.");
             }
@@ -51,7 +55,7 @@ public sealed class LiveRoomManager(
                 request.CreatorProfileId,
                 GenerateUniqueCode(),
                 string.IsNullOrWhiteSpace(request.Title) ? "Live-Raum" : request.Title.Trim(),
-                TypingEngine.NormalizeText(request.Text),
+                normalizedTarget,
                 request.Mode,
                 request.Visibility,
                 roundCount,
@@ -145,6 +149,8 @@ public sealed class LiveRoomManager(
             var now = timeProvider.GetUtcNow();
             completed = ApplyDisconnectTimeouts(room, now);
             AdvancePhase(room, now);
+            ApplyHostDisconnectRule(room);
+            TryAbortStrandedSeries(room, now);
             if (profileId != room.CreatorProfileId)
             {
                 throw new InvalidOperationException("Nur die Raumleitung darf das Rennen starten.");
@@ -306,11 +312,16 @@ public sealed class LiveRoomManager(
             }
             else if (room.Phase == LiveRoomPhase.RoundResults)
             {
-                participant.Status = ParticipantStatus.Disconnected;
+                participant.DisconnectedAt = now;
+                participant.Ready = false;
+            }
+            else if (participant.Status is ParticipantStatus.Finished or ParticipantStatus.Dnf)
+            {
                 participant.DisconnectedAt = now;
             }
 
             ApplyHostDisconnectRule(room);
+            TryAbortStrandedSeries(room, now);
             snapshot = SnapshotUnlocked(room, now);
         }
 
@@ -333,9 +344,37 @@ public sealed class LiveRoomManager(
         return QueuePersistence(completed, snapshot);
     }
 
-    public void Sweep()
+    public IReadOnlyList<LiveRoomSnapshot> Sweep()
     {
-        CleanupExpiredRooms(timeProvider.GetUtcNow());
+        var now = timeProvider.GetUtcNow();
+        var changedSnapshots = new List<LiveRoomSnapshot>();
+        foreach (var room in rooms.Values)
+        {
+            CompletedRoomRecord? completed;
+            LiveRoomSnapshot? changedSnapshot = null;
+            lock (room.Gate)
+            {
+                var previousVersion = room.RoundVersion;
+                completed = ApplyDisconnectTimeouts(room, now);
+                AdvancePhase(room, now);
+                if (room.RoundVersion != previousVersion)
+                {
+                    changedSnapshot = SnapshotUnlocked(room, now);
+                }
+            }
+
+            if (changedSnapshot is not null)
+            {
+                changedSnapshots.Add(QueuePersistence(completed, changedSnapshot));
+            }
+            else
+            {
+                QueuePersistence(completed);
+            }
+        }
+
+        CleanupExpiredRooms(now);
+        return changedSnapshots;
     }
 
     public void RemoveProfile(Guid profileId)
@@ -354,6 +393,8 @@ public sealed class LiveRoomManager(
                 room.ExcludedProfileIds.Add(profileId);
                 if (participant.Status is ParticipantStatus.Finished or ParticipantStatus.Dnf or ParticipantStatus.LeftBeforeStart)
                 {
+                    ApplyHostDisconnectRule(room);
+                    TryAbortStrandedSeries(room, now);
                     continue;
                 }
 
@@ -375,6 +416,9 @@ public sealed class LiveRoomManager(
                     LiveRoomScoring.ApplyPlacements(room);
                     completed = TryCompleteRoom(room, now);
                 }
+
+                ApplyHostDisconnectRule(room);
+                TryAbortStrandedSeries(room, now);
             }
 
             QueuePersistence(completed);
@@ -446,9 +490,10 @@ public sealed class LiveRoomManager(
                     existing.Status = room.Phase == LiveRoomPhase.Running
                         ? ParticipantStatus.Running
                         : existing.Ready ? ParticipantStatus.Ready : ParticipantStatus.Joined;
-                    existing.DisconnectedAt = null;
                 }
 
+                existing.DisconnectedAt = null;
+                ApplyHostDisconnectRule(room);
                 snapshot = SnapshotUnlocked(room, now);
             }
             else
@@ -479,6 +524,7 @@ public sealed class LiveRoomManager(
                     ParticipantStatus.Joined,
                     now,
                     room.Mode == LiveRoomMode.Team ? NextTeamNumber(room) : null);
+                ApplyHostDisconnectRule(room);
                 snapshot = SnapshotUnlocked(room, now);
             }
         }
@@ -581,27 +627,32 @@ public sealed class LiveRoomManager(
         if (changed)
         {
             LiveRoomScoring.ApplyPlacements(room);
+            room.RoundVersion++;
         }
 
-        return TryCompleteRoom(room, now);
+        var completed = TryCompleteRoom(room, now);
+        ApplyHostDisconnectRule(room);
+        TryAbortStrandedSeries(room, now);
+        return completed;
     }
 
     private static void ApplyHostDisconnectRule(LiveRoomState room)
     {
-        if (room.Phase != LiveRoomPhase.Lobby)
+        if (room.Phase is not (LiveRoomPhase.Lobby or LiveRoomPhase.RoundResults))
         {
             return;
         }
 
         if (room.Participants.TryGetValue(room.CreatorProfileId, out var creator) &&
-            creator.Status is ParticipantStatus.Joined or ParticipantStatus.Ready)
+            IsHostCandidate(room, creator))
         {
             return;
         }
 
         var nextHost = room.Participants.Values
-            .Where(IsLobbyActive)
+            .Where(participant => IsHostCandidate(room, participant))
             .OrderBy(item => item.JoinedAt)
+            .ThenBy(item => item.ProfileId)
             .FirstOrDefault();
         if (nextHost is null || nextHost.ProfileId == room.CreatorProfileId)
         {
@@ -610,6 +661,53 @@ public sealed class LiveRoomManager(
 
         room.CreatorProfileId = nextHost.ProfileId;
         room.RoundVersion++;
+    }
+
+    private void TryAbortStrandedSeries(LiveRoomState room, DateTimeOffset now)
+    {
+        if (room.Phase != LiveRoomPhase.RoundResults || room.Finished)
+        {
+            return;
+        }
+
+        var eligible = room.Participants.Values
+            .Where(participant =>
+                !room.ExcludedProfileIds.Contains(participant.ProfileId) &&
+                participant.Status != ParticipantStatus.LeftBeforeStart)
+            .ToArray();
+        if (eligible.Length == 0 || eligible.Any(participant => participant.DisconnectedAt is null))
+        {
+            return;
+        }
+
+        var grace = TimeSpan.FromSeconds(Math.Clamp(options.Value.ReconnectGraceSeconds, 0, 300));
+        if (eligible.Any(participant => now - participant.DisconnectedAt!.Value < grace))
+        {
+            return;
+        }
+
+        room.Finished = true;
+        room.FinishedAt = now;
+        room.RoundEndsAt = now;
+        room.Phase = LiveRoomPhase.Aborted;
+        room.PhaseChangedAt = now;
+        room.CloseReason = "Die Serie wurde beendet, weil nach der Wiederverbindungsfrist niemand mehr verbunden war.";
+        room.PersistenceState = CompletionState.AbortedUnconfirmed;
+        room.RoundVersion++;
+    }
+
+    private static bool IsHostCandidate(LiveRoomState room, LiveParticipantState participant)
+    {
+        if (room.ExcludedProfileIds.Contains(participant.ProfileId) ||
+            participant.Status == ParticipantStatus.LeftBeforeStart ||
+            participant.DisconnectedAt is not null)
+        {
+            return false;
+        }
+
+        return room.Phase == LiveRoomPhase.Lobby
+            ? IsLobbyActive(participant)
+            : participant.Status is ParticipantStatus.Finished or ParticipantStatus.Dnf;
     }
 
     private CompletedRoomRecord? TryCompleteRoom(LiveRoomState room, DateTimeOffset now)
@@ -651,6 +749,8 @@ public sealed class LiveRoomManager(
         if (room.Phase == LiveRoomPhase.RoundResults)
         {
             room.PersistenceState = null;
+            ApplyHostDisconnectRule(room);
+            TryAbortStrandedSeries(room, now);
             return null;
         }
 
@@ -659,6 +759,23 @@ public sealed class LiveRoomManager(
         LiveRoomScoring.ApplyOverallPlacements(room);
         room.PersistenceState = CompletionState.Pending;
         return BuildPersistenceRecord(room);
+    }
+
+    private int CountRoomsTowardCapacity()
+    {
+        var count = 0;
+        foreach (var room in rooms.Values)
+        {
+            lock (room.Gate)
+            {
+                if (!room.Finished)
+                {
+                    count++;
+                }
+            }
+        }
+
+        return count;
     }
 
     private void CleanupExpiredRooms(DateTimeOffset now)
@@ -684,8 +801,13 @@ public sealed class LiveRoomManager(
                 continue;
             }
 
-            rooms.TryRemove(room.Id, out _);
+            if (!rooms.TryRemove(room.Id, out _))
+            {
+                continue;
+            }
+
             roomCodes.TryRemove(room.Code, out _);
+            progressBroadcaster?.RemoveRoom(room.Id);
         }
     }
 
@@ -694,6 +816,27 @@ public sealed class LiveRoomManager(
         var teamOne = room.Participants.Values.Count(item => item.TeamNumber == 1 && CountsTowardCapacity(item));
         var teamTwo = room.Participants.Values.Count(item => item.TeamNumber == 2 && CountsTowardCapacity(item));
         return teamOne <= teamTwo ? 1 : 2;
+    }
+
+    private string NormalizeArenaTarget(string text)
+    {
+        var normalized = TypingEngine.NormalizeText(text);
+        var graphemeLimit = Math.Clamp(
+            options.Value.MaxArenaTargetGraphemes,
+            1,
+            LiveOptions.MaximumSafeArenaTargetGraphemes);
+        if (TypingEngine.SplitGraphemes(normalized).Count > graphemeLimit)
+        {
+            throw new InvalidOperationException($"Arena-Zieltexte dürfen höchstens {graphemeLimit} Grapheme enthalten.");
+        }
+
+        if (Encoding.UTF8.GetByteCount(normalized) > LiveOptions.MaximumSafeArenaTargetUtf8Bytes)
+        {
+            throw new InvalidOperationException(
+                $"Arena-Zieltexte dürfen höchstens {LiveOptions.MaximumSafeArenaTargetUtf8Bytes / 1024} KiB UTF-8 umfassen.");
+        }
+
+        return normalized;
     }
 
     private void BeginCountdown(LiveRoomState room, DateTimeOffset now)

@@ -34,6 +34,10 @@ public sealed record AttemptStart(Guid AttemptId, string Nonce, string Text, Dat
 public sealed class TypingEngine(TimeProvider timeProvider)
 {
     private static readonly char[] WordSeparators = [' ', '\r', '\n', '\t'];
+    private const long ExactAlignmentCellLimit = 1_000_000;
+    private const int BandedAlignmentMaxDistance = 128;
+    private const int BandedAlignmentWidth = BandedAlignmentMaxDistance * 2 + 1;
+    private const int AlignmentCheckpointBlockSize = 256;
 
     public AttemptStart Start(string text)
     {
@@ -110,74 +114,410 @@ public sealed class TypingEngine(TimeProvider timeProvider)
 
     private static List<AlignmentStep> Align(IReadOnlyList<string> targetElements, IReadOnlyList<string> inputElements)
     {
-        var targetCount = targetElements.Count;
-        var inputCount = inputElements.Count;
-        var distance = new int[targetCount + 1, inputCount + 1];
-        var operation = new AlignmentOperation[targetCount + 1, inputCount + 1];
-
-        for (var index = 1; index <= targetCount; index++)
+        var suffixLength = 0;
+        while (suffixLength < targetElements.Count &&
+               suffixLength < inputElements.Count &&
+               StringComparer.Ordinal.Equals(
+                   targetElements[targetElements.Count - suffixLength - 1],
+                   inputElements[inputElements.Count - suffixLength - 1]))
         {
-            distance[index, 0] = index;
-            operation[index, 0] = AlignmentOperation.Delete;
+            suffixLength++;
         }
 
-        for (var index = 1; index <= inputCount; index++)
+        var targetPrefixLength = targetElements.Count - suffixLength;
+        var inputPrefixLength = inputElements.Count - suffixLength;
+        var steps = AlignPrefixes(targetElements, targetPrefixLength, inputElements, inputPrefixLength);
+        for (var index = 0; index < suffixLength; index++)
         {
-            distance[0, index] = index;
-            operation[0, index] = AlignmentOperation.Insert;
+            steps.Add(new AlignmentStep(
+                AlignmentOperation.Match,
+                targetPrefixLength + index,
+                inputPrefixLength + index));
         }
 
-        for (var targetIndex = 1; targetIndex <= targetCount; targetIndex++)
+        return steps;
+    }
+
+    private static List<AlignmentStep> AlignPrefixes(
+        IReadOnlyList<string> targetElements,
+        int targetLength,
+        IReadOnlyList<string> inputElements,
+        int inputLength)
+    {
+        if (targetLength == 0)
         {
-            for (var inputIndex = 1; inputIndex <= inputCount; inputIndex++)
+            var insertions = new List<AlignmentStep>(inputLength);
+            for (var inputIndex = 0; inputIndex < inputLength; inputIndex++)
             {
-                var matches = StringComparer.Ordinal.Equals(targetElements[targetIndex - 1], inputElements[inputIndex - 1]);
-                var substituteCost = distance[targetIndex - 1, inputIndex - 1] + (matches ? 0 : 1);
-                var deleteCost = distance[targetIndex - 1, inputIndex] + 1;
-                var insertCost = distance[targetIndex, inputIndex - 1] + 1;
-
-                var bestCost = substituteCost;
-                var bestOperation = matches ? AlignmentOperation.Match : AlignmentOperation.Substitute;
-                if (deleteCost < bestCost)
-                {
-                    bestCost = deleteCost;
-                    bestOperation = AlignmentOperation.Delete;
-                }
-
-                if (insertCost < bestCost)
-                {
-                    bestCost = insertCost;
-                    bestOperation = AlignmentOperation.Insert;
-                }
-
-                distance[targetIndex, inputIndex] = bestCost;
-                operation[targetIndex, inputIndex] = bestOperation;
+                insertions.Add(new AlignmentStep(AlignmentOperation.Insert, 0, inputIndex));
             }
+
+            return insertions;
         }
 
-        var steps = new List<AlignmentStep>();
-        var targetCursor = targetCount;
-        var inputCursor = inputCount;
+        if (inputLength == 0)
+        {
+            var deletions = new List<AlignmentStep>(targetLength);
+            for (var targetIndex = 0; targetIndex < targetLength; targetIndex++)
+            {
+                deletions.Add(new AlignmentStep(AlignmentOperation.Delete, targetIndex, -1));
+            }
+
+            return deletions;
+        }
+
+        var cellCount = ((long)targetLength + 1) * (inputLength + 1);
+        if (cellCount <= ExactAlignmentCellLimit)
+        {
+            return AlignExact(targetElements, targetLength, inputElements, inputLength);
+        }
+
+        var bandedSteps = TryAlignBanded(targetElements, targetLength, inputElements, inputLength);
+        if (bandedSteps is not null)
+        {
+            return bandedSteps;
+        }
+
+        if (HaveNoCommonElements(targetElements, targetLength, inputElements, inputLength))
+        {
+            return AlignWithoutMatches(targetLength, inputLength);
+        }
+
+        return AlignWithCheckpoints(targetElements, targetLength, inputElements, inputLength);
+    }
+
+    private static List<AlignmentStep> AlignExact(
+        IReadOnlyList<string> targetElements,
+        int targetLength,
+        IReadOnlyList<string> inputElements,
+        int inputLength)
+    {
+        var columns = inputLength + 1;
+        var operations = new AlignmentOperation[checked((targetLength + 1) * columns)];
+        var previous = new int[columns];
+        var current = new int[columns];
+        for (var inputIndex = 1; inputIndex <= inputLength; inputIndex++)
+        {
+            previous[inputIndex] = inputIndex;
+            operations[inputIndex] = AlignmentOperation.Insert;
+        }
+
+        for (var targetIndex = 1; targetIndex <= targetLength; targetIndex++)
+        {
+            CalculateFullDistanceRow(
+                targetElements, targetIndex, inputElements, inputLength,
+                previous, current, operations, targetIndex, columns);
+            (previous, current) = (current, previous);
+        }
+
+        return TraceBackFull(operations, targetLength, inputLength, columns);
+    }
+
+    private static List<AlignmentStep>? TryAlignBanded(
+        IReadOnlyList<string> targetElements,
+        int targetLength,
+        IReadOnlyList<string> inputElements,
+        int inputLength)
+    {
+        if (Math.Abs((long)targetLength - inputLength) > BandedAlignmentMaxDistance ||
+            targetLength > (int.MaxValue / BandedAlignmentWidth) - 1)
+        {
+            return null;
+        }
+
+        if (CalculateBandedDistance(targetElements, targetLength, inputElements, inputLength, null) >
+            BandedAlignmentMaxDistance)
+        {
+            return null;
+        }
+
+        var operations = new AlignmentOperation[checked((targetLength + 1) * BandedAlignmentWidth)];
+        CalculateBandedDistance(targetElements, targetLength, inputElements, inputLength, operations);
+
+        var steps = new List<AlignmentStep>(Math.Max(targetLength, inputLength));
+        var targetCursor = targetLength;
+        var inputCursor = inputLength;
         while (targetCursor > 0 || inputCursor > 0)
         {
-            var current = operation[targetCursor, inputCursor];
-            switch (current)
+            var operation = operations[GetBandedOperationIndex(targetCursor, inputCursor)];
+            AppendReverseStep(operation, ref targetCursor, ref inputCursor, steps);
+        }
+
+        steps.Reverse();
+        return steps;
+    }
+
+    private static int CalculateBandedDistance(
+        IReadOnlyList<string> targetElements,
+        int targetLength,
+        IReadOnlyList<string> inputElements,
+        int inputLength,
+        AlignmentOperation[]? operations)
+    {
+        const int unreachable = int.MaxValue / 4;
+        var previous = new int[inputLength + 1];
+        var current = new int[inputLength + 1];
+        var initialInputEnd = Math.Min(inputLength, BandedAlignmentMaxDistance);
+        for (var inputIndex = 1; inputIndex <= initialInputEnd; inputIndex++)
+        {
+            previous[inputIndex] = inputIndex;
+            if (operations is not null)
             {
-                case AlignmentOperation.Match:
-                case AlignmentOperation.Substitute:
-                    targetCursor--;
-                    inputCursor--;
-                    steps.Add(new AlignmentStep(current, targetCursor, inputCursor));
-                    break;
-                case AlignmentOperation.Delete:
-                    targetCursor--;
-                    steps.Add(new AlignmentStep(current, targetCursor, -1));
-                    break;
-                case AlignmentOperation.Insert:
-                    inputCursor--;
-                    steps.Add(new AlignmentStep(current, targetCursor, inputCursor));
-                    break;
+                operations[GetBandedOperationIndex(0, inputIndex)] = AlignmentOperation.Insert;
             }
+        }
+
+        for (var targetIndex = 1; targetIndex <= targetLength; targetIndex++)
+        {
+            var inputStart = Math.Max(0, targetIndex - BandedAlignmentMaxDistance);
+            var inputEnd = Math.Min(inputLength, targetIndex + BandedAlignmentMaxDistance);
+            var previousInputEnd = Math.Min(inputLength, targetIndex - 1 + BandedAlignmentMaxDistance);
+            if (inputStart == 0)
+            {
+                current[0] = targetIndex;
+                if (operations is not null)
+                {
+                    operations[GetBandedOperationIndex(targetIndex, 0)] = AlignmentOperation.Delete;
+                }
+            }
+
+            for (var inputIndex = Math.Max(1, inputStart); inputIndex <= inputEnd; inputIndex++)
+            {
+                var matches = StringComparer.Ordinal.Equals(
+                    targetElements[targetIndex - 1], inputElements[inputIndex - 1]);
+                var substituteCost = previous[inputIndex - 1] + (matches ? 0 : 1);
+                var deleteCost = inputIndex <= previousInputEnd ? previous[inputIndex] + 1 : unreachable;
+                var insertCost = inputIndex > inputStart ? current[inputIndex - 1] + 1 : unreachable;
+                current[inputIndex] = SelectAlignment(
+                    matches, substituteCost, deleteCost, insertCost, out var operation);
+                if (operations is not null)
+                {
+                    operations[GetBandedOperationIndex(targetIndex, inputIndex)] = operation;
+                }
+            }
+
+            (previous, current) = (current, previous);
+        }
+
+        return previous[inputLength];
+    }
+
+    private static int GetBandedOperationIndex(int targetIndex, int inputIndex)
+    {
+        return checked(
+            targetIndex * BandedAlignmentWidth +
+            inputIndex - targetIndex + BandedAlignmentMaxDistance);
+    }
+
+    private static bool HaveNoCommonElements(
+        IReadOnlyList<string> targetElements, int targetLength,
+        IReadOnlyList<string> inputElements, int inputLength)
+    {
+        var targetIsSmaller = targetLength <= inputLength;
+        var smallerElements = targetIsSmaller ? targetElements : inputElements;
+        var smallerLength = targetIsSmaller ? targetLength : inputLength;
+        var largerElements = targetIsSmaller ? inputElements : targetElements;
+        var largerLength = targetIsSmaller ? inputLength : targetLength;
+        var distinctElements = new HashSet<string>(StringComparer.Ordinal);
+        for (var index = 0; index < smallerLength; index++)
+        {
+            distinctElements.Add(smallerElements[index]);
+        }
+
+        for (var index = 0; index < largerLength; index++)
+        {
+            if (distinctElements.Contains(largerElements[index]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static List<AlignmentStep> AlignWithoutMatches(int targetLength, int inputLength)
+    {
+        var steps = new List<AlignmentStep>(Math.Max(targetLength, inputLength));
+        var targetOffset = Math.Max(0, targetLength - inputLength);
+        var inputOffset = Math.Max(0, inputLength - targetLength);
+        for (var targetIndex = 0; targetIndex < targetOffset; targetIndex++)
+        {
+            steps.Add(new AlignmentStep(AlignmentOperation.Delete, targetIndex, -1));
+        }
+
+        for (var inputIndex = 0; inputIndex < inputOffset; inputIndex++)
+        {
+            steps.Add(new AlignmentStep(AlignmentOperation.Insert, 0, inputIndex));
+        }
+
+        var pairedLength = Math.Min(targetLength, inputLength);
+        for (var index = 0; index < pairedLength; index++)
+        {
+            steps.Add(new AlignmentStep(
+                AlignmentOperation.Substitute,
+                targetOffset + index,
+                inputOffset + index));
+        }
+
+        return steps;
+    }
+
+    private static int SelectAlignment(
+        bool matches, int substituteCost, int deleteCost, int insertCost,
+        out AlignmentOperation operation)
+    {
+        var bestCost = substituteCost;
+        operation = matches ? AlignmentOperation.Match : AlignmentOperation.Substitute;
+
+        // Strict comparisons preserve the public diagonal, delete, insert tie order.
+        if (deleteCost < bestCost)
+        {
+            bestCost = deleteCost;
+            operation = AlignmentOperation.Delete;
+        }
+
+        if (insertCost < bestCost)
+        {
+            bestCost = insertCost;
+            operation = AlignmentOperation.Insert;
+        }
+
+        return bestCost;
+    }
+
+    private static void CalculateFullDistanceRow(
+        IReadOnlyList<string> target, int targetIndex, IReadOnlyList<string> input, int inputLength,
+        int[] previous, int[] current, AlignmentOperation[]? operations = null,
+        int operationRow = 0, int operationColumns = 0)
+    {
+        current[0] = targetIndex;
+        if (operations is not null)
+        {
+            operations[operationRow * operationColumns] = AlignmentOperation.Delete;
+        }
+
+        for (var inputIndex = 1; inputIndex <= inputLength; inputIndex++)
+        {
+            var matches = StringComparer.Ordinal.Equals(target[targetIndex - 1], input[inputIndex - 1]);
+            current[inputIndex] = SelectAlignment(
+                matches,
+                previous[inputIndex - 1] + (matches ? 0 : 1),
+                previous[inputIndex] + 1,
+                current[inputIndex - 1] + 1,
+                out var operation);
+            if (operations is not null)
+            {
+                operations[operationRow * operationColumns + inputIndex] = operation;
+            }
+        }
+    }
+
+    private static List<AlignmentStep> TraceBackFull(
+        AlignmentOperation[] operations, int targetLength, int inputLength, int columns)
+    {
+        var steps = new List<AlignmentStep>(Math.Max(targetLength, inputLength));
+        var targetCursor = targetLength;
+        var inputCursor = inputLength;
+        while (targetCursor > 0 || inputCursor > 0)
+        {
+            var operation = operations[targetCursor * columns + inputCursor];
+            AppendReverseStep(operation, ref targetCursor, ref inputCursor, steps);
+        }
+
+        steps.Reverse();
+        return steps;
+    }
+
+    private static void AppendReverseStep(
+        AlignmentOperation operation, ref int targetCursor, ref int inputCursor,
+        List<AlignmentStep> steps)
+    {
+        switch (operation)
+        {
+            case AlignmentOperation.Match:
+            case AlignmentOperation.Substitute:
+                targetCursor--;
+                inputCursor--;
+                steps.Add(new AlignmentStep(operation, targetCursor, inputCursor));
+                break;
+            case AlignmentOperation.Delete:
+                targetCursor--;
+                steps.Add(new AlignmentStep(operation, targetCursor, -1));
+                break;
+            case AlignmentOperation.Insert:
+                inputCursor--;
+                steps.Add(new AlignmentStep(operation, targetCursor, inputCursor));
+                break;
+            default:
+                throw new InvalidOperationException("Ungültiger Alignment-Zustand.");
+        }
+    }
+
+    // Stored distance rows and exact block recomputation preserve the original tie-breaking.
+    private static List<AlignmentStep> AlignWithCheckpoints(
+        IReadOnlyList<string> targetElements, int targetLength,
+        IReadOnlyList<string> inputElements, int inputLength)
+    {
+        var columns = inputLength + 1;
+        var previous = new int[columns];
+        var current = new int[columns];
+        for (var inputIndex = 1; inputIndex <= inputLength; inputIndex++)
+        {
+            previous[inputIndex] = inputIndex;
+        }
+
+        var checkpointCount = ((targetLength - 1) / AlignmentCheckpointBlockSize) + 1;
+        var checkpoints = new List<int[]>(checkpointCount)
+        {
+            (int[])previous.Clone()
+        };
+        for (var targetIndex = 1; targetIndex <= targetLength; targetIndex++)
+        {
+            CalculateFullDistanceRow(
+                targetElements, targetIndex, inputElements, inputLength, previous, current);
+            (previous, current) = (current, previous);
+            if (targetIndex % AlignmentCheckpointBlockSize == 0 && targetIndex < targetLength)
+            {
+                checkpoints.Add((int[])previous.Clone());
+            }
+        }
+
+        var blockOperations = new AlignmentOperation[
+            checked((AlignmentCheckpointBlockSize + 1) * columns)];
+        var steps = new List<AlignmentStep>(Math.Max(targetLength, inputLength));
+        var targetCursor = targetLength;
+        var inputCursor = inputLength;
+        while (targetCursor > 0)
+        {
+            var blockStart = ((targetCursor - 1) / AlignmentCheckpointBlockSize) *
+                AlignmentCheckpointBlockSize;
+            var blockHeight = targetCursor - blockStart;
+            Array.Copy(
+                checkpoints[blockStart / AlignmentCheckpointBlockSize],
+                previous,
+                inputCursor + 1);
+
+            for (var localTargetIndex = 1; localTargetIndex <= blockHeight; localTargetIndex++)
+            {
+                CalculateFullDistanceRow(
+                    targetElements, blockStart + localTargetIndex,
+                    inputElements, inputCursor, previous, current,
+                    blockOperations, localTargetIndex, columns);
+                (previous, current) = (current, previous);
+            }
+
+            while (targetCursor > blockStart)
+            {
+                var operation = blockOperations[
+                    (targetCursor - blockStart) * columns + inputCursor];
+                AppendReverseStep(operation, ref targetCursor, ref inputCursor, steps);
+            }
+        }
+
+        while (inputCursor > 0)
+        {
+            AppendReverseStep(
+                AlignmentOperation.Insert, ref targetCursor, ref inputCursor, steps);
         }
 
         steps.Reverse();
@@ -326,7 +666,7 @@ public sealed class TypingEngine(TimeProvider timeProvider)
         return NormalizeText(text).Split(WordSeparators, StringSplitOptions.RemoveEmptyEntries).Length;
     }
 
-    private enum AlignmentOperation
+    private enum AlignmentOperation : byte
     {
         Match,
         Substitute,

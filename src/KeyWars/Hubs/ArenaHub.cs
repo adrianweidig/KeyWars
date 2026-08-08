@@ -64,8 +64,9 @@ public sealed class ArenaHub(
 
     public async Task SubmitProgress(Guid roomId, int sequence, string input)
     {
-        var profile = await currentUser.RequireProfileAsync(Context.User!, Context.ConnectionAborted);
-        var result = rooms.SubmitProgressDelta(roomId, profile.Id, sequence, input);
+        var profileId = currentUser.GetProfileId(Context.User!)
+            ?? throw new InvalidOperationException("Die aktuelle Sitzung besitzt kein gültiges KeyWars-Profil.");
+        var result = rooms.SubmitProgressDelta(roomId, profileId, sequence, input);
         if (result.Snapshot is { } snapshot)
         {
             await Clients.Group(roomId.ToString("N")).SendAsync("roomChanged", snapshot, Context.ConnectionAborted);

@@ -1,4 +1,7 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0@sha256:72dd743782f2ae7e5476fd64f6a460045e3998dc862218b80e6944cba79a01b0 AS build
+ARG VERSION=0.1.0
+ARG REVISION=local
+ARG CREATED=unknown
 WORKDIR /src
 COPY NuGet.config Directory.Build.props KeyWars.slnx ./
 COPY src/KeyWars/KeyWars.csproj src/KeyWars/
@@ -17,7 +20,13 @@ COPY tools/KeyWars.LoadTest/KeyWars.LoadTest.csproj tools/KeyWars.LoadTest/
 COPY tools/KeyWars.LoadTest/packages.lock.json tools/KeyWars.LoadTest/
 RUN dotnet restore --locked-mode
 COPY . .
-RUN dotnet publish src/KeyWars/KeyWars.csproj -c Release -o /app/publish --no-restore -p:UseAppHost=false
+RUN dotnet publish src/KeyWars/KeyWars.csproj -c Release -o /app/publish --no-restore \
+    -p:UseAppHost=false \
+    -p:Version="${VERSION}" \
+    -p:InformationalVersion="${VERSION}+${REVISION}" \
+    -p:SourceRevisionId="${REVISION}" \
+    -p:IncludeSourceRevisionInInformationalVersion=false \
+    -p:ContinuousIntegrationBuild=true
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:f1126d438ccc359f51cc6d4701a8deae513856cf10f5fe645d29ea6403dcac6b AS runtime
 ARG VERSION=0.1.0

@@ -5,7 +5,6 @@ public sealed class LdapOptions
     public string Urls { get; set; } = "";
     public string BaseDn { get; set; } = "";
     public string UpnSuffix { get; set; } = "";
-    public string? NetbiosDomain { get; set; }
     public string? UserBaseDn { get; set; }
     public string? CaCertificatePath { get; set; }
     public int ConnectTimeoutSeconds { get; set; } = 5;

@@ -6,9 +6,9 @@ Viele Fortschrittsmeldungen dürfen nicht unbeschränkt Speicher aufbauen.
 
 ## Entscheidung
 
-Der heisse Progresspfad verwendet `LiveProgressBroadcaster` als begrenzten
+Der heiße Progresspfad verwendet `LiveProgressBroadcaster` als begrenzten
 Koaleszierer. Pro Raum wird nur das neueste Delta je Person gepuffert und
-hoechstens mit `KEYWARS__LIVE__PROGRESS_BROADCAST_HZ` gesendet.
+höchstens mit `KEYWARS__LIVE__PROGRESS_BROADCAST_HZ` gesendet.
 `KEYWARS__LIVE__ROOM_COMMAND_QUEUE_CAPACITY` begrenzt die Pending-Deltas; bei
 Überlast werden neue nichtkritische Progress-Deltas verworfen und in
 `/health/arena-progress` gezählt. Zuverlässige Commands wie Start, Finish,

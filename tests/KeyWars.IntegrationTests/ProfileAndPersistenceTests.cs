@@ -590,6 +590,7 @@ public sealed class ProfileAndPersistenceTests
                 ["KEYWARS:LIVE:COUNTDOWN_SECONDS"] = "4",
                 ["KEYWARS:LIVE:COMPLETION_QUEUE_CAPACITY"] = "32",
                 ["KEYWARS:LIVE:COMPLETION_DRAIN_TIMEOUT_SECONDS"] = "25",
+                ["KEYWARS:LIVE:MAX_ARENA_TARGET_GRAPHEMES"] = "1200",
                 ["KEYWARS:CONTENT:MAX_UPLOAD_BYTES"] = "4096",
                 ["KEYWARS:CONTENT:MAX_TEXT_CHARACTERS"] = "2048",
                 ["KEYWARS:CONTENT:MAX_TEXT_GRAPHEMES"] = "2040",
@@ -614,10 +615,30 @@ public sealed class ProfileAndPersistenceTests
         Assert.Equal(4, live.CountdownSeconds);
         Assert.Equal(32, live.CompletionQueueCapacity);
         Assert.Equal(25, live.CompletionDrainTimeoutSeconds);
+        Assert.Equal(1200, live.MaxArenaTargetGraphemes);
         Assert.Equal(4096, content.MaxUploadBytes);
         Assert.Equal(2048, content.MaxTextCharacters);
         Assert.Equal(2040, content.MaxTextGraphemes);
         Assert.Equal(80, content.MaxTextLines);
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("2801")]
+    [InlineData("ungültig")]
+    public void ArenaTargetConfigurationRejectsUnsafeValues(string configuredValue)
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["KEYWARS:LIVE:MAX_ARENA_TARGET_GRAPHEMES"] = configuredValue
+            })
+            .Build();
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            ConfigurationAliases.BindLive(configuration, new LiveOptions()));
+
+        Assert.Contains("zwischen 1 und 2800", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]

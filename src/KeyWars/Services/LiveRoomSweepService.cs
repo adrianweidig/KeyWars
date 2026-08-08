@@ -1,6 +1,10 @@
 namespace KeyWars.Services;
 
-public sealed class LiveRoomSweepService(LiveRoomManager rooms, TimeProvider timeProvider, ILogger<LiveRoomSweepService> logger) : BackgroundService
+public sealed class LiveRoomSweepService(
+    LiveRoomManager rooms,
+    ILiveRoomUpdateSender updateSender,
+    TimeProvider timeProvider,
+    ILogger<LiveRoomSweepService> logger) : BackgroundService
 {
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
@@ -21,7 +25,7 @@ public sealed class LiveRoomSweepService(LiveRoomManager rooms, TimeProvider tim
             try
             {
                 await timer.WaitForNextTickAsync(stoppingToken);
-                rooms.Sweep();
+                await SweepOnceAsync(stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -31,6 +35,14 @@ public sealed class LiveRoomSweepService(LiveRoomManager rooms, TimeProvider tim
             {
                 logger.LogError(ex, "Arena-Raum-Sweep ist fehlgeschlagen.");
             }
+        }
+    }
+
+    public async Task SweepOnceAsync(CancellationToken cancellationToken)
+    {
+        foreach (var snapshot in rooms.Sweep())
+        {
+            await updateSender.SendAsync(snapshot, cancellationToken);
         }
     }
 }
