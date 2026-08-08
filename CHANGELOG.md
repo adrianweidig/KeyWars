@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.4.9 - 2026-08-08
+
+- Restrict visual-asset downloads and every redirect to reviewed HTTPS hosts,
+  with focused regression coverage for the CodeQL substring bypasses.
+
 ## v0.4.8 - 2026-08-08
 
 - Keep multi-round arena series operable after a host disconnect, broadcast

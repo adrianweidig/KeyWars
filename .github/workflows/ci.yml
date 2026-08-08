@@ -49,6 +49,8 @@ jobs:
         run: npm ci
       - name: Verify Chrome browser
         run: google-chrome --version
+      - name: Test visual asset URL policy
+        run: npm run test:assets
       - name: Verify visual assets
         run: npm run assets:verify
       - name: Browser E2E
