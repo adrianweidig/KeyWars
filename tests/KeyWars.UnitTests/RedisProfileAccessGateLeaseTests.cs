@@ -7,6 +7,7 @@ using StackExchange.Redis;
 
 namespace KeyWars.UnitTests;
 
+[Collection(RedisLeaseTimingCollection.Name)]
 public sealed class RedisProfileAccessGateLeaseTests
 {
     [Fact]

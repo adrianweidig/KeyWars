@@ -4,6 +4,7 @@ using StackExchange.Redis;
 
 namespace KeyWars.UnitTests;
 
+[Collection(RedisLeaseTimingCollection.Name)]
 public sealed class RedisDistributedLeaseTests
 {
     [Fact]
@@ -237,4 +238,10 @@ public sealed class RedisDistributedLeaseTests
                 targetMethod ?? throw new InvalidOperationException("Redis-Proxyaufruf ohne Methode."),
                 args ?? []);
     }
+}
+
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class RedisLeaseTimingCollection
+{
+    public const string Name = "Redis lease timing";
 }
