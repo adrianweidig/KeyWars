@@ -8,9 +8,12 @@ namespace KeyWars.Services;
 public sealed record LiveProgressDelta(
     Guid RoomId,
     int RoomVersion,
+    long StateVersion,
     Guid ParticipantId,
+    int ParticipantSequence,
     int CorrectCharacters,
-    string TypedTextPreview,
+    int TypedCharacters,
+    string TypedStateBits,
     double Wpm,
     double Accuracy,
     int? RankHint);
@@ -62,6 +65,14 @@ public sealed class LiveProgressBroadcaster(
         TimeSpan? delay = null;
         lock (room.Gate)
         {
+            if (room.Latest.TryGetValue(delta.ParticipantId, out var latest) &&
+                delta.ParticipantSequence <= latest.ParticipantSequence)
+            {
+                Interlocked.Increment(ref droppedProgressMessages);
+                return;
+            }
+
+            room.Latest[delta.ParticipantId] = delta;
             if (room.Pending.ContainsKey(delta.ParticipantId))
             {
                 Interlocked.Increment(ref coalescedProgressMessages);
@@ -152,8 +163,15 @@ public sealed class LiveProgressBroadcaster(
 
     private static IReadOnlyList<LiveProgressDelta> DrainUnlocked(RoomProgressBuffer room, DateTimeOffset now)
     {
+        var ranks = room.Latest.Values
+            .OrderByDescending(delta => delta.CorrectCharacters)
+            .ThenByDescending(delta => delta.Wpm)
+            .ThenBy(delta => delta.ParticipantId)
+            .Select((delta, index) => new { delta.ParticipantId, Rank = index + 1 })
+            .ToDictionary(item => item.ParticipantId, item => item.Rank);
         var dueDeltas = room.Pending.Values
-            .OrderBy(delta => delta.RankHint ?? int.MaxValue)
+            .Select(delta => delta with { RankHint = ranks[delta.ParticipantId] })
+            .OrderBy(delta => delta.RankHint)
             .ThenBy(delta => delta.ParticipantId)
             .ToList();
         room.Pending.Clear();
@@ -169,15 +187,46 @@ public sealed class LiveProgressBroadcaster(
             return;
         }
 
-        var batch = new LiveProgressBatch(roomId, deltas.Max(delta => delta.RoomVersion), now, deltas);
-        await sender.SendAsync(roomId, batch, cancellationToken);
-        Interlocked.Increment(ref broadcastCount);
+        if (!rooms.TryGetValue(roomId, out var room))
+        {
+            return;
+        }
+
+        await room.SendGate.WaitAsync(CancellationToken.None);
+        try
+        {
+            var current = deltas
+                .Where(delta => !room.LastSentSequences.TryGetValue(delta.ParticipantId, out var sequence) || delta.ParticipantSequence > sequence)
+                .OrderBy(delta => delta.RankHint)
+                .ThenBy(delta => delta.ParticipantId)
+                .ToArray();
+            if (current.Length == 0)
+            {
+                return;
+            }
+
+            var batch = new LiveProgressBatch(roomId, current.Max(delta => delta.RoomVersion), now, current);
+            await sender.SendAsync(roomId, batch, CancellationToken.None);
+            foreach (var delta in current)
+            {
+                room.LastSentSequences[delta.ParticipantId] = delta.ParticipantSequence;
+            }
+
+            Interlocked.Increment(ref broadcastCount);
+        }
+        finally
+        {
+            room.SendGate.Release();
+        }
     }
 
     private sealed class RoomProgressBuffer
     {
         public object Gate { get; } = new();
         public Dictionary<Guid, LiveProgressDelta> Pending { get; } = [];
+        public Dictionary<Guid, LiveProgressDelta> Latest { get; } = [];
+        public Dictionary<Guid, int> LastSentSequences { get; } = [];
+        public SemaphoreSlim SendGate { get; } = new(1, 1);
         public DateTimeOffset LastBroadcastAt { get; set; }
         public bool FlushScheduled { get; set; }
     }

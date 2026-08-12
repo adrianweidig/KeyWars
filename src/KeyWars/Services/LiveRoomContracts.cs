@@ -52,7 +52,9 @@ public sealed record LiveRoomSnapshot(
     IReadOnlyList<LiveParticipantSnapshot> Participants,
     CompletionState? PersistenceState = null,
     IReadOnlyList<LiveTeamSnapshot>? Teams = null,
-    DateTimeOffset? RoundEndsAt = null);
+    DateTimeOffset? RoundEndsAt = null,
+    long StateVersion = 1,
+    bool LobbyLocked = false);
 
 public sealed record LiveProgressResult(
     LiveProgressDelta? Delta,
@@ -66,7 +68,38 @@ public sealed record CreateLiveRoomRequest(
     LiveRoomMode Mode,
     LiveRoomVisibility Visibility,
     int RoundCount,
-    int MaxParticipants);
+    int MaxParticipants,
+    IReadOnlyList<LiveRoomInvitation>? Invitations = null);
+
+public sealed record LiveRoomInvitation(Guid ProfileId, string DisplayName);
+
+public sealed record LiveRoomLobbySummary(
+    Guid RoomId,
+    Guid CreatorProfileId,
+    string CreatorDisplayName,
+    string Code,
+    string Title,
+    LiveRoomMode Mode,
+    LiveRoomVisibility Visibility,
+    LiveRoomPhase Phase,
+    int RoundCount,
+    int CurrentRound,
+    int ParticipantCount,
+    int MaxParticipants,
+    bool LobbyLocked,
+    long StateVersion);
+
+public sealed record LiveRoomLobbyPage(
+    IReadOnlyList<LiveRoomLobbySummary> Items,
+    int Offset,
+    int Limit,
+    int Total);
+
+public sealed record LiveRoomMetricsSnapshot(
+    int ActiveRooms,
+    int OpenRooms,
+    int RunningRooms,
+    int Participants);
 
 public sealed record CompletedRoomRecord(
     Guid Id,

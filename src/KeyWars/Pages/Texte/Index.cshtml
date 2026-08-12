@@ -10,7 +10,7 @@
         <h1>Texte</h1>
         <p class="lead">Wähle längere, sinnvolle Trainingsvorlagen oder pflege eigene Texte für realistische Tipp-Runden.</p>
         <div class="hero-stat-row" aria-label="Textbibliothek Status">
-            <span><strong>@Model.Texts.Count</strong> sichtbar</span>
+            <span><strong>@Model.TotalCount</strong> sichtbar</span>
             <span><strong>Privat</strong> möglich</span>
             <span><strong>Rating</strong> nur geeignete Texte</span>
         </div>
@@ -72,6 +72,13 @@
     </form>
 </section>
 
+@if (Model.TotalCount > 0)
+{
+    <p class="muted" role="status">
+        Treffer @Model.FirstVisibleNumber–@Model.LastVisibleNumber von @Model.TotalCount
+    </p>
+}
+
 <section class="grid text-library-grid">
     @if (Model.Texts.Count == 0)
     {
@@ -104,6 +111,39 @@
         </article>
     }
 </section>
+
+@if (Model.TotalPages > 1)
+{
+    <nav class="pagination" aria-label="Textbibliothek Seiten" data-text-pagination data-current-page="@Model.Seite" data-total-pages="@Model.TotalPages">
+        @if (Model.HasPreviousPage)
+        {
+            <a class="button secondary"
+               asp-page="/Texte/Index"
+               asp-route-Suche="@Model.Suche"
+               asp-route-Sichtbarkeit="@Model.Sichtbarkeit"
+               asp-route-Seite="@(Model.Seite - 1)"
+               data-page-direction="previous">Zurück</a>
+        }
+        else
+        {
+            <span class="button secondary" aria-disabled="true">Zurück</span>
+        }
+        <span aria-current="page">Seite @Model.Seite von @Model.TotalPages</span>
+        @if (Model.HasNextPage)
+        {
+            <a class="button secondary"
+               asp-page="/Texte/Index"
+               asp-route-Suche="@Model.Suche"
+               asp-route-Sichtbarkeit="@Model.Sichtbarkeit"
+               asp-route-Seite="@(Model.Seite + 1)"
+               data-page-direction="next">Weiter</a>
+        }
+        else
+        {
+            <span class="button secondary" aria-disabled="true">Weiter</span>
+        }
+    </nav>
+}
 
 <section class="text-library-mobile-actions card" aria-labelledby="text-library-mobile-actions-title">
     <div>

@@ -11,7 +11,7 @@ public sealed class AttemptService(
     TypingEngine typingEngine,
     MotivationService motivationService,
     TimeProvider timeProvider,
-    AttemptSessionStore sessionStore)
+    IAttemptSessionStateStore sessionStore)
 {
     private static readonly TimeSpan SessionLifetime = TimeSpan.FromHours(2);
     private static readonly TimeSpan MinimumDuration = TimeSpan.FromSeconds(1);
@@ -42,14 +42,14 @@ public sealed class AttemptService(
             Mode = request.Mode,
             Phase = AttemptPhase.Prepared,
             Nonce = session.Nonce,
-            TextHash = ComputeTextHash(session.Text),
+            TextHash = KeyWars.Domain.TextHash.Compute(session.Text),
             PreparedAt = session.PreparedAt,
             StartedAt = session.PreparedAt,
             Official = request.Mode != TrainingMode.Endless,
             LeaderboardEligible = CompetitionEligibility.CanEnterLeaderboardAtStart(request.Mode, resolvedText.Text)
         });
         await db.SaveChangesAsync(cancellationToken);
-        sessionStore.Add(session);
+        await sessionStore.AddAsync(session, SessionLifetime, cancellationToken);
         return session;
     }
 
@@ -66,7 +66,8 @@ public sealed class AttemptService(
             return null;
         }
 
-        if (!sessionStore.TryGet(attemptId, out var session) || session is null)
+        var session = await sessionStore.GetAsync(attemptId, cancellationToken);
+        if (session is null)
         {
             return null;
         }
@@ -94,7 +95,8 @@ public sealed class AttemptService(
             throw AttemptError(AttemptErrorCodes.Expired, GoneStatus, "Dieser Versuch ist abgelaufen.");
         }
 
-        if (!sessionStore.TryGet(request.AttemptId, out var session) || session is null)
+        var session = await sessionStore.GetAsync(request.AttemptId, cancellationToken);
+        if (session is null)
         {
             throw AttemptError(AttemptErrorCodes.Expired, GoneStatus, "Dieser Versuch ist nicht mehr aktiv.");
         }
@@ -111,7 +113,7 @@ public sealed class AttemptService(
         }
 
         var started = session with { Phase = AttemptPhase.Started, StartedAt = now };
-        if (!sessionStore.TryUpdate(session, started))
+        if (!await sessionStore.TryUpdateAsync(session, started, SessionLifetime, cancellationToken))
         {
             throw AttemptError(AttemptErrorCodes.Expired, GoneStatus, "Dieser Versuch ist nicht mehr aktiv.");
         }
@@ -128,7 +130,7 @@ public sealed class AttemptService(
         {
             attempt.Phase = previousPhase;
             attempt.StartedAt = previousStartedAt;
-            sessionStore.TryUpdate(started, session);
+            await sessionStore.TryUpdateAsync(started, session, SessionLifetime, CancellationToken.None);
             throw;
         }
 
@@ -147,7 +149,7 @@ public sealed class AttemptService(
         if (attempt.FinishedAt is not null && attempt.Phase == AttemptPhase.Finished)
         {
             var completion = await BuildPersistedCompletionAsync(profileId, attempt, cancellationToken);
-            sessionStore.TryRemove(request.AttemptId, out _);
+            await sessionStore.RemoveAsync(request.AttemptId, cancellationToken);
             return completion;
         }
 
@@ -156,7 +158,8 @@ public sealed class AttemptService(
             throw AttemptError(AttemptErrorCodes.Expired, GoneStatus, "Dieser Versuch ist abgelaufen.");
         }
 
-        if (!sessionStore.TryGet(request.AttemptId, out var session) || session is null)
+        var session = await sessionStore.GetAsync(request.AttemptId, cancellationToken);
+        if (session is null)
         {
             throw AttemptError(AttemptErrorCodes.Expired, GoneStatus, "Dieser Versuch ist nicht mehr aktiv.");
         }
@@ -172,7 +175,7 @@ public sealed class AttemptService(
         {
             attempt.Phase = AttemptPhase.Expired;
             await db.SaveChangesAsync(cancellationToken);
-            sessionStore.TryRemove(request.AttemptId, out _);
+            await sessionStore.RemoveAsync(request.AttemptId, cancellationToken);
             throw AttemptError(AttemptErrorCodes.Expired, GoneStatus, "Dieser Versuch ist abgelaufen.");
         }
 
@@ -240,7 +243,7 @@ public sealed class AttemptService(
             throw;
         }
 
-        sessionStore.TryRemove(request.AttemptId, out _);
+        await sessionStore.RemoveAsync(request.AttemptId, cancellationToken);
         return await BuildPersistedCompletionAsync(profileId, attempt, cancellationToken);
     }
 
@@ -287,10 +290,11 @@ public sealed class AttemptService(
 
     private async Task ExpireSessionsAsync(DateTimeOffset now, CancellationToken cancellationToken)
     {
-        foreach (var id in sessionStore.GetExpiredIds(now, SessionLifetime))
+        foreach (var id in await sessionStore.GetExpiredIdsAsync(now, SessionLifetime, cancellationToken))
         {
             await using var lifecycleLock = await sessionStore.AcquireLifecycleLockAsync(id, cancellationToken);
-            if (!sessionStore.TryRemoveExpired(id, now, SessionLifetime, out var expiredSession) || expiredSession is null)
+            var expiredSession = await sessionStore.TryRemoveExpiredAsync(id, now, SessionLifetime, cancellationToken);
+            if (expiredSession is null)
             {
                 continue;
             }
@@ -312,7 +316,7 @@ public sealed class AttemptService(
             catch
             {
                 attempt.Phase = previousPhase;
-                sessionStore.Add(expiredSession);
+                await sessionStore.AddAsync(expiredSession, SessionLifetime, CancellationToken.None);
                 throw;
             }
         }
@@ -483,16 +487,22 @@ public sealed class AttemptService(
             return new AttemptCompletion(attempt, MotivationOutcome.Empty(profile));
         }
 
-        var candidates = await db.GamificationEvents
-            .FromSqlInterpolated($"""
-                SELECT *
-                FROM GamificationEvents
-                WHERE UserProfileId = {profileId.ToString().ToUpperInvariant()}
-                  AND CreatedAt = {anchor.CreatedAt}
-                ORDER BY rowid
-                """)
-            .AsNoTracking()
-            .ToListAsync(cancellationToken);
+        var candidates = db.Database.IsSqlite()
+            ? await db.GamificationEvents
+                .FromSqlInterpolated($"""
+                    SELECT *
+                    FROM GamificationEvents
+                    WHERE UserProfileId = {profileId.ToString().ToUpperInvariant()}
+                      AND CreatedAt = {anchor.CreatedAt}
+                    ORDER BY rowid
+                    """)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken)
+            : await db.GamificationEvents
+                .AsNoTracking()
+                .Where(item => item.UserProfileId == profileId && item.CreatedAt == anchor.CreatedAt)
+                .OrderBy(item => item.Id)
+                .ToListAsync(cancellationToken);
         var anchorIndex = candidates.FindIndex(item => item.Id == anchor.Id);
         if (anchorIndex < 0)
         {
@@ -559,10 +569,4 @@ public sealed class AttemptService(
         int? retryAfterMs = null) =>
         new(code, statusCode, message, retryAfterMs);
 
-    private static string ComputeTextHash(string text)
-    {
-        var normalized = TypingEngine.NormalizeText(text);
-        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(normalized));
-        return $"sha256:{Convert.ToHexString(hash).ToLowerInvariant()}";
-    }
 }

@@ -6,10 +6,17 @@ namespace KeyWars.Infrastructure;
 
 public static class StartupValidator
 {
-    public static void Validate(IConfiguration configuration, IHostEnvironment environment, ILogger logger)
+    public static void Validate(
+        IConfiguration configuration,
+        IHostEnvironment environment,
+        ILogger logger,
+        bool ensureDataDirectory = true)
     {
-        var dataDirectory = DataPaths.Resolve(configuration, environment);
-        DataPaths.EnsureWritable(dataDirectory);
+        if (ensureDataDirectory)
+        {
+            var dataDirectory = DataPaths.Resolve(configuration, environment);
+            DataPaths.EnsureWritable(dataDirectory);
+        }
 
         var ldapOptions = ConfigurationAliases.GetLdap(configuration);
         var authOptions = ConfigurationAliases.GetAuth(configuration);

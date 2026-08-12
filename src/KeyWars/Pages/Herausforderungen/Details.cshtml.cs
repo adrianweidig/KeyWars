@@ -14,9 +14,16 @@ public sealed class DetailsModel(CurrentUser currentUser, KeyWarsDbContext db, C
     public TrainingText Text { get; private set; } = new();
     public IReadOnlyList<Row> Rows { get; private set; } = [];
     public ParticipantStatus CurrentParticipantStatus { get; private set; }
+    public int CurrentCompletedRounds { get; private set; }
+    public bool IsCreator { get; private set; }
     public bool CanJoin => IsActive && CurrentParticipantStatus == ParticipantStatus.Invited;
-    public bool CanDecline => IsActive && CurrentParticipantStatus is ParticipantStatus.Invited or ParticipantStatus.Joined;
-    public bool CanPlay => IsActive && CurrentParticipantStatus is ParticipantStatus.Joined or ParticipantStatus.Ready or ParticipantStatus.Running;
+    public bool CanDecline => !IsCreator && IsActive &&
+        (CurrentParticipantStatus is ParticipantStatus.Invited or ParticipantStatus.Joined);
+    public bool CanPlay => IsActive &&
+        CurrentCompletedRounds < CurrentChallenge.RoundCount &&
+        (CurrentParticipantStatus is ParticipantStatus.Joined or ParticipantStatus.Ready or ParticipantStatus.Running);
+    public bool CanCancel => IsCreator && IsActive;
+    public bool CanRematch => IsCreator && CurrentChallenge.Status is ChallengeStatus.Finished or ChallengeStatus.Expired or ChallengeStatus.Cancelled;
 
     private bool IsActive => CurrentChallenge.Status is ChallengeStatus.Open or ChallengeStatus.Running;
 
@@ -59,6 +66,34 @@ public sealed class DetailsModel(CurrentUser currentUser, KeyWarsDbContext db, C
         }
     }
 
+    public async Task<IActionResult> OnPostCancelAsync(Guid id, CancellationToken cancellationToken)
+    {
+        var profile = await currentUser.RequireProfileAsync(User, cancellationToken);
+        try
+        {
+            await challenges.CancelAsync(id, profile.Id, cancellationToken);
+            return RedirectToPage(new { id });
+        }
+        catch (ChallengeLifecycleException exception)
+        {
+            return await ChallengeErrorAsync(id, exception, cancellationToken);
+        }
+    }
+
+    public async Task<IActionResult> OnPostRematchAsync(Guid id, CancellationToken cancellationToken)
+    {
+        var profile = await currentUser.RequireProfileAsync(User, cancellationToken);
+        try
+        {
+            var rematch = await challenges.CreateRematchAsync(id, profile.Id, cancellationToken);
+            return RedirectToPage(new { id = rematch.Id });
+        }
+        catch (ChallengeLifecycleException exception)
+        {
+            return await ChallengeErrorAsync(id, exception, cancellationToken);
+        }
+    }
+
     private async Task<IActionResult> ChallengeErrorAsync(Guid id, ChallengeLifecycleException exception, CancellationToken cancellationToken)
     {
         Response.StatusCode = exception.StatusCode;
@@ -80,15 +115,48 @@ public sealed class DetailsModel(CurrentUser currentUser, KeyWarsDbContext db, C
 
         CurrentParticipantStatus = currentParticipant.Status;
         CurrentChallenge = await db.Challenges.SingleAsync(item => item.Id == id, cancellationToken);
+        IsCreator = CurrentChallenge.CreatorProfileId == profile.Id;
         Text = await db.TrainingTexts.SingleAsync(item => item.Id == CurrentChallenge.TrainingTextId, cancellationToken);
-        Rows = await (
+        var participantRows = await (
             from participant in db.ChallengeParticipants
             join user in db.UserProfiles on participant.UserProfileId equals user.Id
             where participant.ChallengeId == id
             orderby participant.Placement ?? int.MaxValue, user.DisplayName
-            select new Row(user.DisplayName, participant.Status, participant.Placement, participant.RatingDelta)
+            select new
+            {
+                participant.UserProfileId,
+                user.DisplayName,
+                participant.Status,
+                participant.Placement,
+                participant.RatingDelta
+            }
         ).ToListAsync(cancellationToken);
+        var roundIds = await db.ChallengeRounds
+            .Where(round => round.ChallengeId == id)
+            .Select(round => round.Id)
+            .ToArrayAsync(cancellationToken);
+        var results = await db.ChallengeRoundResults
+            .Where(result => roundIds.Contains(result.ChallengeRoundId))
+            .ToListAsync(cancellationToken);
+        Rows = participantRows.Select(participant =>
+        {
+            var participantResults = results.Where(result => result.UserProfileId == participant.UserProfileId).ToArray();
+            return new Row(
+                participant.DisplayName,
+                participant.Status,
+                participant.Placement,
+                participant.RatingDelta,
+                participantResults.Length,
+                participantResults.Count(result => result.Status == ParticipantStatus.Finished && result.Placement == 1));
+        }).ToArray();
+        CurrentCompletedRounds = results.Count(result => result.UserProfileId == profile.Id);
     }
 
-    public sealed record Row(string DisplayName, ParticipantStatus Status, int? Placement, double RatingDelta);
+    public sealed record Row(
+        string DisplayName,
+        ParticipantStatus Status,
+        int? Placement,
+        double RatingDelta,
+        int CompletedRounds,
+        int RoundWins);
 }

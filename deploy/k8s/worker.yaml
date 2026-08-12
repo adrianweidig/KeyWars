@@ -1,0 +1,103 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keywars-worker
+  labels:
+    app.kubernetes.io/name: keywars
+    app.kubernetes.io/component: worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: keywars
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: keywars
+        app.kubernetes.io/component: worker
+        app.kubernetes.io/part-of: keywars
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1654
+        runAsGroup: 1654
+        fsGroup: 1654
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: keywars
+          image: ghcr.io/adrianweidig/keywars:v0.5.0
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: keywars-runtime-config
+            - configMapRef:
+                name: keywars-site-config
+          env:
+            - name: KEYWARS__RUNTIME__ROLE
+              value: worker
+            - name: ConnectionStrings__KeyWars
+              valueFrom:
+                secretKeyRef:
+                  name: keywars-database-connection
+                  key: connection-string
+            - name: KEYWARS__REDIS__CONNECTION_STRING
+              valueFrom:
+                secretKeyRef:
+                  name: keywars-redis-connection
+                  key: connection-string
+          startupProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 10"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: ldap-ca
+              mountPath: /etc/keywars/ldap-ca
+              readOnly: true
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: ldap-ca
+          configMap:
+            name: keywars-ldap-ca
+            optional: true
+      terminationGracePeriodSeconds: 60

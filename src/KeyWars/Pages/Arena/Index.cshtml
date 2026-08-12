@@ -10,7 +10,7 @@
         <h1>Live-Arena</h1>
         <p class="lead">Starte ein gemeinsames Rennen mit sichtbarem Textfortschritt, Fehlern und Zieleinlauf. Der Tippbereich bleibt zuerst, Raumverwaltung bleibt sekundär.</p>
         <div class="hero-stat-row" aria-label="Arena Status">
-            <span><strong>@Model.Rooms.Count</strong> offene Lobbys</span>
+            <span><strong>@Model.TotalCount</strong> offene Lobbys</span>
             <span><strong>Textboard</strong> live</span>
             <span><strong>Rating</strong> nach Rennen</span>
         </div>
@@ -75,16 +75,15 @@
         <div class="grid">
         @foreach (var room in Model.Rooms)
         {
-            var host = room.Participants.FirstOrDefault(item => item.ProfileId == room.CreatorProfileId)?.DisplayName ?? "Raumleitung";
             <article class="card room-card">
                 <div class="section-title-row">
                     <h3>@room.Title</h3>
                     <span class="pill">@DisplayNames.For(room.Phase)</span>
                 </div>
                 <dl class="room-facts">
-                    <div><dt>Host</dt><dd>@host</dd></div>
+                    <div><dt>Host</dt><dd>@room.CreatorDisplayName</dd></div>
                     <div><dt>Modus</dt><dd>@DisplayNames.For(room.Mode)</dd></div>
-                    <div><dt>Teilnehmer</dt><dd>@room.Participants.Count / @room.MaxParticipants</dd></div>
+                    <div><dt>Teilnehmer</dt><dd>@room.ParticipantCount / @room.MaxParticipants</dd></div>
                     <div><dt>Format</dt><dd>Runde @room.CurrentRound von @room.RoundCount</dd></div>
                 </dl>
                 <div class="room-code-share">
@@ -97,5 +96,28 @@
             </article>
         }
         </div>
+
+        @if (Model.TotalPages > 1)
+        {
+            <nav class="pagination" aria-label="Arena-Lobby Seiten">
+                @if (Model.HasPreviousPage)
+                {
+                    <a class="button secondary" asp-page="/Arena/Index" asp-route-Seite="@(Model.Seite - 1)" asp-fragment="offene-raeume">Zurück</a>
+                }
+                else
+                {
+                    <span class="button secondary" aria-disabled="true">Zurück</span>
+                }
+                <span aria-current="page">Seite @Model.Seite von @Model.TotalPages</span>
+                @if (Model.HasNextPage)
+                {
+                    <a class="button secondary" asp-page="/Arena/Index" asp-route-Seite="@(Model.Seite + 1)" asp-fragment="offene-raeume">Weiter</a>
+                }
+                else
+                {
+                    <span class="button secondary" aria-disabled="true">Weiter</span>
+                }
+            </nav>
+        }
     }
 </section>

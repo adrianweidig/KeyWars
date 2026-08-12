@@ -1,5 +1,4 @@
 using System.Security.Cryptography;
-using System.Text;
 using KeyWars.Data;
 using KeyWars.Domain;
 using Microsoft.EntityFrameworkCore;
@@ -8,6 +7,28 @@ using Microsoft.Extensions.Options;
 namespace KeyWars.Services;
 
 public sealed record CreateChallengeRequest(string Title, Guid TrainingTextId, ChallengeMode Mode, IReadOnlyCollection<Guid> ParticipantIds, int RoundCount, int ExpiryDays);
+
+public enum ChallengeListFilter
+{
+    All,
+    Invitations,
+    Active,
+    Completed
+}
+
+public sealed record ChallengeListItem(
+    Challenge Challenge,
+    ParticipantStatus ParticipantStatus,
+    bool IsUnread);
+
+public sealed record ChallengeListPage(
+    IReadOnlyList<ChallengeListItem> Items,
+    ChallengeListFilter Filter,
+    int Page,
+    int PageSize,
+    int TotalCount,
+    int TotalPages,
+    int UnreadCount);
 
 public static class ChallengeErrorCodes
 {
@@ -27,9 +48,10 @@ public sealed class ChallengeLifecycleException(string code, int statusCode, str
 public sealed class ChallengeService(
     KeyWarsDbContext db,
     IOptions<ChallengeOptions> options,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider,
+    IChallengeLockProvider? lockProvider = null)
 {
-    private static readonly AsyncKeyedLock<Guid> ChallengeLocks = new();
+    private readonly IChallengeLockProvider challengeLocks = lockProvider ?? LocalChallengeLockProvider.Shared;
     private const int BadRequestStatus = 400;
     private const int NotFoundStatus = 404;
     private const int ConflictStatus = 409;
@@ -38,15 +60,30 @@ public sealed class ChallengeService(
     public async Task<Challenge> CreateAsync(Guid creatorProfileId, CreateChallengeRequest request, CancellationToken cancellationToken = default)
     {
         var challengeId = Guid.CreateVersion7();
-        await using var challengeLock = await ChallengeLocks.AcquireAsync(challengeId, cancellationToken);
-        if (request.Mode != ChallengeMode.Classic)
+        await using var challengeLock = await challengeLocks.AcquireAsync(challengeId, cancellationToken);
+        return await CreateCoreAsync(challengeId, creatorProfileId, request, null, cancellationToken);
+    }
+
+    private async Task<Challenge> CreateCoreAsync(
+        Guid challengeId,
+        Guid creatorProfileId,
+        CreateChallengeRequest request,
+        Guid? rematchOfChallengeId,
+        CancellationToken cancellationToken)
+    {
+        if (request.Mode is not (ChallengeMode.Classic or ChallengeMode.BestOf))
         {
-            throw ChallengeError(ChallengeErrorCodes.InvalidRequest, BadRequestStatus, "Aktuell ist nur der Challenge-Modus \"Klassisches Rennen\" implementiert.");
+            throw ChallengeError(ChallengeErrorCodes.InvalidRequest, BadRequestStatus, "Verfügbar sind klassische Rennen und Best-of-Serien.");
         }
 
-        if (request.RoundCount != 1)
+        if (request.Mode == ChallengeMode.Classic && request.RoundCount != 1)
         {
-            throw ChallengeError(ChallengeErrorCodes.InvalidRequest, BadRequestStatus, "Mehrere Runden werden erst mit der Serienlogik aktiviert.");
+            throw ChallengeError(ChallengeErrorCodes.InvalidRequest, BadRequestStatus, "Klassische Herausforderungen laufen über genau eine Runde.");
+        }
+
+        if (request.Mode == ChallengeMode.BestOf && request.RoundCount is not (3 or 5))
+        {
+            throw ChallengeError(ChallengeErrorCodes.InvalidRequest, BadRequestStatus, "Best-of-Serien laufen über drei oder fünf Runden.");
         }
 
         if (request.ParticipantIds is null)
@@ -83,23 +120,39 @@ public sealed class ChallengeService(
 
         var text = await db.TrainingTexts.SingleOrDefaultAsync(item =>
             item.Id == request.TrainingTextId &&
+            !item.IsQuarantined &&
             (item.IsStandard || item.Visibility == TrainingTextVisibility.Organization || item.OwnerProfileId == creatorProfileId), cancellationToken)
             ?? throw ChallengeError(ChallengeErrorCodes.InvalidRequest, BadRequestStatus, "Der Trainingstext ist für diese Herausforderung nicht verfügbar.");
         var now = timeProvider.GetUtcNow();
+        var title = string.IsNullOrWhiteSpace(request.Title) ? text.Title : request.Title.Trim();
+        if (title.Length > 160)
+        {
+            throw ChallengeError(ChallengeErrorCodes.InvalidRequest, BadRequestStatus, "Der Titel darf höchstens 160 Zeichen lang sein.");
+        }
+
         var challenge = new Challenge
         {
             Id = challengeId,
+            RematchOfChallengeId = rematchOfChallengeId,
             CreatorProfileId = creatorProfileId,
             TrainingTextId = text.Id,
-            Title = string.IsNullOrWhiteSpace(request.Title) ? text.Title : request.Title.Trim(),
+            Title = title,
             Mode = request.Mode,
-            RoundCount = 1,
+            RoundCount = request.RoundCount,
             RatingEligible = text.RatingEligible && request.Mode is ChallengeMode.Classic or ChallengeMode.BestOf,
             CreatedAt = now,
             ExpiresAt = now.AddDays(Math.Clamp(request.ExpiryDays, 1, 30))
         };
         db.Challenges.Add(challenge);
-        db.ChallengeRounds.Add(new ChallengeRound { ChallengeId = challenge.Id, RoundNumber = 1, CreatedAt = now });
+        for (var roundNumber = 1; roundNumber <= challenge.RoundCount; roundNumber++)
+        {
+            db.ChallengeRounds.Add(new ChallengeRound
+            {
+                ChallengeId = challenge.Id,
+                RoundNumber = roundNumber,
+                CreatedAt = now
+            });
+        }
 
         foreach (var participantId in participants)
         {
@@ -118,7 +171,7 @@ public sealed class ChallengeService(
 
     public async Task<AttemptSession> StartAttemptAsync(Guid challengeId, Guid profileId, AttemptService attempts, CancellationToken cancellationToken = default)
     {
-        await using var challengeLock = await ChallengeLocks.AcquireAsync(challengeId, cancellationToken);
+        await using var challengeLock = await challengeLocks.AcquireAsync(challengeId, cancellationToken);
         return await StartAttemptCoreAsync(challengeId, profileId, attempts, cancellationToken);
     }
 
@@ -137,12 +190,7 @@ public sealed class ChallengeService(
             throw ChallengeError(ChallengeErrorCodes.Conflict, ConflictStatus, "Diese Herausforderung kann nicht mehr gestartet werden.");
         }
 
-        var round = await RequireRoundAsync(challengeId, cancellationToken);
-        var existingResult = await db.ChallengeRoundResults.AnyAsync(item => item.ChallengeRoundId == round.Id && item.UserProfileId == profileId, cancellationToken);
-        if (existingResult)
-        {
-            throw ChallengeError(ChallengeErrorCodes.Conflict, ConflictStatus, "Diese Challenge-Runde wurde bereits abgeschlossen.");
-        }
+        var round = await RequireNextRoundAsync(challengeId, profileId, cancellationToken);
 
         var existingBinding = await db.ChallengeAttemptBindings.SingleOrDefaultAsync(item => item.ChallengeRoundId == round.Id && item.UserProfileId == profileId, cancellationToken);
         if (existingBinding is not null)
@@ -191,7 +239,7 @@ public sealed class ChallengeService(
             ChallengeRoundId = round.Id,
             UserProfileId = profileId,
             TypingAttemptId = session.Id,
-            TextSnapshotHash = ComputeTextHash(session.Text),
+            TextSnapshotHash = TextHash.Compute(session.Text),
             Mode = TrainingMode.Text,
             BindingToken = CreateBindingToken(),
             CreatedAt = timeProvider.GetUtcNow()
@@ -210,23 +258,163 @@ public sealed class ChallengeService(
 
     public async Task<IReadOnlyList<Challenge>> ListForProfileAsync(Guid profileId, CancellationToken cancellationToken = default)
     {
-        await ExpireDueChallengesAsync(cancellationToken);
-        var ids = await db.ChallengeParticipants
-            .Where(item => item.UserProfileId == profileId)
-            .Select(item => item.ChallengeId)
-            .ToListAsync(cancellationToken);
+        var page = await ListPageForProfileAsync(profileId, ChallengeListFilter.All, 1, 50, cancellationToken);
+        return page.Items.Select(item => item.Challenge).ToArray();
+    }
 
-        return (await db.Challenges
-            .Where(item => ids.Contains(item.Id))
-            .ToListAsync(cancellationToken))
-            .OrderByDescending(item => item.CreatedAt)
-            .Take(50)
-            .ToList();
+    public async Task<ChallengeListPage> ListPageForProfileAsync(
+        Guid profileId,
+        ChallengeListFilter filter,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        await ExpireDueChallengesAsync(cancellationToken);
+        var boundedPage = Math.Max(1, page);
+        var boundedPageSize = Math.Clamp(pageSize, 1, 50);
+        var activeStatuses = new[] { ChallengeStatus.Open, ChallengeStatus.Running };
+        var query =
+            from participant in db.ChallengeParticipants.AsNoTracking()
+            join challenge in db.Challenges.AsNoTracking() on participant.ChallengeId equals challenge.Id
+            where participant.UserProfileId == profileId
+            select new { Challenge = challenge, participant.Status };
+
+        query = filter switch
+        {
+            ChallengeListFilter.Invitations => query.Where(item =>
+                activeStatuses.Contains(item.Challenge.Status) &&
+                item.Status == ParticipantStatus.Invited),
+            ChallengeListFilter.Active => query.Where(item =>
+                activeStatuses.Contains(item.Challenge.Status) &&
+                item.Status != ParticipantStatus.Declined &&
+                item.Status != ParticipantStatus.Cancelled),
+            ChallengeListFilter.Completed => query.Where(item =>
+                item.Challenge.Status == ChallengeStatus.Finished ||
+                item.Challenge.Status == ChallengeStatus.Expired ||
+                item.Challenge.Status == ChallengeStatus.Cancelled),
+            _ => query
+        };
+
+        var totalCount = await query.CountAsync(cancellationToken);
+        var totalPages = Math.Max(1, (int)Math.Ceiling(totalCount / (double)boundedPageSize));
+        boundedPage = Math.Min(boundedPage, totalPages);
+        var rows = await query
+            .OrderByDescending(item => item.Status == ParticipantStatus.Invited)
+            .ThenByDescending(item => item.Challenge.Id)
+            .Skip((boundedPage - 1) * boundedPageSize)
+            .Take(boundedPageSize)
+            .ToListAsync(cancellationToken);
+        var unreadCount = await (
+                from participant in db.ChallengeParticipants.AsNoTracking()
+                join challenge in db.Challenges.AsNoTracking() on participant.ChallengeId equals challenge.Id
+                where participant.UserProfileId == profileId &&
+                    participant.Status == ParticipantStatus.Invited &&
+                    (challenge.Status == ChallengeStatus.Open || challenge.Status == ChallengeStatus.Running)
+                select participant)
+            .CountAsync(cancellationToken);
+
+        return new ChallengeListPage(
+            rows.Select(item => new ChallengeListItem(
+                item.Challenge,
+                item.Status,
+                item.Status == ParticipantStatus.Invited && activeStatuses.Contains(item.Challenge.Status)))
+                .ToArray(),
+            filter,
+            boundedPage,
+            boundedPageSize,
+            totalCount,
+            totalPages,
+            unreadCount);
+    }
+
+    public async Task<Challenge> CancelAsync(Guid challengeId, Guid creatorProfileId, CancellationToken cancellationToken = default)
+    {
+        await using var challengeLock = await challengeLocks.AcquireAsync(challengeId, cancellationToken);
+        var challenge = await RequireChallengeAsync(challengeId, cancellationToken);
+        EnsureCreator(challenge, creatorProfileId);
+        if (challenge.Status == ChallengeStatus.Cancelled)
+        {
+            return challenge;
+        }
+
+        if (challenge.Status is ChallengeStatus.Finished or ChallengeStatus.Expired)
+        {
+            throw ChallengeError(ChallengeErrorCodes.Conflict, ConflictStatus, "Diese Herausforderung ist bereits abgeschlossen und kann nicht mehr abgebrochen werden.");
+        }
+
+        var now = timeProvider.GetUtcNow();
+        challenge.Status = ChallengeStatus.Cancelled;
+        challenge.FinishedAt = now;
+        var participants = await db.ChallengeParticipants
+            .Where(item => item.ChallengeId == challengeId)
+            .ToListAsync(cancellationToken);
+        foreach (var participant in participants.Where(item => item.Status is not (ParticipantStatus.Finished or ParticipantStatus.Dnf or ParticipantStatus.Declined)))
+        {
+            participant.Status = ParticipantStatus.Cancelled;
+            participant.FinishedAt = now;
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+        return challenge;
+    }
+
+    public async Task<Challenge> CreateRematchAsync(Guid challengeId, Guid creatorProfileId, CancellationToken cancellationToken = default)
+    {
+        await using var challengeLock = await challengeLocks.AcquireAsync(challengeId, cancellationToken);
+        var existing = await db.Challenges
+            .SingleOrDefaultAsync(item => item.RematchOfChallengeId == challengeId, cancellationToken);
+        if (existing is not null)
+        {
+            EnsureCreator(existing, creatorProfileId);
+            return existing;
+        }
+
+        var source = await RequireChallengeAsync(challengeId, cancellationToken);
+        EnsureCreator(source, creatorProfileId);
+        if (source.Status is ChallengeStatus.Open or ChallengeStatus.Running)
+        {
+            throw ChallengeError(ChallengeErrorCodes.Conflict, ConflictStatus, "Eine Revanche ist erst nach Abschluss oder Abbruch möglich.");
+        }
+
+        var participantIds = await db.ChallengeParticipants
+            .Where(item => item.ChallengeId == source.Id && item.UserProfileId != creatorProfileId)
+            .Select(item => item.UserProfileId)
+            .ToArrayAsync(cancellationToken);
+        var expiryDays = Math.Clamp((int)Math.Ceiling((source.ExpiresAt - source.CreatedAt).TotalDays), 1, 30);
+        var request = new CreateChallengeRequest(
+            BuildRematchTitle(source.Title),
+            source.TrainingTextId,
+            source.Mode,
+            participantIds,
+            source.RoundCount,
+            expiryDays);
+        try
+        {
+            return await CreateCoreAsync(
+                Guid.CreateVersion7(),
+                creatorProfileId,
+                request,
+                source.Id,
+                cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            db.ChangeTracker.Clear();
+            existing = await db.Challenges
+                .AsNoTracking()
+                .SingleOrDefaultAsync(item => item.RematchOfChallengeId == challengeId, cancellationToken);
+            if (existing is not null)
+            {
+                return existing;
+            }
+
+            throw;
+        }
     }
 
     public async Task JoinAsync(Guid challengeId, Guid profileId, CancellationToken cancellationToken = default)
     {
-        await using var challengeLock = await ChallengeLocks.AcquireAsync(challengeId, cancellationToken);
+        await using var challengeLock = await challengeLocks.AcquireAsync(challengeId, cancellationToken);
         await RequireActiveChallengeAsync(challengeId, cancellationToken);
         var participant = await RequireParticipantAsync(challengeId, profileId, cancellationToken);
         if (participant.Status == ParticipantStatus.Invited)
@@ -239,7 +427,7 @@ public sealed class ChallengeService(
 
     public async Task DeclineAsync(Guid challengeId, Guid profileId, CancellationToken cancellationToken = default)
     {
-        await using var challengeLock = await ChallengeLocks.AcquireAsync(challengeId, cancellationToken);
+        await using var challengeLock = await challengeLocks.AcquireAsync(challengeId, cancellationToken);
         await RequireActiveChallengeAsync(challengeId, cancellationToken);
         var participant = await RequireParticipantAsync(challengeId, profileId, cancellationToken);
         if (participant.Status is ParticipantStatus.Invited or ParticipantStatus.Joined)
@@ -252,7 +440,7 @@ public sealed class ChallengeService(
 
     public async Task RequirePlayableAsync(Guid challengeId, Guid profileId, CancellationToken cancellationToken = default)
     {
-        await using var challengeLock = await ChallengeLocks.AcquireAsync(challengeId, cancellationToken);
+        await using var challengeLock = await challengeLocks.AcquireAsync(challengeId, cancellationToken);
         await RequireActiveChallengeAsync(challengeId, cancellationToken);
         var participant = await RequireParticipantAsync(challengeId, profileId, cancellationToken);
         if (participant.Status == ParticipantStatus.Invited)
@@ -268,54 +456,54 @@ public sealed class ChallengeService(
 
     public async Task FinishRoundAsync(Guid challengeId, Guid profileId, TypingAttempt attempt, CancellationToken cancellationToken = default)
     {
-        await using var challengeLock = await ChallengeLocks.AcquireAsync(challengeId, cancellationToken);
+        await using var challengeLock = await challengeLocks.AcquireAsync(challengeId, cancellationToken);
         await FinishRoundCoreAsync(challengeId, profileId, attempt, cancellationToken);
     }
 
     private async Task FinishRoundCoreAsync(Guid challengeId, Guid profileId, TypingAttempt attempt, CancellationToken cancellationToken)
     {
-        var existingRound = await db.ChallengeRounds.SingleOrDefaultAsync(
-            item => item.ChallengeId == challengeId && item.RoundNumber == 1,
-            cancellationToken);
-        if (existingRound is not null)
-        {
-            var existingResult = await db.ChallengeRoundResults.SingleOrDefaultAsync(
-                item => item.ChallengeRoundId == existingRound.Id && item.UserProfileId == profileId,
-                cancellationToken);
-            if (existingResult is not null)
-            {
-                if (existingResult.TypingAttemptId != attempt.Id)
-                {
-                    throw ChallengeError(ChallengeErrorCodes.Conflict, ConflictStatus, "Die Challenge-Runde wurde bereits mit einem anderen Versuch abgeschlossen.");
-                }
-
-                await ExecuteInTransactionAsync(
-                    () => TryCloseCoreAsync(challengeId, cancellationToken),
-                    cancellationToken);
-                return;
-            }
-        }
-
-        var challenge = await RequireActiveChallengeAsync(challengeId, cancellationToken);
         var participant = await RequireParticipantAsync(challengeId, profileId, cancellationToken);
         if (participant.Status == ParticipantStatus.Invited)
         {
             throw ChallengeError(ChallengeErrorCodes.Conflict, ConflictStatus, "Die Herausforderung muss vor dem Abschluss angenommen werden.");
         }
 
+        var binding = await db.ChallengeAttemptBindings.SingleOrDefaultAsync(item =>
+            item.ChallengeId == challengeId &&
+            item.UserProfileId == profileId &&
+            item.TypingAttemptId == attempt.Id, cancellationToken);
+        if (binding is null)
+        {
+            throw ChallengeError(ChallengeErrorCodes.InvalidAttempt, ConflictStatus, "Der Versuch gehört nicht zu dieser Herausforderung.");
+        }
+
+        var round = await db.ChallengeRounds.SingleOrDefaultAsync(
+                item => item.Id == binding.ChallengeRoundId && item.ChallengeId == challengeId,
+                cancellationToken)
+            ?? throw ChallengeError(ChallengeErrorCodes.InvalidAttempt, ConflictStatus, "Der Versuch gehört nicht zu dieser Herausforderung.");
+        var existingResult = await db.ChallengeRoundResults.SingleOrDefaultAsync(
+            item => item.ChallengeRoundId == round.Id && item.UserProfileId == profileId,
+            cancellationToken);
+        if (existingResult is not null)
+        {
+            if (existingResult.TypingAttemptId != attempt.Id)
+            {
+                throw ChallengeError(ChallengeErrorCodes.Conflict, ConflictStatus, "Die Challenge-Runde wurde bereits mit einem anderen Versuch abgeschlossen.");
+            }
+
+            await ExecuteInTransactionAsync(
+                () => TryCloseCoreAsync(challengeId, cancellationToken),
+                cancellationToken);
+            return;
+        }
+
+        var challenge = await RequireActiveChallengeAsync(challengeId, cancellationToken);
         if (participant.Status is ParticipantStatus.Finished or ParticipantStatus.Dnf or ParticipantStatus.Declined)
         {
             throw ChallengeError(ChallengeErrorCodes.Conflict, ConflictStatus, "Diese Challenge-Runde ist für dich bereits abgeschlossen.");
         }
 
-        var round = existingRound ?? await RequireRoundAsync(challengeId, cancellationToken);
-        var binding = await db.ChallengeAttemptBindings.SingleOrDefaultAsync(item =>
-            item.ChallengeId == challengeId &&
-            item.ChallengeRoundId == round.Id &&
-            item.UserProfileId == profileId &&
-            item.TypingAttemptId == attempt.Id, cancellationToken);
-        if (binding is null ||
-            binding.Consumed ||
+        if (binding.Consumed ||
             binding.Mode != attempt.Mode ||
             binding.TextSnapshotHash != attempt.TextHash ||
             attempt.TrainingTextId != challenge.TrainingTextId ||
@@ -339,20 +527,38 @@ public sealed class ChallengeService(
             var now = timeProvider.GetUtcNow();
             binding.Consumed = true;
             binding.ConsumedAt = now;
-            participant.Status = attempt.Completed ? ParticipantStatus.Finished : ParticipantStatus.Dnf;
-            participant.FinishedAt = now;
+            var roundResultStatus = attempt.Completed ? ParticipantStatus.Finished : ParticipantStatus.Dnf;
             db.ChallengeRoundResults.Add(new ChallengeRoundResult
             {
                 ChallengeRoundId = round.Id,
                 UserProfileId = profileId,
                 TypingAttemptId = attempt.Id,
-                Status = participant.Status,
+                Status = roundResultStatus,
                 DurationMilliseconds = attempt.DurationMilliseconds,
                 Accuracy = attempt.Accuracy,
                 Consistency = attempt.Consistency,
                 Wpm = attempt.Wpm,
-                FinishedAt = participant.FinishedAt
+                FinishedAt = now
             });
+
+            if (round.RoundNumber < challenge.RoundCount)
+            {
+                participant.Status = ParticipantStatus.Joined;
+                participant.FinishedAt = null;
+            }
+            else
+            {
+                var hasFinishedRound = attempt.Completed || await db.ChallengeRoundResults.AnyAsync(item =>
+                    item.UserProfileId == profileId &&
+                    db.ChallengeRounds
+                        .Where(challengeRound => challengeRound.ChallengeId == challengeId)
+                        .Select(challengeRound => challengeRound.Id)
+                        .Contains(item.ChallengeRoundId) &&
+                    item.Status == ParticipantStatus.Finished,
+                    cancellationToken);
+                participant.Status = hasFinishedRound ? ParticipantStatus.Finished : ParticipantStatus.Dnf;
+                participant.FinishedAt = now;
+            }
 
             await db.SaveChangesAsync(cancellationToken);
             await TryCloseCoreAsync(challenge.Id, cancellationToken);
@@ -361,7 +567,7 @@ public sealed class ChallengeService(
 
     public async Task TryCloseAsync(Guid challengeId, CancellationToken cancellationToken = default)
     {
-        await using var challengeLock = await ChallengeLocks.AcquireAsync(challengeId, cancellationToken);
+        await using var challengeLock = await challengeLocks.AcquireAsync(challengeId, cancellationToken);
         await TryCloseCoreAsync(challengeId, cancellationToken);
     }
 
@@ -379,30 +585,41 @@ public sealed class ChallengeService(
         }
 
         var participants = await db.ChallengeParticipants.Where(item => item.ChallengeId == challengeId).ToListAsync(cancellationToken);
-        var terminal = participants.All(item => item.Status is ParticipantStatus.Finished or ParticipantStatus.Dnf or ParticipantStatus.Declined);
+        var rounds = await db.ChallengeRounds
+            .Where(item => item.ChallengeId == challengeId)
+            .OrderBy(item => item.RoundNumber)
+            .ToListAsync(cancellationToken);
+        var roundIds = rounds.Select(item => item.Id).ToArray();
+        var results = await db.ChallengeRoundResults
+            .Where(item => roundIds.Contains(item.ChallengeRoundId))
+            .ToListAsync(cancellationToken);
+        var resultCounts = results
+            .GroupBy(item => item.UserProfileId)
+            .ToDictionary(group => group.Key, group => group.Count());
+        var terminal = participants.All(item =>
+            item.Status is ParticipantStatus.Declined or ParticipantStatus.Cancelled ||
+            resultCounts.GetValueOrDefault(item.UserProfileId) >= challenge.RoundCount);
         if (!terminal)
         {
             return;
         }
 
-        var round = await RequireRoundAsync(challengeId, cancellationToken);
-        var results = await db.ChallengeRoundResults.Where(item => item.ChallengeRoundId == round.Id).ToListAsync(cancellationToken);
-        var ranked = RaceRanking.RankClassic(results.Select(result => new RaceResult(
-            result.UserProfileId,
-            result.Status,
-            result.DurationMilliseconds,
-            result.Accuracy,
-            0,
-            result.Consistency,
-            result.Wpm,
-            0)));
+        foreach (var round in rounds)
+        {
+            var roundResults = results.Where(item => item.ChallengeRoundId == round.Id).ToArray();
+            var roundRanking = RankRound(roundResults);
+            foreach (var rankedResult in roundRanking)
+            {
+                roundResults.Single(item => item.UserProfileId == rankedResult.Result.UserProfileId).Placement = rankedResult.Placement;
+            }
+        }
 
+        var ranked = challenge.Mode == ChallengeMode.BestOf
+            ? RankSeries(participants, results)
+            : RankRound(results);
         foreach (var rankedResult in ranked)
         {
-            var participant = participants.Single(item => item.UserProfileId == rankedResult.Result.UserProfileId);
-            participant.Placement = rankedResult.Placement;
-            var result = results.Single(item => item.UserProfileId == rankedResult.Result.UserProfileId);
-            result.Placement = rankedResult.Placement;
+            participants.Single(item => item.UserProfileId == rankedResult.Result.UserProfileId).Placement = rankedResult.Placement;
         }
 
         if (challenge.RatingEligible && ranked.Count >= 2)
@@ -449,16 +666,17 @@ public sealed class ChallengeService(
         var now = timeProvider.GetUtcNow();
         var candidates = await db.Challenges
             .AsNoTracking()
+            .Where(item =>
+                item.Status == ChallengeStatus.Open || item.Status == ChallengeStatus.Running)
+            .Select(item => new { item.Id, item.ExpiresAt })
             .ToListAsync(cancellationToken);
         var candidateIds = candidates
-            .Where(item =>
-                item.Status is (ChallengeStatus.Open or ChallengeStatus.Running) &&
-                item.ExpiresAt <= now)
+            .Where(item => item.ExpiresAt <= now)
             .Select(item => item.Id)
             .ToArray();
         foreach (var challengeId in candidateIds)
         {
-            await using var challengeLock = await ChallengeLocks.AcquireAsync(challengeId, cancellationToken);
+            await using var challengeLock = await challengeLocks.AcquireAsync(challengeId, cancellationToken);
             var challenge = await db.Challenges.SingleOrDefaultAsync(item => item.Id == challengeId, cancellationToken);
             if (challenge is not null)
             {
@@ -495,12 +713,77 @@ public sealed class ChallengeService(
             ?? throw ChallengeError(ChallengeErrorCodes.NotFound, NotFoundStatus, "Diese Herausforderung wurde nicht gefunden.");
     }
 
-    private async Task<ChallengeRound> RequireRoundAsync(Guid challengeId, CancellationToken cancellationToken)
+    private async Task<ChallengeRound> RequireNextRoundAsync(Guid challengeId, Guid profileId, CancellationToken cancellationToken)
     {
-        return await db.ChallengeRounds.SingleOrDefaultAsync(
-                item => item.ChallengeId == challengeId && item.RoundNumber == 1,
-                cancellationToken)
-            ?? throw ChallengeError(ChallengeErrorCodes.NotFound, NotFoundStatus, "Die Challenge-Runde wurde nicht gefunden.");
+        var completedRoundIds = db.ChallengeRoundResults
+            .Where(item => item.UserProfileId == profileId)
+            .Select(item => item.ChallengeRoundId);
+        return await db.ChallengeRounds
+                .Where(item => item.ChallengeId == challengeId && !completedRoundIds.Contains(item.Id))
+                .OrderBy(item => item.RoundNumber)
+                .FirstOrDefaultAsync(cancellationToken)
+            ?? throw ChallengeError(ChallengeErrorCodes.Conflict, ConflictStatus, "Alle Runden dieser Herausforderung sind bereits abgeschlossen.");
+    }
+
+    private static IReadOnlyList<RankedRaceResult> RankRound(IEnumerable<ChallengeRoundResult> results) =>
+        RaceRanking.RankClassic(results.Select(result => new RaceResult(
+            result.UserProfileId,
+            result.Status,
+            result.DurationMilliseconds,
+            result.Accuracy,
+            0,
+            result.Consistency,
+            result.Wpm,
+            0)));
+
+    private static IReadOnlyList<RankedRaceResult> RankSeries(
+        IReadOnlyCollection<ChallengeParticipant> participants,
+        IReadOnlyCollection<ChallengeRoundResult> results)
+    {
+        var activeParticipants = participants
+            .Where(item => item.Status is not (ParticipantStatus.Declined or ParticipantStatus.Cancelled))
+            .ToArray();
+        var participantCount = activeParticipants.Length;
+        var rankedSeries = ArenaScoring.RankSeries(activeParticipants.Select(participant =>
+        {
+            var participantResults = results.Where(item => item.UserProfileId == participant.UserProfileId).ToArray();
+            return new ArenaSeriesScore(
+                participant.UserProfileId,
+                participantResults.Sum(item => ArenaScoring.PointsForRound(item.Status, item.Placement, participantCount)),
+                participantResults.Count(item => item.Status == ParticipantStatus.Finished && item.Placement == 1),
+                participantResults.Count(item => item.Status == ParticipantStatus.Finished),
+                participantResults.Sum(item => item.DurationMilliseconds),
+                participantResults.Length == 0 ? 0 : participantResults.Average(item => item.Accuracy));
+        }));
+
+        return rankedSeries.Select(item => new RankedRaceResult(
+            new RaceResult(
+                item.Score.UserProfileId,
+                item.Score.FinishedRounds > 0 ? ParticipantStatus.Finished : ParticipantStatus.Dnf,
+                item.Score.TotalDurationMilliseconds,
+                item.Score.AverageAccuracy,
+                0,
+                0,
+                0,
+                0),
+            item.Placement)).ToArray();
+    }
+
+    private static void EnsureCreator(Challenge challenge, Guid creatorProfileId)
+    {
+        if (challenge.CreatorProfileId != creatorProfileId)
+        {
+            throw ChallengeError(ChallengeErrorCodes.NotFound, NotFoundStatus, "Diese Herausforderung wurde nicht gefunden.");
+        }
+    }
+
+    private static string BuildRematchTitle(string title)
+    {
+        const string suffix = " – Revanche";
+        var prefix = title.Length <= 160 - suffix.Length
+            ? title
+            : title[..(160 - suffix.Length)].TrimEnd();
+        return $"{prefix}{suffix}";
     }
 
     private async Task ExecuteInTransactionAsync(Func<Task> operation, CancellationToken cancellationToken)
@@ -525,13 +808,6 @@ public sealed class ChallengeService(
             db.ChangeTracker.Clear();
             throw;
         }
-    }
-
-    private static string ComputeTextHash(string text)
-    {
-        var normalized = TypingEngine.NormalizeText(text);
-        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(normalized));
-        return $"sha256:{Convert.ToHexString(hash).ToLowerInvariant()}";
     }
 
     private static string CreateBindingToken()

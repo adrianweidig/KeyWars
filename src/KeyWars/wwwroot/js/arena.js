@@ -62,6 +62,14 @@ export function attachArenaPages() {
     const startForm = document.querySelector("[data-arena-start-form]");
     const dnfButton = root.querySelector("[data-arena-dnf]");
     const leaveButton = document.querySelector("[data-arena-leave]");
+    const hostControls = root.querySelector("[data-arena-host-controls]");
+    const lobbyState = root.querySelector("[data-arena-lobby-state]");
+    const lobbyLockButton = root.querySelector("[data-arena-lock]");
+    const closeRoomButton = root.querySelector("[data-arena-close]");
+    const hostTarget = root.querySelector("[data-arena-host-target]");
+    const transferHostButton = root.querySelector("[data-arena-transfer-host]");
+    const kickButton = root.querySelector("[data-arena-kick]");
+    const hostStatus = root.querySelector("[data-arena-host-status]");
     const connection = new SignalRConnection("/hubs/arena");
     const showLiveWpm = root.dataset.showLiveWpm === "true";
     const showLiveRankChanges = root.dataset.showLiveRankChanges === "true";
@@ -102,6 +110,11 @@ export function attachArenaPages() {
     let persistenceState = normalizePersistenceState(root.dataset.persistenceState) || "Inactive";
     let restoreInputFocusAfterReconnect = false;
     let ignoreNextInputBlur = false;
+
+    const clearConnectionError = () => {
+      document.querySelector("[data-arena-error]")?.remove();
+    };
+    let hostActionPending = false;
 
     const setInputDisabled = (disabled) => {
       if (!input) {
@@ -276,7 +289,7 @@ export function attachArenaPages() {
     };
 
     const visibleParticipantWindow = (ranked = rankedParticipants()) => {
-      if (displayMode() !== "focused") {
+      if (root.dataset.arenaRosterExpanded === "true" || displayMode() !== "focused") {
         return ranked;
       }
 
@@ -379,6 +392,53 @@ export function attachArenaPages() {
         row.append(title, detail);
         return row;
       }));
+    };
+
+    const renderHostControls = () => {
+      if (!hostControls || !snapshot) {
+        return;
+      }
+
+      const isHost = snapshot.creatorProfileId === currentProfileId;
+      const canManageParticipants = isHost && ["Lobby", "RoundResults"].includes(snapshot.phase) && !snapshot.finished;
+      setHidden(hostControls, !isHost);
+      setText(lobbyState, snapshot.lobbyLocked ? "Lobby gesperrt" : "Lobby offen");
+
+      if (hostTarget) {
+        const selectedId = hostTarget.value;
+        const candidates = (snapshot.participants || []).filter((participant) =>
+          participant.profileId !== snapshot.creatorProfileId &&
+          !["LeftBeforeStart", "Cancelled", "Declined", "AbortedByServer"].includes(participant.status));
+        hostTarget.replaceChildren(...candidates.map((participant) => {
+          const option = document.createElement("option");
+          option.value = participant.profileId;
+          option.dataset.status = participant.status;
+          option.textContent = `${participant.displayName} · ${statusLabel(participant.status)}`;
+          return option;
+        }));
+        if (candidates.some((participant) => participant.profileId === selectedId)) {
+          hostTarget.value = selectedId;
+        }
+        hostTarget.disabled = !canManageParticipants || candidates.length === 0 || hostActionPending;
+      }
+
+      const selectedStatus = hostTarget?.selectedOptions?.[0]?.dataset.status;
+      const canTransfer = snapshot.phase === "Lobby"
+        ? ["Joined", "Ready"].includes(selectedStatus)
+        : snapshot.phase === "RoundResults" && ["Finished", "Dnf"].includes(selectedStatus);
+      if (lobbyLockButton) {
+        lobbyLockButton.textContent = snapshot.lobbyLocked ? "Lobby öffnen" : "Lobby sperren";
+        lobbyLockButton.disabled = !isHost || snapshot.phase !== "Lobby" || snapshot.finished || hostActionPending;
+      }
+      if (transferHostButton) {
+        transferHostButton.disabled = !canManageParticipants || !canTransfer || hostActionPending;
+      }
+      if (kickButton) {
+        kickButton.disabled = !canManageParticipants || !hostTarget?.value || hostActionPending;
+      }
+      if (closeRoomButton) {
+        closeRoomButton.disabled = !isHost || snapshot.finished || hostActionPending;
+      }
     };
 
     const trackLane = (participant) => {
@@ -700,6 +760,10 @@ export function attachArenaPages() {
           dnfButton.disabled = true;
         }
 
+        hostControls?.querySelectorAll("button, select").forEach((control) => {
+          control.disabled = true;
+        });
+
         if (leaveButton) {
           leaveButton.disabled = true;
         }
@@ -747,6 +811,8 @@ export function attachArenaPages() {
         button.disabled = !connected;
       });
 
+      renderHostControls();
+
       renderTimer();
     };
 
@@ -762,6 +828,11 @@ export function attachArenaPages() {
       phaseSteps.forEach((step, index) => {
         step.classList.toggle("active", index === currentIndex);
         step.classList.toggle("done", index < currentIndex);
+        if (index === currentIndex) {
+          step.setAttribute("aria-current", "step");
+        } else {
+          step.removeAttribute("aria-current");
+        }
       });
     };
 
@@ -943,6 +1014,16 @@ export function attachArenaPages() {
 
       const previousPersistenceState = currentPersistenceState();
       const incoming = camelize(next);
+      if (snapshot && incoming.roomId !== snapshot.roomId) {
+        return;
+      }
+
+      const incomingStateVersion = Number(incoming.stateVersion);
+      const currentStateVersion = Number(snapshot?.stateVersion);
+      if (Number.isSafeInteger(incomingStateVersion) && Number.isSafeInteger(currentStateVersion) &&
+          incomingStateVersion < currentStateVersion) {
+        return;
+      }
       if (incoming.finished && terminalPersistenceStates.has(previousPersistenceState) &&
           !terminalPersistenceStates.has(persistenceStateFor(incoming))) {
         incoming.persistenceState = previousPersistenceState;
@@ -977,6 +1058,7 @@ export function attachArenaPages() {
       renderHud();
       renderTeams();
       renderPodium();
+      renderHostControls();
       setText(roundLabel, `Runde ${snapshot.currentRound} von ${snapshot.roundCount}`);
       renderState();
       renderPersistenceStatus();
@@ -999,6 +1081,9 @@ export function attachArenaPages() {
       startForm?.querySelector("button")?.setAttribute("disabled", "disabled");
       dnfButton?.setAttribute("disabled", "disabled");
       leaveButton?.setAttribute("disabled", "disabled");
+      hostControls?.querySelectorAll("button, select").forEach((control) => {
+        control.disabled = true;
+      });
       connectionStatus = "disconnected";
       root.dataset.connectionState = connectionStatus;
       setStatusText(connectionQuality, "Verbindung: Raum nicht verfügbar");
@@ -1027,11 +1112,27 @@ export function attachArenaPages() {
           return;
         }
 
+        const participantSequence = Number(delta.participantSequence);
+        const currentSequence = Number(participant.sequence);
+        if (Number.isSafeInteger(participantSequence) && Number.isSafeInteger(currentSequence) &&
+            participantSequence <= currentSequence) {
+          return;
+        }
+
         participant.correctCharacters = delta.correctCharacters;
-        participant.typedTextPreview = delta.typedTextPreview || "";
+        participant.typedTextPreview = decodeTypedStateBits(delta.typedStateBits, delta.typedCharacters) ||
+          delta.typedTextPreview || "";
         participant.wpm = delta.wpm;
         participant.accuracy = delta.accuracy;
         participant.rankHint = delta.rankHint;
+        if (Number.isSafeInteger(participantSequence)) {
+          participant.sequence = participantSequence;
+        }
+
+        const deltaStateVersion = Number(delta.stateVersion);
+        if (Number.isSafeInteger(deltaStateVersion)) {
+          snapshot.stateVersion = Math.max(Number(snapshot.stateVersion) || 0, deltaStateVersion);
+        }
         changedParticipantIds.add(participant.profileId);
       });
       renderLiveTypingBoard(changedParticipantIds);
@@ -1039,6 +1140,25 @@ export function attachArenaPages() {
       renderTrack();
       renderHud();
       renderState();
+    };
+
+    const decodeTypedStateBits = (encoded, typedCharacters) => {
+      const length = Math.max(0, Math.min(
+        Number.isSafeInteger(Number(typedCharacters)) ? Number(typedCharacters) : 0,
+        Number(snapshot?.targetCharacterCount) || 0));
+      if (length === 0 || !encoded) {
+        return "";
+      }
+
+      try {
+        const binary = window.atob(encoded);
+        return Array.from({ length }, (_, index) => {
+          const value = binary.charCodeAt(Math.floor(index / 8)) || 0;
+          return (value & (1 << (index % 8))) !== 0 ? "c" : "w";
+        }).join("");
+      } catch {
+        return "";
+      }
     };
 
     const submitProgress = () => {
@@ -1152,6 +1272,52 @@ export function attachArenaPages() {
       }
     });
 
+    const performHostAction = async (method, args, successMessage) => {
+      if (hostActionPending) {
+        return;
+      }
+
+      hostActionPending = true;
+      renderState();
+      setStatusText(hostStatus, "Aktion wird ausgeführt …");
+      try {
+        applySnapshot(await connection.invoke(method, args));
+        setStatusText(hostStatus, successMessage);
+      } catch (error) {
+        setStatusText(hostStatus, "Die Aktion konnte nicht ausgeführt werden.");
+        showConnectionError(error);
+      } finally {
+        hostActionPending = false;
+        renderState();
+      }
+    };
+
+    hostTarget?.addEventListener("change", renderHostControls);
+    lobbyLockButton?.addEventListener("click", () => {
+      void performHostAction(
+        "SetLobbyLocked",
+        [roomId, snapshot?.lobbyLocked !== true],
+        snapshot?.lobbyLocked ? "Die Lobby ist wieder offen." : "Die Lobby ist für neue Beitritte gesperrt.");
+    });
+    transferHostButton?.addEventListener("click", () => {
+      const targetId = hostTarget?.value;
+      if (targetId) {
+        void performHostAction("TransferHost", [roomId, targetId], "Die Raumleitung wurde übergeben.");
+      }
+    });
+    kickButton?.addEventListener("click", () => {
+      const targetId = hostTarget?.value;
+      const targetName = hostTarget?.selectedOptions?.[0]?.textContent || "diese Person";
+      if (targetId && window.confirm(`${targetName} wirklich aus dem Raum entfernen?`)) {
+        void performHostAction("Kick", [roomId, targetId], "Die Person wurde aus dem Raum entfernt.");
+      }
+    });
+    closeRoomButton?.addEventListener("click", () => {
+      if (window.confirm("Diesen Raum für alle schließen? Eine laufende Runde wird als Serverabbruch beendet.")) {
+        void performHostAction("Close", [roomId], "Der Raum wurde geschlossen.");
+      }
+    });
+
     leaveButton?.addEventListener("click", async () => {
       try {
         await connection.invoke("LeaveRoom", [roomId]);
@@ -1201,6 +1367,7 @@ export function attachArenaPages() {
     connection.onReconnect(async () => {
       try {
         applySnapshot(await connection.invoke("JoinRoom", [roomId]));
+        clearConnectionError();
         setConnectionStatus("connected");
         if (restoreInputFocusAfterReconnect && input && !input.disabled) {
           input.focus({ preventScroll: true });
@@ -1225,6 +1392,12 @@ export function attachArenaPages() {
       }
     });
 
+    root.addEventListener("keywars:arena-roster-display-change", () => {
+      renderLiveTypingBoard();
+      renderParticipants();
+      renderTrack();
+    });
+
     renderState();
     renderPersistenceStatus();
 
@@ -1233,7 +1406,10 @@ export function attachArenaPages() {
         setConnectionStatus("connected");
         return connection.invoke("JoinRoom", [roomId]);
       })
-      .then(applySnapshot)
+      .then((next) => {
+        applySnapshot(next);
+        clearConnectionError();
+      })
       .catch((error) => {
         setConnectionStatus("disconnected");
         showConnectionError(error);
@@ -1243,7 +1419,11 @@ export function attachArenaPages() {
       disposed = true;
       stopPersistencePolling();
       if (connection.isConnected()) {
-        connection.invoke("LeaveRoom", [roomId]).catch(() => {});
+        connection.invoke("LeaveRoom", [roomId])
+          .catch(() => {})
+          .finally(() => connection.dispose());
+      } else {
+        void connection.dispose();
       }
     });
   });

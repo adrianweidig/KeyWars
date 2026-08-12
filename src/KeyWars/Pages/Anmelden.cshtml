@@ -13,14 +13,16 @@
 
 <section class="card">
     <form method="post" class="form-grid" autocomplete="off">
-        <div asp-validation-summary="ModelOnly"></div>
+        <div asp-validation-summary="ModelOnly" role="alert" aria-live="assertive" aria-atomic="true" tabindex="-1"></div>
         <label>
             Benutzername
-            <input asp-for="Input.Username" autocomplete="username" autofocus />
+            <input asp-for="Input.Username" autocomplete="username" aria-describedby="login-username-error" autofocus />
+            <span id="login-username-error" asp-validation-for="Input.Username"></span>
         </label>
         <label>
             Passwort
-            <input asp-for="Input.Password" type="password" autocomplete="current-password" />
+            <input asp-for="Input.Password" type="password" autocomplete="current-password" aria-describedby="login-password-error" />
+            <span id="login-password-error" asp-validation-for="Input.Password"></span>
         </label>
         <button type="submit">Anmelden</button>
     </form>

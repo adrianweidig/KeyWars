@@ -132,6 +132,55 @@ public sealed class MotivationServiceTests
     }
 
     [Fact]
+    public async Task ArenaBatchPreloadsEventsWithTheWriterNormalizedSourceId()
+    {
+        await using var context = await MotivationTestContext.CreateAsync();
+        var writer = new GamificationEventWriter(context.Db);
+        var normalizedSourceId = "arena-normalized";
+        await writer.AddAsync(
+            new List<GamificationEvent>(),
+            context.Profile,
+            new GamificationEventDraft(
+                GamificationEventType.XpAwarded,
+                "xp-awarded",
+                "+1 XP",
+                "Bereits vorhandenes Ereignis.",
+                1,
+                1,
+                1,
+                GamificationRarity.Common,
+                "arena",
+                normalizedSourceId),
+            context.Time.GetUtcNow(),
+            CancellationToken.None);
+        await context.Db.SaveChangesAsync();
+        context.Db.ChangeTracker.Clear();
+
+        await context.Service.ApplyArenaResultAsync(
+            context.Profile.Id,
+            $"  {normalizedSourceId}  ",
+            72,
+            99,
+            30_000);
+        await context.Db.SaveChangesAsync();
+
+        Assert.Single(await context.Db.GamificationEvents.Where(item =>
+            item.UserProfileId == context.Profile.Id &&
+            item.Source == "arena" &&
+            item.SourceId == normalizedSourceId &&
+            item.EventKey == "xp-awarded").ToListAsync());
+        Assert.Single(await context.Db.GamificationEvents.Where(item =>
+            item.UserProfileId == context.Profile.Id &&
+            item.Source == "arena" &&
+            item.SourceId == normalizedSourceId &&
+            item.EventKey == "arena-result").ToListAsync());
+        Assert.Single(await context.Db.RewardLedgerEntries.Where(item =>
+            item.UserProfileId == context.Profile.Id &&
+            item.Source == "arena" &&
+            item.SourceId == $"  {normalizedSourceId}  ").ToListAsync());
+    }
+
+    [Fact]
     public async Task LevelUpWritesBeforeAfterEventAndOutcome()
     {
         await using var context = await MotivationTestContext.CreateAsync();

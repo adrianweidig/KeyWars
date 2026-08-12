@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using KeyWars.Data;
 using KeyWars.Domain;
+using KeyWars.Pages;
 using KeyWars.Services;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -487,9 +488,15 @@ public sealed partial class WebSmokeTests : IClassFixture<KeyWarsWebFactory>
         var profile = await db.UserProfiles.SingleAsync(item => item.SamAccountName == "max.mustermann");
         var rooms = scope.ServiceProvider.GetRequiredService<LiveRoomManager>();
         var room = rooms.CreateRoom(new CreateLiveRoomRequest(profile.Id, profile.DisplayName, "Große Runde", "Text", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 64));
+        Guid hiddenProfileId = default;
         foreach (var index in Enumerable.Range(1, 31))
         {
-            rooms.Join(room.RoomId, Guid.CreateVersion7(), $"Alpha {index:00}");
+            var participantId = Guid.CreateVersion7();
+            rooms.Join(room.RoomId, participantId, $"Alpha {index:00}");
+            if (index == 4)
+            {
+                hiddenProfileId = participantId;
+            }
         }
 
         var page = await client.GetStringAsync($"/arena/{room.RoomId}");
@@ -505,7 +512,9 @@ public sealed partial class WebSmokeTests : IClassFixture<KeyWarsWebFactory>
         Assert.Contains("Alpha 03", decodedPage);
         Assert.Contains("Alpha 31", decodedPage);
         Assert.Contains("27 weitere Teilnehmende", decodedPage);
-        Assert.DoesNotContain("Alpha 04", decodedPage);
+        Assert.DoesNotContain($"data-live-participant-id=\"{hiddenProfileId}\"", page);
+        Assert.DoesNotContain($"data-track-participant-id=\"{hiddenProfileId}\"", page);
+        Assert.DoesNotContain($"data-participant-id=\"{hiddenProfileId}\"", page);
     }
 
     [Fact]
@@ -755,19 +764,38 @@ public sealed partial class WebSmokeTests : IClassFixture<KeyWarsWebFactory>
     [Fact]
     public async Task ArenaLobbyRendersEntryPathsAndRoomCapacityWithoutInfrastructureCopy()
     {
-        var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        using var isolatedFactory = new KeyWarsWebFactory();
+        var client = isolatedFactory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
         await LoginAsync(client);
-        await using var scope = factory.Services.CreateAsyncScope();
+        await using var scope = isolatedFactory.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<KeyWarsDbContext>();
         var profile = await db.UserProfiles.SingleAsync(item => item.SamAccountName == "max.mustermann");
         var rooms = scope.ServiceProvider.GetRequiredService<LiveRoomManager>();
-        rooms.CreateRoom(new CreateLiveRoomRequest(profile.Id, profile.DisplayName, "Offene Runde", "Text", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 8));
+        for (var index = 1; index <= 21; index++)
+        {
+            rooms.CreateRoom(new CreateLiveRoomRequest(
+                profile.Id,
+                profile.DisplayName,
+                $"Offene Runde {index:00}",
+                "Text",
+                LiveRoomMode.Classic,
+                LiveRoomVisibility.InternalOpen,
+                1,
+                8));
+        }
 
         var arena = await client.GetStringAsync("/arena");
+        var secondPage = await client.GetStringAsync("/arena?Seite=2");
 
         Assert.Contains("Live-Rennen starten", arena);
         Assert.Contains("Code beitreten", arena);
-        Assert.Contains("Offene Runde", arena);
+        Assert.Contains("Offene Runde 01", arena);
+        Assert.Contains("Offene Runde 20", arena);
+        Assert.DoesNotContain("Offene Runde 21", arena);
+        Assert.Contains("Seite 1 von 2", arena);
+        Assert.Contains("Offene Runde 21", secondPage);
+        Assert.DoesNotContain("Offene Runde 01", secondPage);
+        Assert.Contains("Seite 2 von 2", secondPage);
         Assert.Contains("Max Mustermann", arena);
         Assert.Contains("1 / 8", arena);
         Assert.Contains("Klassisches Rennen", arena);
@@ -803,7 +831,127 @@ public sealed partial class WebSmokeTests : IClassFixture<KeyWarsWebFactory>
         Assert.DoesNotContain("aria-disabled=\"true\"", form);
         Assert.Contains("data-submit-guard", form);
         Assert.DoesNotContain("max=\"64\"", form);
-        Assert.DoesNotContain("Einladungen", form);
+        Assert.Contains("Nur eingeladene Personen", WebUtility.HtmlDecode(form));
+        Assert.Contains("data-arena-invitations", form);
+    }
+
+    [Fact]
+    public async Task ArenaCapacityReturnsRetryableServiceUnavailablePage()
+    {
+        using var customFactory = new ConfiguredKeyWarsWebFactory(12, maxConcurrentRooms: 1);
+        var client = customFactory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        await LoginAsync(client);
+        Guid textId;
+        await using (var scope = customFactory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<KeyWarsDbContext>();
+            var profile = await db.UserProfiles.SingleAsync(item => item.SamAccountName == "max.mustermann");
+            textId = await db.TrainingTexts.Select(item => item.Id).FirstAsync();
+            var dispatcher = scope.ServiceProvider.GetRequiredService<ILiveRoomDispatcher>();
+            await dispatcher.CreateRoomAsync(new CreateLiveRoomRequest(
+                profile.Id,
+                profile.DisplayName,
+                "Bereits offen",
+                "Text",
+                LiveRoomMode.Classic,
+                LiveRoomVisibility.Code,
+                1,
+                8));
+        }
+
+        var form = await client.GetStringAsync("/arena/neu");
+        var token = AntiForgeryRegex().Match(form).Groups["token"].Value;
+        var response = await client.PostAsync("/arena/neu", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["Input.Title"] = "Ein Raum zu viel",
+            ["Input.TrainingTextId"] = textId.ToString(),
+            ["Input.Visibility"] = nameof(LiveRoomVisibility.Code),
+            ["Input.Mode"] = nameof(LiveRoomMode.Classic),
+            ["Input.RoundCount"] = "1",
+            ["Input.MaxParticipants"] = "8",
+            ["__RequestVerificationToken"] = token
+        }));
+        var body = WebUtility.HtmlDecode(await response.Content.ReadAsStringAsync());
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Equal(TimeSpan.FromSeconds(5), response.Headers.RetryAfter?.Delta);
+        Assert.Contains("Die Arena ist gerade ausgelastet", body);
+        Assert.Contains("Es wurde kein Raum erstellt", body);
+    }
+
+    [Fact]
+    public async Task OnboardingPersistsThreeShortStepsAndChosenDestination()
+    {
+        using var isolatedFactory = new KeyWarsWebFactory();
+        var client = isolatedFactory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        await LoginAsync(client);
+
+        var dashboard = WebUtility.HtmlDecode(await client.GetStringAsync("/"));
+        Assert.Contains("In drei Schritten startklar", dashboard);
+
+        var stepOne = await client.GetStringAsync("/onboarding");
+        Assert.Contains("Schritt 1 von 3", WebUtility.HtmlDecode(stepOne));
+        Assert.Contains("Einrichtung überspringen", WebUtility.HtmlDecode(stepOne));
+        var stepOneToken = AntiForgeryRegex().Match(stepOne).Groups["token"].Value;
+        var firstResponse = await client.PostAsync("/onboarding?handler=Training", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["Input.PreferredMode"] = nameof(TrainingMode.Words25),
+            ["__RequestVerificationToken"] = stepOneToken
+        }));
+        Assert.Equal("/onboarding?schritt=2", firstResponse.Headers.Location?.OriginalString);
+
+        var stepTwo = await client.GetStringAsync(firstResponse.Headers.Location);
+        Assert.Contains("Schritt 2 von 3", WebUtility.HtmlDecode(stepTwo));
+        var stepTwoToken = AntiForgeryRegex().Match(stepTwo).Groups["token"].Value;
+        var secondResponse = await client.PostAsync("/onboarding?handler=Visibility", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["Input.LeaderboardVisible"] = "true",
+            ["Input.ShowLiveWpm"] = "true",
+            ["Input.ReducedMotion"] = "true",
+            ["__RequestVerificationToken"] = stepTwoToken
+        }));
+        Assert.Equal("/onboarding?schritt=3", secondResponse.Headers.Location?.OriginalString);
+
+        var stepThree = await client.GetStringAsync(secondResponse.Headers.Location);
+        Assert.Contains("Schritt 3 von 3", WebUtility.HtmlDecode(stepThree));
+        var stepThreeToken = AntiForgeryRegex().Match(stepThree).Groups["token"].Value;
+        var finishResponse = await client.PostAsync("/onboarding?handler=Finish", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["Input.Destination"] = nameof(OnboardingModel.OnboardingDestination.TextLibrary),
+            ["__RequestVerificationToken"] = stepThreeToken
+        }));
+
+        Assert.Equal(HttpStatusCode.Redirect, finishResponse.StatusCode);
+        Assert.Equal("/texte", finishResponse.Headers.Location?.OriginalString);
+        await using var scope = isolatedFactory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<KeyWarsDbContext>();
+        var profile = await db.UserProfiles.SingleAsync(item => item.SamAccountName == "max.mustermann");
+        Assert.Equal(TrainingMode.Words25, profile.PreferredMode);
+        Assert.True(profile.LeaderboardVisible);
+        Assert.True(profile.ShowLiveWpm);
+        Assert.True(profile.ReducedMotion);
+        Assert.NotNull(profile.OnboardingCompletedAt);
+    }
+
+    [Fact]
+    public async Task OnboardingCanBeSkipped()
+    {
+        using var isolatedFactory = new KeyWarsWebFactory();
+        var client = isolatedFactory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        await LoginAsync(client);
+        var page = await client.GetStringAsync("/onboarding");
+        var token = AntiForgeryRegex().Match(page).Groups["token"].Value;
+
+        var response = await client.PostAsync("/onboarding?handler=Skip", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["__RequestVerificationToken"] = token
+        }));
+
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.Equal("/", response.Headers.Location?.OriginalString);
+        var secondVisit = await client.GetAsync("/onboarding");
+        Assert.Equal(HttpStatusCode.Redirect, secondVisit.StatusCode);
+        Assert.Equal("/", secondVisit.Headers.Location?.OriginalString);
     }
 
     [Fact]
@@ -922,7 +1070,8 @@ public sealed class KeyWarsWebFactory : WebApplicationFactory<Program>
 
 public sealed class ConfiguredKeyWarsWebFactory(
     int maxParticipantsPerRoom,
-    int maxArenaTargetGraphemes = LiveOptions.MaximumSafeArenaTargetGraphemes) : WebApplicationFactory<Program>
+    int maxArenaTargetGraphemes = LiveOptions.MaximumSafeArenaTargetGraphemes,
+    int maxConcurrentRooms = 256) : WebApplicationFactory<Program>
 {
     private readonly string dataDirectory = Path.Combine(Path.GetTempPath(), $"keywars-e2e-{Guid.NewGuid():N}");
 
@@ -933,5 +1082,6 @@ public sealed class ConfiguredKeyWarsWebFactory(
         builder.UseSetting("KEYWARS:AUTH:DEVELOPMENT_LOGIN", "true");
         builder.UseSetting("KEYWARS:LIVE:MAX_PARTICIPANTS_PER_ROOM", maxParticipantsPerRoom.ToString(System.Globalization.CultureInfo.InvariantCulture));
         builder.UseSetting("KEYWARS:LIVE:MAX_ARENA_TARGET_GRAPHEMES", maxArenaTargetGraphemes.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        builder.UseSetting("KEYWARS:LIVE:MAX_CONCURRENT_ROOMS", maxConcurrentRooms.ToString(System.Globalization.CultureInfo.InvariantCulture));
     }
 }

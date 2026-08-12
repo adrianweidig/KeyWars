@@ -9,6 +9,9 @@ function fakeSignalRSource() {
       this.reconnectedHandlers = [];
       this.closeHandlers = [];
       this.invocations = [];
+      this.startAttempts = 0;
+      this.stateVersion = 1;
+      this.connectionId = "fake-connection";
     }
 
     on(target, handler) {
@@ -28,11 +31,21 @@ function fakeSignalRSource() {
     }
 
     async start() {
+      this.startAttempts += 1;
       if (new URLSearchParams(window.location.search).get("signalRStart") === "failed") {
         throw new Error("Test-Verbindung konnte nicht gestartet werden.");
       }
 
+      const failStarts = Number(new URLSearchParams(window.location.search).get("failStarts") || 0);
+      if (this.startAttempts <= failStarts) {
+        throw new Error("Test-Verbindung ist vorübergehend nicht verfügbar.");
+      }
+
       this.state = "Connected";
+    }
+
+    async stop() {
+      this.state = "Disconnected";
     }
 
     async invoke(target, ...args) {
@@ -59,6 +72,7 @@ function fakeSignalRSource() {
         roundCount: 1,
         currentRound: 1,
         roundVersion: 1,
+        stateVersion: this.stateVersion,
         phase: running ? "Running" : "SeriesResults",
         started: true,
         finished: !running,
@@ -96,9 +110,14 @@ function fakeSignalRSource() {
       this.reconnectedHandlers.forEach((handler) => handler("fake-connection"));
     }
 
-    emitClosed() {
+    emit(target, value) {
+      this.handlers.get(target)?.(value);
+    }
+
+    emitClosed(message) {
       this.state = "Disconnected";
-      this.closeHandlers.forEach((handler) => handler());
+      const error = message ? new Error(message) : undefined;
+      this.closeHandlers.forEach((handler) => handler(error));
     }
   }
 
@@ -125,6 +144,7 @@ function fakeSignalRSource() {
       Connected: "Connected",
       Reconnecting: "Reconnecting"
     },
+    HttpTransportType: { WebSockets: 1 },
     LogLevel: { Warning: 3 }
   };
 })();`;

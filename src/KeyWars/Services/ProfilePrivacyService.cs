@@ -77,6 +77,7 @@ public sealed record ProfileExportPayload(
     IReadOnlyList<TrainingText> OwnedTexts,
     IReadOnlyList<TextCollection> OwnedCollections,
     IReadOnlyList<TextCollectionItem> OwnedCollectionItems,
+    IReadOnlyList<ContentModerationAuditEntry> ContentModerationAudit,
     IReadOnlyList<Challenge> CreatedChallenges,
     IReadOnlyList<ChallengeRound> ChallengeRounds,
     IReadOnlyList<ChallengeParticipant> ChallengeParticipations,
@@ -87,10 +88,10 @@ public sealed record ProfileExportPayload(
 
 public sealed class ProfilePrivacyService(
     KeyWarsDbContext db,
-    LiveRoomManager liveRooms,
-    LiveRoomCompletionQueue liveRoomCompletions,
-    AttemptSessionStore attemptSessions,
-    ProfileAccessGate accessGate,
+    ILiveRoomDispatcher liveRooms,
+    ILiveRoomCompletionDrain liveRoomCompletions,
+    IAttemptSessionStateStore attemptSessions,
+    IProfileAccessGate accessGate,
     TimeProvider timeProvider)
 {
     public async Task<ProfileExportPayload> BuildExportAsync(Guid profileId, CancellationToken cancellationToken = default)
@@ -202,7 +203,7 @@ public sealed class ProfilePrivacyService(
             .ToListAsync(cancellationToken);
 
         return new ProfileExportPayload(
-            2,
+            3,
             timeProvider.GetUtcNow(),
             profile,
             attempts,
@@ -215,6 +216,12 @@ public sealed class ProfilePrivacyService(
             await db.TrainingTexts.Where(item => item.OwnerProfileId == profileId).ToListAsync(cancellationToken),
             ownedCollections,
             ownedCollectionItems,
+            (await db.ContentModerationAuditEntries
+                .Where(item => item.ActorProfileId == profileId || item.TargetOwnerProfileId == profileId)
+                .ToListAsync(cancellationToken))
+                .OrderBy(item => item.CreatedAt)
+                .ThenBy(item => item.Id)
+                .ToArray(),
             createdChallenges,
             challengeRounds,
             challengeParticipations,
@@ -308,12 +315,12 @@ public sealed class ProfilePrivacyService(
         Func<Task> operation,
         CancellationToken cancellationToken)
     {
-        BeginExclusiveOperation(profileId);
+        await BeginExclusiveOperationAsync(profileId, cancellationToken);
         var lifecycleLocks = new List<IAsyncDisposable>();
         try
         {
             await accessGate.WaitForIdleAsync(profileId, cancellationToken);
-            var removedSessions = attemptSessions.RemoveProfile(profileId);
+            var removedSessions = await attemptSessions.RemoveProfileAsync(profileId, cancellationToken);
             var persistedAttemptIds = await db.TypingAttempts
                 .Where(attempt => attempt.UserProfileId == profileId &&
                     (attempt.Phase == AttemptPhase.Prepared || attempt.Phase == AttemptPhase.Started))
@@ -330,15 +337,15 @@ public sealed class ProfilePrivacyService(
                 lifecycleLocks.Add(await attemptSessions.AcquireLifecycleLockAsync(attemptId, cancellationToken));
             }
 
-            attemptSessions.RemoveProfile(profileId);
+            await attemptSessions.RemoveProfileAsync(profileId, cancellationToken);
             await AbortActiveAttemptsAsync(profileId, cancellationToken);
-            liveRooms.RemoveProfile(profileId);
+            await liveRooms.RemoveProfileAsync(profileId, cancellationToken);
             var drain = await liveRoomCompletions.DrainProfileAsync(profileId, cancellationToken);
             EnsureDrainSucceeded(drain);
             await operation();
             if (markDeleted)
             {
-                accessGate.MarkDeleted(profileId);
+                await accessGate.MarkDeletedAsync(profileId, cancellationToken);
             }
         }
         finally
@@ -352,19 +359,19 @@ public sealed class ProfilePrivacyService(
             }
             finally
             {
-                accessGate.CompleteOperation(profileId);
+                await accessGate.CompleteOperationAsync(profileId, CancellationToken.None);
             }
         }
     }
 
-    private void BeginExclusiveOperation(Guid profileId)
+    private async Task BeginExclusiveOperationAsync(Guid profileId, CancellationToken cancellationToken)
     {
-        if (accessGate.TryBeginOperation(profileId))
+        if (await accessGate.TryBeginOperationAsync(profileId, cancellationToken))
         {
             return;
         }
 
-        throw accessGate.GetState(profileId) == ProfileAccessState.Deleted
+        throw await accessGate.GetStateAsync(profileId, cancellationToken) == ProfileAccessState.Deleted
             ? new ProfileOperationException("profile_deleted", "Dieses Profil wurde bereits gelöscht.")
             : new ProfileOperationException("profile_operation_in_progress", "Für dieses Profil läuft bereits eine Datenschutzoperation.");
     }

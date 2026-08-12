@@ -1,12 +1,14 @@
 # Live-Arena
 
-Live-Räume laufen im Arbeitsspeicher und unterstützen standardmäßig bis zu 64
-Personen. Verfügbar sind Einzelrennen, Serien über drei oder fünf Runden und
-eine automatisch ausgeglichene Teamwertung über eine Runde.
+Live-Räume unterstützen standardmäßig bis zu 64 Personen. Ihr aktiver
+Raumzustand liegt im Arbeitsspeicher der zuständigen Arena-Instanz; im
+Scale-Modus sichert Redis zusätzlich Zuständigkeit und Presence. Verfügbar sind
+Einzelrennen, Serien über drei oder fünf Runden und eine automatisch
+ausgeglichene Teamwertung über eine Runde.
 
 ## Zustands- und Persistenzmodell
 
-- Tastenfortschritt bleibt flüchtig und wird nicht pro Taste in SQLite geschrieben.
+- Tastenfortschritt bleibt flüchtig und wird nicht pro Taste in die Datenbank geschrieben.
 - Progress-Deltas werden pro Person koalesziert und höchstens mit der konfigurierten Broadcast-Rate gesendet.
 - Start, Finish, Leave und Phasenwechsel liefern zuverlässige Vollsnapshots.
 - Erst das Ende eines Rennens oder einer Serie erzeugt einen idempotenten Abschlussjob mit aggregierten Ergebnissen.
@@ -35,7 +37,8 @@ Für hohe Last zuerst diese Endpunkte beobachten:
 - `/health/arena-persistence`: Abschlussjobs, Wiederholungen, Fehler und Persistenzdauer.
 
 Drops nicht sofort mit größeren Queues überdecken. Zuerst Teilnehmerzahl,
-`KEYWARS_LIVE_BROADCAST_HZ`, CPU, Arbeitsspeicher und SQLite-Latenz messen.
+`KEYWARS_LIVE_BROADCAST_HZ`, CPU, Arbeitsspeicher sowie Datenbank- und
+Redis-Latenz messen.
 Alle wirksamen Grenzen stehen in der
 [Konfigurationsübersicht](configuration.md#live-arena-und-kapazität).
 

@@ -1,15 +1,22 @@
 using System.ComponentModel.DataAnnotations;
 using System.Text;
 using KeyWars.Auth;
+using KeyWars.Data;
 using KeyWars.Domain;
 using KeyWars.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
 namespace KeyWars.Pages.Arena;
 
-public sealed class NeuModel(CurrentUser currentUser, TextLibraryService texts, LiveRoomManager rooms, IOptions<LiveOptions> liveOptions) : PageModel
+public sealed class NeuModel(
+    CurrentUser currentUser,
+    TextLibraryService texts,
+    ILiveRoomDispatcher rooms,
+    IOptions<LiveOptions> liveOptions,
+    KeyWarsDbContext db) : PageModel
 {
     public IReadOnlyList<TrainingText> Texts { get; private set; } = [];
     public IReadOnlyList<ArenaTextOption> TextOptions { get; private set; } = [];
@@ -17,6 +24,8 @@ public sealed class NeuModel(CurrentUser currentUser, TextLibraryService texts, 
     public int MaxParticipantsLimit { get; private set; }
     public int MaxArenaTargetGraphemes { get; private set; }
     public int ExcludedTextCount { get; private set; }
+    public IReadOnlyList<UserProfile> SelectedInvitations { get; private set; } = [];
+    public IReadOnlyList<string> Departments { get; private set; } = [];
 
     [BindProperty]
     public RoomInput Input { get; set; } = new();
@@ -25,8 +34,7 @@ public sealed class NeuModel(CurrentUser currentUser, TextLibraryService texts, 
     {
         ApplyConfiguredLimits();
         var profile = await currentUser.RequireProfileAsync(User, cancellationToken);
-        Texts = await texts.ListVisibleAsync(profile.Id, cancellationToken);
-        BuildTextOptions();
+        await LoadPageDataAsync(profile.Id, [], cancellationToken);
         Input.TrainingTextId = TextOptions.FirstOrDefault()?.Id ?? Guid.Empty;
         Input.MaxParticipants = Math.Min(Input.MaxParticipants, MaxParticipantsLimit);
     }
@@ -35,8 +43,7 @@ public sealed class NeuModel(CurrentUser currentUser, TextLibraryService texts, 
     {
         ApplyConfiguredLimits();
         var profile = await currentUser.RequireProfileAsync(User, cancellationToken);
-        Texts = await texts.ListVisibleAsync(profile.Id, cancellationToken);
-        BuildTextOptions();
+        await LoadPageDataAsync(profile.Id, Input.InvitationProfileIds, cancellationToken);
         if (Input.MaxParticipants < 2 || Input.MaxParticipants > MaxParticipantsLimit)
         {
             ModelState.AddModelError($"{nameof(Input)}.{nameof(Input.MaxParticipants)}", $"Erlaubt sind 2 bis {MaxParticipantsLimit} Personen.");
@@ -75,6 +82,28 @@ public sealed class NeuModel(CurrentUser currentUser, TextLibraryService texts, 
                     : "Der ausgewählte Text ist nicht verfügbar.");
         }
 
+        var distinctInvitationIds = Input.InvitationProfileIds.Distinct().ToArray();
+        if (distinctInvitationIds.Length != Input.InvitationProfileIds.Count)
+        {
+            ModelState.AddModelError($"{nameof(Input)}.{nameof(Input.InvitationProfileIds)}", "Eine Person darf nur einmal eingeladen werden.");
+        }
+        else if (Input.Visibility == LiveRoomVisibility.InvitationOnly && distinctInvitationIds.Length == 0)
+        {
+            ModelState.AddModelError($"{nameof(Input)}.{nameof(Input.InvitationProfileIds)}", "Wähle mindestens eine eingeladene Person aus.");
+        }
+        else if (Input.Visibility != LiveRoomVisibility.InvitationOnly && distinctInvitationIds.Length > 0)
+        {
+            ModelState.AddModelError($"{nameof(Input)}.{nameof(Input.InvitationProfileIds)}", "Direkte Einladungen sind nur für Einladungsräume möglich.");
+        }
+        else if (SelectedInvitations.Count != distinctInvitationIds.Length)
+        {
+            ModelState.AddModelError($"{nameof(Input)}.{nameof(Input.InvitationProfileIds)}", "Mindestens eine eingeladene Person ist nicht mehr verfügbar.");
+        }
+        else if (distinctInvitationIds.Length + 1 > Input.MaxParticipants)
+        {
+            ModelState.AddModelError($"{nameof(Input)}.{nameof(Input.InvitationProfileIds)}", "Die Einladungsliste ist größer als die gewählte Raumkapazität.");
+        }
+
         if (!ModelState.IsValid)
         {
             return Page();
@@ -91,17 +120,65 @@ public sealed class NeuModel(CurrentUser currentUser, TextLibraryService texts, 
             return Page();
         }
 
-        var snapshot = rooms.CreateRoom(new CreateLiveRoomRequest(
-            profile.Id,
-            profile.DisplayName,
-            string.IsNullOrWhiteSpace(Input.Title) ? text.Title : Input.Title,
-            normalizedTarget,
-            Input.Mode,
-            Input.Visibility,
-            Input.RoundCount,
-            Input.MaxParticipants));
-        return RedirectToPage("/Arena/Raum", new { id = snapshot.RoomId });
+        try
+        {
+            var invitations = SelectedInvitations
+                .Select(person => new LiveRoomInvitation(person.Id, person.DisplayName))
+                .ToArray();
+            var snapshot = await rooms.CreateRoomAsync(new CreateLiveRoomRequest(
+                profile.Id,
+                profile.DisplayName,
+                string.IsNullOrWhiteSpace(Input.Title) ? text.Title : Input.Title,
+                normalizedTarget,
+                Input.Mode,
+                Input.Visibility,
+                Input.RoundCount,
+                Input.MaxParticipants,
+                invitations), cancellationToken);
+            return RedirectToPage("/Arena/Raum", new { id = snapshot.RoomId });
+        }
+        catch (InvalidOperationException exception) when (IsCapacityError(exception.Message))
+        {
+            Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+            Response.Headers.RetryAfter = "5";
+            ModelState.AddModelError(string.Empty, "Die Arena ist gerade ausgelastet. Es wurde kein Raum erstellt. Warte kurz oder tritt einem bestehenden Raum bei.");
+            return Page();
+        }
+        catch (InvalidOperationException exception)
+        {
+            Response.StatusCode = StatusCodes.Status409Conflict;
+            ModelState.AddModelError(string.Empty, exception.Message);
+            return Page();
+        }
     }
+
+    private async Task LoadPageDataAsync(Guid profileId, IReadOnlyCollection<Guid> invitationIds, CancellationToken cancellationToken)
+    {
+        Texts = await texts.ListVisibleAsync(profileId, cancellationToken);
+        BuildTextOptions();
+        if (invitationIds.Count > 0)
+        {
+            SelectedInvitations = await db.UserProfiles
+                .AsNoTracking()
+                .Where(person => invitationIds.Contains(person.Id) && !person.Deleted && person.Id != profileId)
+                .OrderBy(person => person.DisplayName)
+                .ThenBy(person => person.SamAccountName)
+                .ToListAsync(cancellationToken);
+        }
+
+        var departments = await db.UserProfiles
+            .AsNoTracking()
+            .Where(person => !person.Deleted && person.Id != profileId && person.Department != null && person.Department != "")
+            .Select(person => person.Department!)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+        Departments = departments.Order(StringComparer.CurrentCultureIgnoreCase).ToArray();
+    }
+
+    private static bool IsCapacityError(string message) =>
+        message.Contains("maximale Anzahl gleichzeitiger Live-Räume", StringComparison.OrdinalIgnoreCase) ||
+        message.Contains("Persistenz", StringComparison.OrdinalIgnoreCase) ||
+        message.Contains("vorübergehend keine neuen Räume", StringComparison.OrdinalIgnoreCase);
 
     private void ApplyConfiguredLimits()
     {
@@ -170,5 +247,6 @@ public sealed class NeuModel(CurrentUser currentUser, TextLibraryService texts, 
         public LiveRoomMode Mode { get; set; } = LiveRoomMode.Classic;
         public int RoundCount { get; set; } = 1;
         public int MaxParticipants { get; set; } = 16;
+        public List<Guid> InvitationProfileIds { get; set; } = [];
     }
 }

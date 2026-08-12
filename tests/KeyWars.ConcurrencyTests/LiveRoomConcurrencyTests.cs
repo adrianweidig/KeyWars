@@ -688,9 +688,10 @@ public sealed class LiveRoomConcurrencyTests
         Assert.Equal(room.RoomId, result.Delta.RoomId);
         Assert.Equal(first, result.Delta.ParticipantId);
         Assert.Equal(4, result.Delta.CorrectCharacters);
-        Assert.Equal("cccc", result.Delta.TypedTextPreview);
+        Assert.Equal(4, result.Delta.TypedCharacters);
+        Assert.Equal("Dw==", result.Delta.TypedStateBits);
         Assert.Equal(100, result.Delta.Accuracy);
-        Assert.Equal(1, result.Delta.RankHint);
+        Assert.Null(result.Delta.RankHint);
     }
 
     [Fact]
@@ -702,7 +703,8 @@ public sealed class LiveRoomConcurrencyTests
 
         Assert.NotNull(result.Delta);
         Assert.Equal(2, result.Delta.CorrectCharacters);
-        Assert.Equal("ccwc", result.Delta.TypedTextPreview);
+        Assert.Equal(4, result.Delta.TypedCharacters);
+        Assert.Equal("Cw==", result.Delta.TypedStateBits);
     }
 
     [Fact]
@@ -935,7 +937,7 @@ public sealed class LiveRoomConcurrencyTests
         var manager = CreateManager(new LiveOptions { ReconnectGraceSeconds = 2 }, time);
         var sender = new RecordingRoomUpdateSender();
         var service = new LiveRoomSweepService(
-            manager,
+            new LocalLiveRoomDispatcher(manager),
             sender,
             time,
             NullLogger<LiveRoomSweepService>.Instance);
@@ -990,9 +992,12 @@ public sealed class LiveRoomConcurrencyTests
         await broadcaster.PublishAsync(new LiveProgressDelta(
             room.RoomId,
             3,
+            4,
             first,
             1,
-            "c",
+            1,
+            1,
+            "AQ==",
             1,
             100,
             1), CancellationToken.None);
@@ -1028,6 +1033,153 @@ public sealed class LiveRoomConcurrencyTests
 
         Assert.Equal(ParticipantStatus.LeftBeforeStart, snapshot.Participants.Single(item => item.ProfileId == second).Status);
         Assert.False(snapshot.Participants.Single(item => item.ProfileId == second).Ready);
+    }
+
+    [Fact]
+    public void StateVersionAdvancesForMutationsAndProgressCarriesParticipantSequence()
+    {
+        var (manager, room, first, _, _) = CreateRunningRoom();
+        var before = manager.Snapshot(room.RoomId);
+
+        var progress = manager.SubmitProgressDelta(room.RoomId, first, 8, "Te");
+        var delta = Assert.IsType<LiveProgressDelta>(progress.Delta);
+        var after = manager.Snapshot(room.RoomId);
+
+        Assert.True(after.StateVersion > before.StateVersion);
+        Assert.Equal(after.StateVersion, delta.StateVersion);
+        Assert.Equal(8, delta.ParticipantSequence);
+        Assert.Equal(2, delta.TypedCharacters);
+        Assert.Equal("Aw==", delta.TypedStateBits);
+
+        var stale = manager.SubmitProgressDelta(room.RoomId, first, 7, "T");
+        Assert.Null(stale.Delta);
+        Assert.Equal(after.StateVersion, manager.Snapshot(room.RoomId).StateVersion);
+    }
+
+    [Fact]
+    public void InvitationLockKickAndRejoinRulesAreServerAuthoritative()
+    {
+        var manager = CreateManager();
+        var host = Guid.CreateVersion7();
+        var invited = Guid.CreateVersion7();
+        var outsider = Guid.CreateVersion7();
+        var room = manager.CreateRoom(new CreateLiveRoomRequest(
+            host,
+            "Host",
+            "Privat",
+            "Text",
+            LiveRoomMode.Classic,
+            LiveRoomVisibility.InvitationOnly,
+            1,
+            4,
+            [new LiveRoomInvitation(invited, "Gast")]));
+
+        Assert.Empty(manager.ListLobbySummaries(outsider).Items);
+        var summary = Assert.Single(manager.ListLobbySummaries(invited).Items);
+        Assert.Equal("Host", summary.CreatorDisplayName);
+        Assert.Equal(1, summary.RoundCount);
+        Assert.Equal(1, summary.CurrentRound);
+        Assert.Equal(1, summary.ParticipantCount);
+        Assert.Throws<InvalidOperationException>(() => manager.Join(room.RoomId, outsider, "Fremd"));
+
+        var locked = manager.SetLobbyLocked(room.RoomId, host, true);
+        Assert.True(locked.LobbyLocked);
+        Assert.Throws<InvalidOperationException>(() => manager.Join(room.RoomId, invited, "Gast"));
+
+        manager.SetLobbyLocked(room.RoomId, host, false);
+        var joined = manager.Join(room.RoomId, invited, "Gast");
+        Assert.Equal(ParticipantStatus.Joined, joined.Participants.Single(item => item.ProfileId == invited).Status);
+
+        manager.SetLobbyLocked(room.RoomId, host, true);
+        var rejoined = manager.Join(room.RoomId, invited, "Gast");
+        Assert.Equal(ParticipantStatus.Joined, rejoined.Participants.Single(item => item.ProfileId == invited).Status);
+
+        var kicked = manager.Kick(room.RoomId, host, invited);
+        Assert.Equal(ParticipantStatus.LeftBeforeStart, kicked.Participants.Single(item => item.ProfileId == invited).Status);
+        Assert.Throws<InvalidOperationException>(() => manager.Join(room.RoomId, invited, "Gast"));
+    }
+
+    [Fact]
+    public void ExplicitHostTransferAndCloseAreIdempotent()
+    {
+        var manager = CreateManager();
+        var first = Guid.CreateVersion7();
+        var second = Guid.CreateVersion7();
+        var room = manager.CreateRoom(new CreateLiveRoomRequest(
+            first,
+            "A",
+            "Raum",
+            "Text",
+            LiveRoomMode.Classic,
+            LiveRoomVisibility.InternalOpen,
+            1,
+            8));
+        manager.Join(room.RoomId, second, "B");
+
+        var transferred = manager.TransferHost(room.RoomId, first, second);
+        var repeated = manager.TransferHost(room.RoomId, second, second);
+        Assert.Equal(second, transferred.CreatorProfileId);
+        Assert.Equal(transferred.StateVersion, repeated.StateVersion);
+
+        var closed = manager.Close(room.RoomId, second);
+        var closedAgain = manager.Close(room.RoomId, second);
+        Assert.Equal(LiveRoomPhase.Closed, closed.Phase);
+        Assert.True(closed.Finished);
+        Assert.Equal(closed.StateVersion, closedAgain.StateVersion);
+        Assert.Throws<InvalidOperationException>(() => manager.Join(room.RoomId, Guid.CreateVersion7(), "C"));
+    }
+
+    [Fact]
+    public async Task PresenceRollbackRestoresPreviousRoomAndNoOpTransitionIsSafe()
+    {
+        var presence = CreatePresence();
+        var profileId = Guid.CreateVersion7();
+        var previousRoomId = Guid.CreateVersion7();
+        var rejectedRoomId = Guid.CreateVersion7();
+        await presence.EnterRoomAsync(profileId, "tab", previousRoomId);
+
+        var transition = await presence.EnterRoomAsync(profileId, "tab", rejectedRoomId);
+        Assert.True(transition.Changed);
+        await presence.RollbackEnterRoomAsync(profileId, "tab", rejectedRoomId, transition);
+        Assert.Equal(1, await presence.CountRoomConnectionsAsync(profileId, previousRoomId));
+        Assert.Equal(0, await presence.CountRoomConnectionsAsync(profileId, rejectedRoomId));
+
+        var unchanged = await presence.EnterRoomAsync(profileId, "tab", previousRoomId);
+        Assert.False(unchanged.Changed);
+        await presence.RollbackEnterRoomAsync(profileId, "tab", previousRoomId, unchanged);
+        Assert.Equal(1, await presence.CountRoomConnectionsAsync(profileId, previousRoomId));
+    }
+
+    [Fact]
+    public void RoomMementoRoundTripPreservesVersionedAuthorityAndRejectsStaleImport()
+    {
+        var source = CreateManager();
+        var host = Guid.CreateVersion7();
+        var guest = Guid.CreateVersion7();
+        var room = source.CreateRoom(new CreateLiveRoomRequest(
+            host,
+            "A",
+            "Verteilt",
+            "Schlüssel",
+            LiveRoomMode.Series,
+            LiveRoomVisibility.InvitationOnly,
+            3,
+            8,
+            [new LiveRoomInvitation(guest, "B")]));
+        source.Join(room.RoomId, guest, "B");
+        source.SetReady(room.RoomId, guest, true);
+        var memento = source.ExportRoomState(room.RoomId);
+
+        var replica = CreateManager();
+        Assert.True(replica.ImportRoomState(memento));
+        var restored = replica.Snapshot(room.RoomId);
+        Assert.Equal(memento.StateVersion, restored.StateVersion);
+        Assert.Equal(room.Code, restored.Code);
+        Assert.Equal(ParticipantStatus.Ready, restored.Participants.Single(item => item.ProfileId == guest).Status);
+
+        var advanced = replica.SetLobbyLocked(room.RoomId, host, true);
+        Assert.False(replica.ImportRoomState(memento));
+        Assert.Equal(advanced.StateVersion, replica.Snapshot(room.RoomId).StateVersion);
     }
 
     private static LiveRoomManager CreateManager(

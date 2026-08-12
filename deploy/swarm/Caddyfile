@@ -1,0 +1,18 @@
+:8080 {
+	@edge_health path /health/edge
+	respond @edge_health "ok" 200
+
+	@metrics path /metrics
+	respond @metrics "not found" 404
+
+	@arena path /arena* /hubs/arena* /api/arena* /profil/loeschen* /profil/statistik-zuruecksetzen*
+	reverse_proxy @arena keywars-arena:8080 {
+		header_up X-Forwarded-Proto https
+		stream_close_delay 5m
+	}
+
+	reverse_proxy keywars-web:8080 {
+		header_up X-Forwarded-Proto https
+		stream_close_delay 5m
+	}
+}

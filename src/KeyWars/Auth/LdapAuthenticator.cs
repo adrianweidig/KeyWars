@@ -19,6 +19,7 @@ public sealed class LdapAuthenticator(IOptions<LdapOptions> options, ILogger<Lda
         "mail",
         "department",
         "title",
+        "memberOf",
         "userAccountControl"
     ];
 
@@ -155,7 +156,10 @@ public sealed class LdapAuthenticator(IOptions<LdapOptions> options, ILogger<Lda
             surname,
             GetString(entry, "mail"),
             GetString(entry, "department"),
-            GetString(entry, "title"));
+            GetString(entry, "title"))
+        {
+            GroupValues = GetStrings(entry, "memberOf")
+        };
     }
 
     private static bool IsDisabled(SearchResultEntry entry)
@@ -172,6 +176,22 @@ public sealed class LdapAuthenticator(IOptions<LdapOptions> options, ILogger<Lda
         }
 
         return entry.Attributes[attributeName][0]?.ToString();
+    }
+
+    private static IReadOnlyCollection<string> GetStrings(SearchResultEntry entry, string attributeName)
+    {
+        if (!entry.Attributes.Contains(attributeName))
+        {
+            return [];
+        }
+
+        return entry.Attributes[attributeName]
+            .GetValues(typeof(string))
+            .OfType<string>()
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     private static string GetGuid(SearchResultEntry entry, string attributeName)

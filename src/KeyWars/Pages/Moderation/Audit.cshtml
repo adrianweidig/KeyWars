@@ -1,0 +1,81 @@
+@page "/moderation/audit"
+@using KeyWars.Domain
+@model KeyWars.Pages.Moderation.AuditModel
+@{
+    ViewData["Title"] = "Moderations-Auditspur";
+}
+
+<section class="page-header">
+    <div>
+        <span class="eyebrow">Append-only</span>
+        <h1>Moderations-Auditspur</h1>
+        <p class="lead">Wer welchen Inhalt wann und aus welchem Grund moderiert hat.</p>
+    </div>
+    <div class="page-actions">
+        <a class="button secondary" asp-page="/Moderation/Index">Zur Moderation</a>
+    </div>
+</section>
+
+<section class="card">
+    @if (Model.Audit.Items.Count == 0)
+    {
+        <div class="empty-state">
+            <h2>Noch keine Moderationsvorgänge</h2>
+            <p>Die Auditspur erhält mit der ersten Moderationsaktion einen Eintrag.</p>
+        </div>
+    }
+    else
+    {
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Zeitpunkt</th>
+                    <th>Akteur</th>
+                    <th>Ziel</th>
+                    <th>Aktion</th>
+                    <th>Begründung</th>
+                </tr>
+            </thead>
+            <tbody>
+            @foreach (var entry in Model.Audit.Items)
+            {
+                <tr>
+                    <td data-label="Zeitpunkt">@entry.CreatedAt.LocalDateTime.ToString("g")</td>
+                    <td data-label="Akteur">@entry.ActorDisplayName</td>
+                    <td data-label="Ziel">
+                        @entry.TargetTitle<br />
+                        <span class="muted">@(entry.TargetType == ContentModerationTargetType.TrainingText ? "Text" : "Sammlung")</span>
+                    </td>
+                    <td data-label="Aktion">
+                        @(entry.Action == ContentModerationAction.Quarantine ? "Quarantänisiert" : "Nicht mehr organisationsweit")
+                    </td>
+                    <td data-label="Begründung">@entry.Reason</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    }
+</section>
+
+@if (Model.Audit.TotalPages > 1)
+{
+    <nav class="pagination" aria-label="Auditseiten">
+        @if (Model.Audit.HasPreviousPage)
+        {
+            <a class="button secondary" asp-route-Seite="@(Model.Audit.Page - 1)">Zurück</a>
+        }
+        else
+        {
+            <span class="button secondary" aria-disabled="true">Zurück</span>
+        }
+        <span aria-current="page">Seite @Model.Audit.Page von @Model.Audit.TotalPages</span>
+        @if (Model.Audit.HasNextPage)
+        {
+            <a class="button secondary" asp-route-Seite="@(Model.Audit.Page + 1)">Weiter</a>
+        }
+        else
+        {
+            <span class="button secondary" aria-disabled="true">Weiter</span>
+        }
+    </nav>
+}

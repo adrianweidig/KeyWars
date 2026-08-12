@@ -12,6 +12,7 @@ public sealed class SpielenModel(CurrentUser currentUser, KeyWarsDbContext db, C
 {
     public Challenge CurrentChallenge { get; private set; } = new();
     public TrainingText Text { get; private set; } = new();
+    public int CurrentRound { get; private set; } = 1;
 
     public async Task<IActionResult> OnGetAsync(Guid id, CancellationToken cancellationToken)
     {
@@ -28,6 +29,13 @@ public sealed class SpielenModel(CurrentUser currentUser, KeyWarsDbContext db, C
 
         CurrentChallenge = await db.Challenges.SingleAsync(item => item.Id == id, cancellationToken);
         Text = await db.TrainingTexts.SingleAsync(item => item.Id == CurrentChallenge.TrainingTextId, cancellationToken);
+        var roundIds = db.ChallengeRounds
+            .Where(round => round.ChallengeId == id)
+            .Select(round => round.Id);
+        var completedRounds = await db.ChallengeRoundResults.CountAsync(
+            result => result.UserProfileId == profile.Id && roundIds.Contains(result.ChallengeRoundId),
+            cancellationToken);
+        CurrentRound = Math.Min(CurrentChallenge.RoundCount, completedRounds + 1);
         return Page();
     }
 }

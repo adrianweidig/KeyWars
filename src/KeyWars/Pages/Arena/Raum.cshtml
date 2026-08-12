@@ -8,6 +8,7 @@
     var inLobby = Model.Snapshot.Phase == LiveRoomPhase.Lobby;
     var betweenRounds = Model.Snapshot.Phase == LiveRoomPhase.RoundResults;
     var isRunning = Model.Snapshot.Phase == LiveRoomPhase.Running;
+    var showResultsPhase = Model.Snapshot.Finished || Model.Snapshot.Phase is LiveRoomPhase.RoundResults or LiveRoomPhase.SeriesResults or LiveRoomPhase.Closed;
     var readyButtonText = currentParticipant?.Ready == true ? "Nicht bereit" : "Bereit";
     var rankedParticipants = Model.Snapshot.Participants
         .OrderBy(item => item.Placement ?? int.MaxValue)
@@ -46,9 +47,9 @@
     </div>
 </section>
 
-<div asp-validation-summary="ModelOnly"></div>
+<div asp-validation-summary="ModelOnly" role="alert" aria-live="assertive" aria-atomic="true" tabindex="-1"></div>
 
-<section class="arena-layout" data-arena-room data-room-id="@Model.Snapshot.RoomId" data-current-profile-id="@Model.CurrentProfileId" data-arena-display-mode="@displayMode" data-max-participants="@Model.Snapshot.MaxParticipants" data-show-live-wpm="@Bool(Model.ShowLiveWpm)" data-show-live-rank-changes="@Bool(Model.ShowLiveRankChanges)" data-sound-enabled="@Bool(Model.SoundEnabled)" data-sound-volume="@Model.SoundVolumePercent" data-reactions-enabled="@Bool(Model.ReactionsEnabled)" data-reduced-motion="@Bool(Model.ReducedMotion)" data-connection-state="disconnected" data-persistence-state="@initialPersistenceState">
+<section class="arena-layout" data-arena-room data-room-id="@Model.Snapshot.RoomId" data-current-profile-id="@Model.CurrentProfileId" data-arena-display-mode="@displayMode" data-arena-roster-expanded="false" data-max-participants="@Model.Snapshot.MaxParticipants" data-show-live-wpm="@Bool(Model.ShowLiveWpm)" data-show-live-rank-changes="@Bool(Model.ShowLiveRankChanges)" data-sound-enabled="@Bool(Model.SoundEnabled)" data-sound-volume="@Model.SoundVolumePercent" data-reactions-enabled="@Bool(Model.ReactionsEnabled)" data-reduced-motion="@Bool(Model.ReducedMotion)" data-connection-state="disconnected" data-persistence-state="@initialPersistenceState">
     <div class="card arena-workbench typing-session-card typing-focus-primary">
         <div class="arena-status-bar">
             <div>
@@ -61,10 +62,10 @@
             </div>
         </div>
         <ol class="arena-phase-steps" aria-label="Arena Ablauf">
-            <li class="@(Model.Snapshot.Phase == LiveRoomPhase.Lobby ? "active" : "")">Lobby</li>
-            <li class="@(Model.Snapshot.Phase == LiveRoomPhase.Countdown ? "active" : "")">Countdown</li>
-            <li class="@(Model.Snapshot.Phase == LiveRoomPhase.Running ? "active" : "")">Rennen</li>
-            <li class="@(Model.Snapshot.Finished ? "active" : "")">Ergebnis</li>
+            <li class="@(Model.Snapshot.Phase == LiveRoomPhase.Lobby ? "active" : "")" aria-current="@(Model.Snapshot.Phase == LiveRoomPhase.Lobby ? "step" : null)">Lobby</li>
+            <li class="@(Model.Snapshot.Phase == LiveRoomPhase.Countdown ? "active" : "")" aria-current="@(Model.Snapshot.Phase == LiveRoomPhase.Countdown ? "step" : null)">Countdown</li>
+            <li class="@(Model.Snapshot.Phase == LiveRoomPhase.Running ? "active" : "")" aria-current="@(Model.Snapshot.Phase == LiveRoomPhase.Running ? "step" : null)">Rennen</li>
+            <li class="@(showResultsPhase ? "active" : "")" aria-current="@(showResultsPhase ? "step" : null)">Ergebnis</li>
         </ol>
         <p class="arena-persistence-status @(showPersistenceState ? "" : "is-hidden")" data-arena-persistence-status role="status" aria-live="polite" aria-atomic="true">@InitialPersistenceStatus(Model.Snapshot)</p>
         <div class="typing-target" data-arena-target tabindex="0" role="region" aria-label="Zieltext des Arena-Rennens">
@@ -134,6 +135,31 @@
         <div class="visually-hidden" aria-live="polite" data-arena-live-region></div>
     </div>
     <aside class="arena-secondary">
+        <div class="card arena-host-controls @(isHost ? "" : "is-hidden")" data-arena-host-controls>
+            <div class="section-title-row">
+                <h2>Raum verwalten</h2>
+                <span class="pill" data-arena-lobby-state>@(Model.Snapshot.LobbyLocked ? "Lobby gesperrt" : "Lobby offen")</span>
+            </div>
+            <p class="muted">Die Raumleitung kann neue Beitritte sperren, die Leitung übergeben, Personen entfernen oder den Raum geordnet schließen.</p>
+            <div class="form-actions">
+                <button type="button" class="secondary" data-arena-lock>@(Model.Snapshot.LobbyLocked ? "Lobby öffnen" : "Lobby sperren")</button>
+                <button type="button" class="secondary" data-arena-close>Raum schließen</button>
+            </div>
+            <label>
+                Person verwalten
+                <select data-arena-host-target>
+                    @foreach (var participant in Model.Snapshot.Participants.Where(item => item.ProfileId != Model.Snapshot.CreatorProfileId))
+                    {
+                        <option value="@participant.ProfileId">@participant.DisplayName · @DisplayNames.For(participant.Status)</option>
+                    }
+                </select>
+            </label>
+            <div class="form-actions">
+                <button type="button" class="secondary" data-arena-transfer-host>Leitung übergeben</button>
+                <button type="button" class="secondary" data-arena-kick>Person entfernen</button>
+            </div>
+            <p class="muted" data-arena-host-status role="status" aria-live="polite"></p>
+        </div>
         <div class="card arena-team-board @(Model.Snapshot.Mode == LiveRoomMode.Team ? "" : "is-hidden")" data-arena-team-board>
             <h2>Teamwertung</h2>
             <p class="muted">Zieleinläufe bringen Platzierungspunkte. Bei Gleichstand entscheiden Rundensiege und Gesamtzeit.</p>
@@ -188,9 +214,30 @@
                 <p class="muted roster-window-note @(hiddenParticipants > 0 ? "" : "is-hidden")" data-arena-window-note>@HiddenParticipantsText(hiddenParticipants)</p>
             </div>
         </div>
-        <div class="card">
-            <h2>Teilnehmende</h2>
-            <table class="table participant-list @displayMode">
+        <div class="card arena-roster-card">
+            <div class="arena-roster-header">
+                <h2>Teilnehmende</h2>
+                @if (isHost)
+                {
+                    <div class="arena-roster-controls" data-arena-roster-controls>
+                        <label class="visually-hidden" for="arena-roster-search">Teilnehmende suchen</label>
+                        <input id="arena-roster-search" type="search" inputmode="search" autocomplete="off" placeholder="Name suchen" data-arena-roster-search aria-controls="arena-participant-table" />
+                        <label class="visually-hidden" for="arena-roster-filter">Teilnehmende nach Status filtern</label>
+                        <select id="arena-roster-filter" data-arena-roster-filter aria-controls="arena-participant-table">
+                            <option value="all">Alle Status</option>
+                            <option value="lobby">Lobby</option>
+                            <option value="running">Im Rennen</option>
+                            <option value="finished">Beendet</option>
+                            <option value="issues">Unterbrochen</option>
+                        </select>
+                        <button type="button" class="secondary compact-button" data-arena-roster-expand aria-controls="arena-participant-table" aria-expanded="false">Alle anzeigen</button>
+                    </div>
+                }
+            </div>
+            <p class="muted arena-roster-status" data-arena-roster-status role="status" aria-live="polite" aria-atomic="true"></p>
+            <div class="arena-roster-table-wrap">
+            <table id="arena-participant-table" class="table participant-list @displayMode">
+                <caption class="visually-hidden">Teilnehmende mit Team, Status, Fortschritt, Punkten und Platzierung</caption>
                 <thead><tr><th>Name</th><th>Team</th><th>Status</th><th>Fortschritt</th><th>Punkte</th><th>Platz</th></tr></thead>
                 <tbody data-arena-participants>
                 @foreach (var participant in visibleParticipants)
@@ -206,6 +253,7 @@
                 }
                 </tbody>
             </table>
+            </div>
             <div class="podium @(Model.Snapshot.Finished ? "" : "is-hidden")" data-arena-podium>
                 <h2>Podium</h2>
                 @foreach (var participant in rankedParticipants.Where(item => item.Status is ParticipantStatus.Finished or ParticipantStatus.Dnf).Take(3))

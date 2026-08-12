@@ -2,10 +2,13 @@ using Microsoft.Extensions.Options;
 
 namespace KeyWars.Services;
 
-public sealed record LivePresenceSwitch(Guid? PreviousRoomId, bool PreviousRoomLostLastConnection);
+public sealed record LivePresenceSwitch(Guid? PreviousRoomId, bool PreviousRoomLostLastConnection)
+{
+    public bool Changed { get; init; }
+}
 public sealed record LivePresenceLeave(Guid RoomId, Guid ProfileId, bool RoomLostLastConnection);
 
-public sealed class LivePresenceTracker(IOptions<LiveOptions> options, TimeProvider timeProvider)
+public sealed class LivePresenceTracker(IOptions<LiveOptions> options, TimeProvider timeProvider) : ILivePresenceStateStore
 {
     private readonly object gate = new();
     private readonly Dictionary<string, LivePresenceConnection> byConnectionId = new(StringComparer.Ordinal);
@@ -47,16 +50,48 @@ public sealed class LivePresenceTracker(IOptions<LiveOptions> options, TimeProvi
                 if (existing.RoomId == roomId)
                 {
                     existing.LastSeenAt = now;
-                    return new LivePresenceSwitch(null, false);
+                    return new LivePresenceSwitch(null, false) { Changed = false };
                 }
 
                 RemoveConnectionUnlocked(connectionId, out var oldRoomId, out _, out var oldRoomLostLastConnection);
                 AddConnectionUnlocked(new LivePresenceConnection(connectionId, profileId, roomId, now));
-                return new LivePresenceSwitch(oldRoomId, oldRoomLostLastConnection);
+                return new LivePresenceSwitch(oldRoomId, oldRoomLostLastConnection) { Changed = true };
             }
 
             AddConnectionUnlocked(new LivePresenceConnection(connectionId, profileId, roomId, now));
-            return new LivePresenceSwitch(null, false);
+            return new LivePresenceSwitch(null, false) { Changed = true };
+        }
+    }
+
+    public void RollbackEnterRoom(
+        Guid profileId,
+        string connectionId,
+        Guid roomId,
+        LivePresenceSwitch transition)
+    {
+        if (!transition.Changed)
+        {
+            return;
+        }
+
+        lock (gate)
+        {
+            if (!byConnectionId.TryGetValue(connectionId, out var current) ||
+                current.ProfileId != profileId ||
+                current.RoomId != roomId)
+            {
+                return;
+            }
+
+            RemoveConnectionUnlocked(connectionId, out _, out _, out _);
+            if (transition.PreviousRoomId is { } previousRoomId)
+            {
+                AddConnectionUnlocked(new LivePresenceConnection(
+                    connectionId,
+                    profileId,
+                    previousRoomId,
+                    timeProvider.GetUtcNow()));
+            }
         }
     }
 
@@ -102,6 +137,96 @@ public sealed class LivePresenceTracker(IOptions<LiveOptions> options, TimeProvi
                 ? profileConnections.Values.Count(item => item.RoomId == roomId)
                 : 0;
         }
+    }
+
+    public IReadOnlyList<string> RemoveProfileFromRoom(Guid profileId, Guid roomId)
+    {
+        lock (gate)
+        {
+            if (!byProfileId.TryGetValue(profileId, out var profileConnections))
+            {
+                return [];
+            }
+
+            var connectionIds = profileConnections.Values
+                .Where(item => item.RoomId == roomId)
+                .Select(item => item.ConnectionId)
+                .ToArray();
+            foreach (var connectionId in connectionIds)
+            {
+                RemoveConnectionUnlocked(connectionId, out _, out _, out _);
+            }
+
+            return connectionIds;
+        }
+    }
+
+    public ValueTask EnsureCanConnectAsync(
+        Guid profileId,
+        string connectionId,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        EnsureCanConnect(profileId, connectionId);
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask<LivePresenceSwitch> EnterRoomAsync(
+        Guid profileId,
+        string connectionId,
+        Guid roomId,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return ValueTask.FromResult(EnterRoom(profileId, connectionId, roomId));
+    }
+
+    public ValueTask RollbackEnterRoomAsync(
+        Guid profileId,
+        string connectionId,
+        Guid roomId,
+        LivePresenceSwitch transition,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        RollbackEnterRoom(profileId, connectionId, roomId, transition);
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask<LivePresenceLeave?> LeaveRoomAsync(
+        Guid profileId,
+        string connectionId,
+        Guid roomId,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return ValueTask.FromResult(LeaveRoom(profileId, connectionId, roomId));
+    }
+
+    public ValueTask<LivePresenceLeave?> RemoveConnectionAsync(
+        string connectionId,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return ValueTask.FromResult(RemoveConnection(connectionId));
+    }
+
+    public ValueTask<int> CountRoomConnectionsAsync(
+        Guid profileId,
+        Guid roomId,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return ValueTask.FromResult(CountRoomConnections(profileId, roomId));
+    }
+
+    public ValueTask<IReadOnlyList<string>> RemoveProfileFromRoomAsync(
+        Guid profileId,
+        Guid roomId,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return ValueTask.FromResult(RemoveProfileFromRoom(profileId, roomId));
     }
 
     private void AddConnectionUnlocked(LivePresenceConnection connection)

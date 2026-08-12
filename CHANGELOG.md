@@ -1,5 +1,49 @@
 # Changelog
 
+## v0.5.0 - 2026-08-12
+
+### Arena and product
+
+- Make live rooms replica-safe with Redis-backed ownership, versioned state,
+  distributed presence, ordered progress updates and durable completion while
+  keeping the standalone in-process path.
+- Add challenge Best-of series, cancellation and idempotent rematches, paged
+  people search, content moderation, text-library paging and department-scoped
+  rankings.
+- Improve first-use guidance, mobile arena controls, reconnect recovery,
+  accessible live feedback and streamed profile exports.
+
+### Deployment and scaling
+
+- Keep the single-container SQLite deployment as the default and add an
+  opt-in scale topology with separate web, arena, worker and migration roles,
+  PostgreSQL persistence, Redis-backed shared state, and deployment examples
+  for Compose, Swarm and Kubernetes.
+- Scale-mode upgrade note: run the dedicated migration role before application
+  replicas. KeyWars v0.5 does not automatically transfer an existing SQLite
+  database to PostgreSQL; plan and validate that data move separately.
+
+### Operations and performance
+
+- Add bounded data-retention cleanup, database/query improvements, runtime
+  health and telemetry, and repeatable load scenarios for capacity validation.
+- Move expensive leaderboard, profile and arena-completion work to bounded,
+  projected or set-based database operations and add indexes for the supported
+  read and cleanup paths.
+
+### Verification
+
+- Add a strict multi-room SignalR load contract, a two-web/two-arena scale
+  smoke with replica loss, expanded browser and accessibility flows, and
+  active FlaUI/UIA3/OpenCV desktop interaction coverage.
+
+### Release integrity
+
+- Publish auditable multi-architecture container metadata with verified OCI
+  version, revision and creation time, registry-attached SBOM and provenance,
+  plus a checksummed `linux/amd64` offline archive whose public release assets
+  are downloaded and validated again after publication.
+
 ## v0.4.9 - 2026-08-08
 
 - Restrict visual-asset downloads and every redirect to reviewed HTTPS hosts,

@@ -1,10 +1,26 @@
 name: performance
 
 on:
+  pull_request:
+    paths:
+      - ".github/workflows/performance.yml"
+      - "src/KeyWars/**"
+      - "tests/cluster/**"
+      - "tools/KeyWars.LoadTest/**"
+      - "compose.scale.yaml"
+      - "Dockerfile"
+      - "Directory.*.props"
+      - "Directory.*.targets"
   workflow_dispatch:
+  schedule:
+    - cron: "23 3 * * 1"
 
 permissions:
   contents: read
+
+concurrency:
+  group: performance-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   loadtest:
@@ -19,8 +35,174 @@ jobs:
           dotnet-version: 10.0.x
       - name: Restore
         run: dotnet restore tools/KeyWars.LoadTest/KeyWars.LoadTest.csproj --locked-mode
-      - run: dotnet run --project tools/KeyWars.LoadTest -c Release --no-restore -- 2 10 25 50 100 | tee keywars-loadtest.txt
+      - name: Build
+        run: dotnet build tools/KeyWars.LoadTest/KeyWars.LoadTest.csproj -c Release --no-restore
+      - name: Load-tool self-tests
+        run: dotnet tools/KeyWars.LoadTest/bin/Release/net10.0/KeyWars.LoadTest.dll --self-test
+      - name: In-memory regression gate
+        run: dotnet tools/KeyWars.LoadTest/bin/Release/net10.0/KeyWars.LoadTest.dll 2 25 64 | tee keywars-in-memory.txt
+      - name: SignalR fan-out and SLO gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p performance-artifacts
+          data_dir="${RUNNER_TEMP}/keywars-performance-${GITHUB_RUN_ID}"
+          mkdir -p "${data_dir}"
+          ASPNETCORE_ENVIRONMENT=Development \
+          ASPNETCORE_URLS=http://127.0.0.1:5191 \
+          KEYWARS__AUTH__DEVELOPMENT_LOGIN=true \
+          KEYWARS__DATA__DIRECTORY="${data_dir}" \
+          KEYWARS__LIVE__COUNTDOWN_SECONDS=1 \
+          KEYWARS__LIVE__PROGRESS_BROADCAST_HZ=20 \
+          Logging__LogLevel__Default=Warning \
+          Logging__LogLevel__Microsoft=Warning \
+          dotnet src/KeyWars/bin/Release/net10.0/KeyWars.dll \
+            >performance-artifacts/server.log 2>&1 &
+          server_pid=$!
+          cleanup() {
+            kill "${server_pid}" 2>/dev/null || true
+            wait "${server_pid}" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:5191/health/ready >/dev/null; then
+              break
+            fi
+            if ! kill -0 "${server_pid}" 2>/dev/null; then
+              cat performance-artifacts/server.log
+              exit 1
+            fi
+            if [[ "${attempt}" == "60" ]]; then
+              cat performance-artifacts/server.log
+              exit 1
+            fi
+            sleep 1
+          done
+
+          dotnet tools/KeyWars.LoadTest/bin/Release/net10.0/KeyWars.LoadTest.dll \
+            --signalr \
+            --scenario smoke \
+            --base-url http://127.0.0.1:5191 \
+            --rooms 2 \
+            --participants 3 \
+            --steps 10 \
+            --typing-cps 5 \
+            --jitter-ms 20 \
+            --reconnect-percent 34 \
+            --operation-timeout-ms 10000 \
+            --timeout-seconds 180 \
+            --target-process-id "${server_pid}" \
+            --slo-p95-ms 2000 \
+            --slo-p99-ms 5000 \
+            --slo-fanout-p95-ms 3000 \
+            --slo-error-rate-percent 0 \
+            --slo-missing-broadcasts 0 \
+            --json performance-artifacts/signalr-load.json \
+            | tee performance-artifacts/signalr-load.txt
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
         with:
-          name: keywars-loadtest
-          path: keywars-loadtest.txt
+          name: keywars-performance-${{ github.run_id }}
+          if-no-files-found: error
+          path: |
+            keywars-in-memory.txt
+            performance-artifacts/
+
+  scale-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+      - name: Build load client and PostgreSQL integration test
+        run: |
+          dotnet restore tools/KeyWars.LoadTest/KeyWars.LoadTest.csproj --locked-mode
+          dotnet build tools/KeyWars.LoadTest/KeyWars.LoadTest.csproj -c Release --no-restore
+          dotnet restore tests/KeyWars.IntegrationTests/KeyWars.IntegrationTests.csproj --locked-mode
+          dotnet build tests/KeyWars.IntegrationTests/KeyWars.IntegrationTests.csproj -c Release --no-restore
+      - name: Build local cluster image
+        run: docker build --tag keywars:ci .
+      - name: PostgreSQL, Redis and two-Arena smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_dir="scale-artifacts"
+          secret_dir="${RUNNER_TEMP}/keywars-scale-secrets-${GITHUB_RUN_ID}"
+          mkdir -p "${artifact_dir}" "${secret_dir}"
+          password="$(openssl rand -hex 24)"
+          printf '%s' "${password}" > "${secret_dir}/postgres-password"
+          printf '%s' "Host=postgres;Port=5432;Database=keywars;Username=keywars;Password=${password}" \
+            > "${secret_dir}/database-connection"
+          printf '%s' 'redis:6379,abortConnect=false' > "${secret_dir}/redis-connection"
+          : > "${secret_dir}/ldap-ca.crt"
+          unset password
+
+          export KEYWARS_IMAGE=keywars
+          export KEYWARS_VERSION=ci
+          export KEYWARS_PORT=5192
+          export KEYWARS_SECRETS_DIRECTORY="${secret_dir}"
+          export KEYWARS_LDAP_CA_FILE="${secret_dir}/ldap-ca.crt"
+          export KEYWARS_LDAP_URLS='ldaps://unused.invalid:636'
+          export KEYWARS_LDAP_BASE_DN='DC=unused,DC=invalid'
+          export KEYWARS_LDAP_UPN_SUFFIX='unused.invalid'
+          export KEYWARS_WEB_REPLICAS=2
+          export KEYWARS_ARENA_REPLICAS=2
+          export KEYWARS_WORKER_REPLICAS=1
+          compose=(docker compose -f compose.scale.yaml -f tests/cluster/compose.ci.yaml)
+
+          cleanup() {
+            "${compose[@]}" ps > "${artifact_dir}/compose-ps.txt" 2>&1 || true
+            "${compose[@]}" logs --no-color > "${artifact_dir}/compose.log" 2>&1 || true
+            "${compose[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          "${compose[@]}" config --quiet
+          "${compose[@]}" up -d --wait postgres redis
+          "${compose[@]}" run --rm postgres-tests
+          "${compose[@]}" run --rm keywars-migrate
+          "${compose[@]}" up -d --wait \
+            --scale keywars-web=2 --scale keywars-arena=2 --scale keywars-worker=1 \
+            keywars-web keywars-arena keywars-worker keywars-edge
+
+          test "$("${compose[@]}" ps -q keywars-web | wc -l)" -eq 2
+          test "$("${compose[@]}" ps -q keywars-arena | wc -l)" -eq 2
+          curl --fail --silent --show-error http://127.0.0.1:5192/health/edge
+
+          dotnet tools/KeyWars.LoadTest/bin/Release/net10.0/KeyWars.LoadTest.dll \
+            --signalr --scenario smoke --base-url http://127.0.0.1:5192 \
+            --rooms 4 --participants 4 --steps 12 --typing-cps 8 --jitter-ms 20 \
+            --reconnect-percent 34 --operation-timeout-ms 15000 --timeout-seconds 240 \
+            --slo-p95-ms 3000 --slo-p99-ms 7000 --slo-fanout-p95-ms 4000 \
+            --slo-error-rate-percent 0 --slo-missing-broadcasts 0 \
+            --json "${artifact_dir}/cluster-two-arena.json" \
+            | tee "${artifact_dir}/cluster-two-arena.txt"
+
+          victim="$("${compose[@]}" ps -q keywars-arena | head -n 1)"
+          test -n "${victim}"
+          docker stop --time 20 "${victim}"
+          sleep 3
+          curl --fail --silent --show-error http://127.0.0.1:5192/health/edge
+
+          dotnet tools/KeyWars.LoadTest/bin/Release/net10.0/KeyWars.LoadTest.dll \
+            --signalr --scenario smoke --base-url http://127.0.0.1:5192 \
+            --rooms 2 --participants 3 --steps 8 --typing-cps 6 --jitter-ms 20 \
+            --reconnect-percent 34 --operation-timeout-ms 15000 --timeout-seconds 180 \
+            --slo-p95-ms 3000 --slo-p99-ms 7000 --slo-fanout-p95-ms 4000 \
+            --slo-error-rate-percent 0 --slo-missing-broadcasts 0 \
+            --json "${artifact_dir}/cluster-one-arena.json" \
+            | tee "${artifact_dir}/cluster-one-arena.txt"
+
+          "${compose[@]}" up -d --wait --scale keywars-arena=2 keywars-arena
+          test "$("${compose[@]}" ps -q keywars-arena | wc -l)" -eq 2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: keywars-scale-smoke-${{ github.run_id }}
+          if-no-files-found: error
+          path: scale-artifacts/

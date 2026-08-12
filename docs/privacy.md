@@ -1,7 +1,8 @@
 # Datenschutz und lokale Profildaten
 
-KeyWars speichert lokale Profildaten nur in der eigenen SQLite-Datenbank. Die
-AD- oder LDAP-Quelle bleibt führend für Identität und Login.
+KeyWars speichert Profildaten nur in der konfigurierten eigenen Datenbank:
+SQLite in der Einzelinstanz oder PostgreSQL im Scale-Modus. Die AD- oder
+LDAP-Quelle bleibt führend für Identität und Login.
 
 ## Export
 
@@ -14,10 +15,12 @@ Der Profilexport enthält nur Daten des angemeldeten Profils:
 - eigene Texte, Sammlungen und deren Zusammenstellung;
 - erstellte Challenges, zugehörige Runden, eigene Challenge-Teilnahmen,
   Bindungen und Rundenergebnisse;
-- erstellte Live-Räume und eigene Live-Arena-Ergebniszeilen.
+- erstellte Live-Räume und eigene Live-Arena-Ergebniszeilen;
+- Moderationsvorgänge, die das Profil ausgeführt haben oder deren Inhalt ihm
+  gehört.
 
 Der Export enthält eine Versionsnummer und einen Erstellzeitpunkt. Das aktuelle
-Format ist Version 2. Interne Wiederholungs- und Idempotenzwerte wie
+Format ist Version 3. Interne Wiederholungs- und Idempotenzwerte wie
 `TypingAttempt.Nonce`, `ChallengeAttemptBinding.BindingToken` und
 `LiveRoomSummary.IdempotencyKey` werden nicht ausgegeben. Ein automatisierter
 Inventartest erzwingt bei neuen Datenbanktabellen eine bewusste
@@ -63,5 +66,6 @@ eines Rennens als nicht beendet.
 
 Historische Gruppen- und Arena-Ergebnisse bleiben zur Integrität der
 gemeinsamen Ergebnislisten erhalten, zeigen aber nur noch das gelöschte Profil.
+Auch die append-only Moderations-Auditspur bleibt aus Nachweisgründen erhalten.
 Ein späterer AD-Login mit derselben Directory-Identität erzeugt ein neues
 KeyWars-Profil und wird nicht mit dem gelöschten Profil verknüpft.

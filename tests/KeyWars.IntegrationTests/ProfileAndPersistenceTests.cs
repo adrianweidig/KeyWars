@@ -594,7 +594,11 @@ public sealed class ProfileAndPersistenceTests
                 ["KEYWARS:CONTENT:MAX_UPLOAD_BYTES"] = "4096",
                 ["KEYWARS:CONTENT:MAX_TEXT_CHARACTERS"] = "2048",
                 ["KEYWARS:CONTENT:MAX_TEXT_GRAPHEMES"] = "2040",
-                ["KEYWARS:CONTENT:MAX_TEXT_LINES"] = "80"
+                ["KEYWARS:CONTENT:MAX_TEXT_LINES"] = "80",
+                ["KEYWARS:RETENTION:ENABLED"] = "true",
+                ["KEYWARS:RETENTION:DRY_RUN"] = "false",
+                ["KEYWARS:RETENTION:BATCH_SIZE"] = "75",
+                ["KEYWARS:RETENTION:BACKUP_RETENTION_DAYS"] = "45"
             })
             .Build();
 
@@ -606,6 +610,8 @@ public sealed class ProfileAndPersistenceTests
         ConfigurationAliases.BindLive(configuration, live);
         var content = new ContentOptions();
         ConfigurationAliases.BindContent(configuration, content);
+        var retention = new RetentionOptions();
+        ConfigurationAliases.BindRetention(configuration, retention);
 
         Assert.Equal("DC=example,DC=local", ldap.BaseDn);
         Assert.Equal("example.local", ldap.UpnSuffix);
@@ -620,6 +626,10 @@ public sealed class ProfileAndPersistenceTests
         Assert.Equal(2048, content.MaxTextCharacters);
         Assert.Equal(2040, content.MaxTextGraphemes);
         Assert.Equal(80, content.MaxTextLines);
+        Assert.True(retention.Enabled);
+        Assert.False(retention.DryRun);
+        Assert.Equal(75, retention.BatchSize);
+        Assert.Equal(45, retention.BackupRetentionDays);
     }
 
     [Theory]
@@ -639,6 +649,22 @@ public sealed class ProfileAndPersistenceTests
             ConfigurationAliases.BindLive(configuration, new LiveOptions()));
 
         Assert.Contains("zwischen 1 und 2800", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("BATCH_SIZE", "0")]
+    [InlineData("BATCH_SIZE", "ungültig")]
+    [InlineData("DRY_RUN", "vielleicht")]
+    public void RetentionConfigurationRejectsUnsafeValues(string key, string configuredValue)
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                [$"KEYWARS:RETENTION:{key}"] = configuredValue
+            })
+            .Build();
+
+        Assert.Throws<InvalidOperationException>(() => ConfigurationAliases.GetRetention(configuration));
     }
 
     [Fact]

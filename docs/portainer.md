@@ -2,8 +2,8 @@
 
 ## Stack in etwa zehn Minuten bereitstellen
 
-1. `compose.yaml` und `.env.example` aus demselben Release laden.
-2. `.env.example` lokal als `.env` speichern.
+1. `compose.yaml` und `default.env.example` aus demselben Release laden.
+2. `default.env.example` lokal als `.env` speichern.
 3. Image-Tag unverändert versioniert lassen und LDAP-Werte eintragen.
 4. In Portainer **Stacks → Add stack** öffnen und den Stack exakt `keywars` nennen.
 5. `compose.yaml` einfügen oder hochladen und die Werte aus `.env` über **Load variables from .env file** laden.
@@ -38,3 +38,7 @@ veröffentlichen.
 
 Portainer ersetzt weder Backup-Export noch TLS-Termination. Der Stack enthält
 keinen Reverse Proxy und keinen automatischen Backup-Zeitplan.
+
+Für mehrere Anwendungsinstanzen nicht die Replica-Zahl dieses Stacks erhöhen.
+Verwende den getrennten [Scale-Modus](scale-operations.md) mit PostgreSQL, Redis
+und den vorgesehenen Laufzeitrollen.

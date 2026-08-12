@@ -10,6 +10,22 @@ namespace KeyWars.IntegrationTests;
 public sealed class ChallengeLifecycleTests
 {
     [Fact]
+    public async Task CreateRejectsQuarantinedTrainingText()
+    {
+        await using var context = await ChallengeTestContext.CreateAsync();
+        context.Text.IsQuarantined = true;
+        await context.Db.SaveChangesAsync();
+
+        var error = await Assert.ThrowsAsync<ChallengeLifecycleException>(() =>
+            context.Service.CreateAsync(
+                context.Creator.Id,
+                new CreateChallengeRequest("Nicht sichtbar", context.Text.Id, ChallengeMode.Classic, [context.Invitee.Id], 1, 1)));
+
+        Assert.Equal((ChallengeErrorCodes.InvalidRequest, 400), (error.Code, error.StatusCode));
+        Assert.Empty(await context.Db.Challenges.ToListAsync());
+    }
+
+    [Fact]
     public async Task JoinExpiresPastDueChallenge()
     {
         await using var context = await ChallengeTestContext.CreateAsync();
@@ -312,6 +328,128 @@ public sealed class ChallengeLifecycleTests
 
         Assert.Equal((ChallengeErrorCodes.Expired, 410), (error.Code, error.StatusCode));
         Assert.Empty(await context.Db.ChallengeAttemptBindings.ToListAsync());
+    }
+
+    [Fact]
+    public async Task CreatorCanCancelChallengeIdempotently()
+    {
+        await using var context = await ChallengeTestContext.CreateAsync();
+        var challenge = await context.Service.CreateAsync(
+            context.Creator.Id,
+            new CreateChallengeRequest("Abbruch", context.Text.Id, ChallengeMode.Classic, [context.Invitee.Id], 1, 7));
+
+        var hidden = await Assert.ThrowsAsync<ChallengeLifecycleException>(() =>
+            context.Service.CancelAsync(challenge.Id, context.Invitee.Id));
+        Assert.Equal((ChallengeErrorCodes.NotFound, 404), (hidden.Code, hidden.StatusCode));
+
+        var first = await context.Service.CancelAsync(challenge.Id, context.Creator.Id);
+        var second = await context.Service.CancelAsync(challenge.Id, context.Creator.Id);
+
+        Assert.Equal(first.Id, second.Id);
+        Assert.Equal(ChallengeStatus.Cancelled, second.Status);
+        Assert.All(
+            await context.Db.ChallengeParticipants.Where(item => item.ChallengeId == challenge.Id).ToListAsync(),
+            participant => Assert.Equal(ParticipantStatus.Cancelled, participant.Status));
+    }
+
+    [Fact]
+    public async Task RematchReusesSourceExactlyOnce()
+    {
+        await using var context = await ChallengeTestContext.CreateAsync();
+        var source = await context.Service.CreateAsync(
+            context.Creator.Id,
+            new CreateChallengeRequest("Serie", context.Text.Id, ChallengeMode.BestOf, [context.Invitee.Id], 3, 7));
+        await context.Service.CancelAsync(source.Id, context.Creator.Id);
+
+        var first = await context.Service.CreateRematchAsync(source.Id, context.Creator.Id);
+        var second = await context.Service.CreateRematchAsync(source.Id, context.Creator.Id);
+
+        Assert.Equal(first.Id, second.Id);
+        Assert.Equal(source.Id, first.RematchOfChallengeId);
+        Assert.Equal((ChallengeMode.BestOf, 3), (first.Mode, first.RoundCount));
+        Assert.Equal(2, await context.Db.ChallengeParticipants.CountAsync(item => item.ChallengeId == first.Id));
+        Assert.Equal(3, await context.Db.ChallengeRounds.CountAsync(item => item.ChallengeId == first.Id));
+        Assert.Single(await context.Db.Challenges.Where(item => item.RematchOfChallengeId == source.Id).ToListAsync());
+    }
+
+    [Fact]
+    public async Task ChallengeListSupportsFiltersPagingAndUnreadCount()
+    {
+        await using var context = await ChallengeTestContext.CreateAsync();
+        var active = await context.Service.CreateAsync(
+            context.Creator.Id,
+            new CreateChallengeRequest("Aktiv", context.Text.Id, ChallengeMode.Classic, [context.Invitee.Id], 1, 7));
+        var completed = await context.Service.CreateAsync(
+            context.Creator.Id,
+            new CreateChallengeRequest("Abgebrochen", context.Text.Id, ChallengeMode.Classic, [context.Invitee.Id], 1, 7));
+        await context.Service.CancelAsync(completed.Id, context.Creator.Id);
+
+        var invitations = await context.Service.ListPageForProfileAsync(
+            context.Invitee.Id, ChallengeListFilter.Invitations, 1, 1);
+        var finished = await context.Service.ListPageForProfileAsync(
+            context.Invitee.Id, ChallengeListFilter.Completed, 1, 1);
+
+        Assert.Equal(1, invitations.TotalCount);
+        Assert.Equal(1, invitations.UnreadCount);
+        Assert.Equal(active.Id, Assert.Single(invitations.Items).Challenge.Id);
+        Assert.Equal(completed.Id, Assert.Single(finished.Items).Challenge.Id);
+
+        await context.Service.JoinAsync(active.Id, context.Invitee.Id);
+        var afterJoin = await context.Service.ListPageForProfileAsync(
+            context.Invitee.Id, ChallengeListFilter.Invitations, 99, 1);
+        Assert.Empty(afterJoin.Items);
+        Assert.Equal(0, afterJoin.UnreadCount);
+        Assert.Equal(1, afterJoin.Page);
+    }
+
+    [Fact]
+    public async Task BestOfRunsAllRoundsAndRatesSeriesOnce()
+    {
+        await using var context = await ChallengeTestContext.CreateAsync();
+        var challenge = await context.Service.CreateAsync(
+            context.Creator.Id,
+            new CreateChallengeRequest("Best of 3", context.Text.Id, ChallengeMode.BestOf, [context.Invitee.Id], 3, 7));
+        await context.Service.JoinAsync(challenge.Id, context.Invitee.Id);
+
+        for (var round = 0; round < 3; round++)
+        {
+            await CompleteNextRoundAsync(context, challenge.Id, context.Invitee.Id);
+            await CompleteNextRoundAsync(context, challenge.Id, context.Creator.Id);
+        }
+
+        var stored = await context.Db.Challenges.SingleAsync(item => item.Id == challenge.Id);
+        var participants = await context.Db.ChallengeParticipants
+            .Where(item => item.ChallengeId == challenge.Id)
+            .ToListAsync();
+        var results = await context.Db.ChallengeRoundResults
+            .Where(item => context.Db.ChallengeRounds
+                .Where(challengeRound => challengeRound.ChallengeId == challenge.Id)
+                .Select(challengeRound => challengeRound.Id)
+                .Contains(item.ChallengeRoundId))
+            .ToListAsync();
+
+        Assert.Equal(ChallengeStatus.Finished, stored.Status);
+        Assert.Equal(6, results.Count);
+        Assert.All(results, result => Assert.NotNull(result.Placement));
+        Assert.All(participants, participant =>
+        {
+            Assert.Equal(ParticipantStatus.Finished, participant.Status);
+            Assert.NotNull(participant.Placement);
+        });
+        Assert.All(
+            await context.Db.UserProfiles.Where(item => item.Id == context.Creator.Id || item.Id == context.Invitee.Id).ToListAsync(),
+            profile => Assert.Equal(1, profile.RatedMatchCount));
+    }
+
+    private static async Task CompleteNextRoundAsync(ChallengeTestContext context, Guid challengeId, Guid profileId)
+    {
+        var session = await context.Service.StartAttemptAsync(challengeId, profileId, context.Attempts);
+        await context.Attempts.BeginAsync(profileId, new BeginAttemptRequest(session.Id, session.Nonce));
+        context.Time.Advance(TimeSpan.FromSeconds(10));
+        var attempt = await context.Attempts.FinishAsync(
+            profileId,
+            new FinishAttemptRequest(session.Id, session.Text, 0, 0, 10_000) { Nonce = session.Nonce });
+        await context.Service.FinishRoundAsync(challengeId, profileId, attempt);
     }
 
     private sealed class ChallengeTestContext : IAsyncDisposable

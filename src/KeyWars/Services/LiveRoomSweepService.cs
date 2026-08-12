@@ -1,14 +1,23 @@
+using KeyWars.Infrastructure.Cluster;
+
 namespace KeyWars.Services;
 
 public sealed class LiveRoomSweepService(
-    LiveRoomManager rooms,
+    ILiveRoomDispatcher rooms,
     ILiveRoomUpdateSender updateSender,
     TimeProvider timeProvider,
-    ILogger<LiveRoomSweepService> logger) : BackgroundService
+    ILogger<LiveRoomSweepService> logger,
+    RuntimeTopology? topology = null) : BackgroundService
 {
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
-        var abortedRooms = rooms.AbortActiveRooms();
+        if (topology?.IsCluster == true)
+        {
+            await base.StopAsync(cancellationToken);
+            return;
+        }
+
+        var abortedRooms = await rooms.AbortActiveRoomsAsync(CancellationToken.None);
         if (abortedRooms > 0)
         {
             logger.LogWarning("{Count} laufende Arena-Räume wurden beim Shutdown ohne Rating abgebrochen.", abortedRooms);
@@ -40,7 +49,7 @@ public sealed class LiveRoomSweepService(
 
     public async Task SweepOnceAsync(CancellationToken cancellationToken)
     {
-        foreach (var snapshot in rooms.Sweep())
+        foreach (var snapshot in await rooms.SweepAsync(cancellationToken))
         {
             await updateSender.SendAsync(snapshot, cancellationToken);
         }

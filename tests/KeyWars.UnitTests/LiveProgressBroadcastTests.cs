@@ -27,7 +27,8 @@ public sealed class LiveProgressBroadcastTests
         Assert.Equal(2, sender.Batches.Count);
         Assert.Equal(10, sender.Batches[0].Deltas.Single().CorrectCharacters);
         Assert.Equal(15, sender.Batches[1].Deltas.Single().CorrectCharacters);
-        Assert.Equal("ccccccccccccccc", sender.Batches[1].Deltas.Single().TypedTextPreview);
+        Assert.Equal(15, sender.Batches[1].Deltas.Single().TypedCharacters);
+        Assert.True(sender.Batches[1].Deltas.Single().TypedStateBits.Length < 15);
         Assert.True(broadcaster.Snapshot().CoalescedProgressMessages >= 1);
     }
 
@@ -93,12 +94,27 @@ public sealed class LiveProgressBroadcastTests
     private static LiveProgressDelta CreateDelta(Guid roomId, Guid participantId, int correctCharacters) => new(
         roomId,
         2,
+        correctCharacters + 1L,
         participantId,
         correctCharacters,
-        new string('c', correctCharacters),
+        correctCharacters,
+        correctCharacters,
+        EncodeCorrectBits(correctCharacters),
         42,
         100,
         1);
+
+    private static string EncodeCorrectBits(int length)
+    {
+        var bytes = new byte[(length + 7) / 8];
+        Array.Fill(bytes, byte.MaxValue);
+        if (length % 8 is { } remainder and not 0)
+        {
+            bytes[^1] = (byte)((1 << remainder) - 1);
+        }
+
+        return Convert.ToBase64String(bytes);
+    }
 
     private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
     {

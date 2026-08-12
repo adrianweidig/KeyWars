@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Mvc.RazorPages;
 
 namespace KeyWars.Pages.Arena;
 
-public sealed class BeitretenModel(CurrentUser currentUser, LiveRoomManager rooms) : PageModel
+public sealed class BeitretenModel(CurrentUser currentUser, ILiveRoomDispatcher rooms) : PageModel
 {
     [BindProperty]
     public string Code { get; set; } = "";
@@ -20,7 +20,7 @@ public sealed class BeitretenModel(CurrentUser currentUser, LiveRoomManager room
         try
         {
             Code = LiveRoomManager.NormalizeRoomCode(Code);
-            var snapshot = rooms.JoinByCode(Code, profile.Id, profile.DisplayName);
+            var snapshot = await rooms.JoinByCodeAsync(Code, profile.Id, profile.DisplayName, cancellationToken);
             return RedirectToPage("/Arena/Raum", new { id = snapshot.RoomId });
         }
         catch (InvalidOperationException ex)

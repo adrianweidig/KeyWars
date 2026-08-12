@@ -235,6 +235,7 @@
         {
             <nav class="pagination" aria-label="Historie Seiten">
                 <a class="button secondary" asp-page="/Profil/Index" asp-route-seite="@(Model.Insights.HistoryPage - 1)" aria-disabled="@(Model.Insights.HistoryPage <= 1)">Zurück</a>
+                <span aria-current="page">Seite @Model.Insights.HistoryPage von @Model.Insights.HistoryTotalPages</span>
                 <a class="button secondary" asp-page="/Profil/Index" asp-route-seite="@(Model.Insights.HistoryPage + 1)" aria-disabled="@(Model.Insights.HistoryPage >= Model.Insights.HistoryTotalPages)">Weiter</a>
             </nav>
         }

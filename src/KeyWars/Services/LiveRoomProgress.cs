@@ -45,6 +45,28 @@ internal static class LiveRoomProgress
         });
     }
 
+    public static string BuildTypedStateBits(
+        IReadOnlyList<string> targetElements,
+        IReadOnlyList<string> inputElements)
+    {
+        var length = Math.Min(targetElements.Count, inputElements.Count);
+        if (length == 0)
+        {
+            return "";
+        }
+
+        var bytes = new byte[(length + 7) / 8];
+        for (var index = 0; index < length; index++)
+        {
+            if (StringComparer.Ordinal.Equals(targetElements[index], inputElements[index]))
+            {
+                bytes[index / 8] |= (byte)(1 << (index % 8));
+            }
+        }
+
+        return Convert.ToBase64String(bytes);
+    }
+
     public static double CalculateWpm(int correctCharacters, DateTimeOffset? startedAt, DateTimeOffset now)
     {
         if (startedAt is null)
@@ -71,18 +93,6 @@ internal static class LiveRoomProgress
         }
 
         return normalized;
-    }
-
-    public static int CalculateRankHint(LiveRoomState room, Guid profileId)
-    {
-        var ranked = room.Participants.Values
-            .OrderByDescending(item => item.CorrectCharacters)
-            .ThenByDescending(item => item.Wpm)
-            .ThenBy(item => item.JoinedAt)
-            .ThenBy(item => item.ProfileId)
-            .Select((participant, index) => new { participant.ProfileId, Rank = index + 1 })
-            .FirstOrDefault(item => item.ProfileId == profileId);
-        return ranked?.Rank ?? room.Participants.Count;
     }
 
     public static TimeSpan NormalizeDuration(TimeSpan duration) =>

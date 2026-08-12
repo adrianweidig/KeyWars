@@ -8,7 +8,7 @@
 <section class="page-header challenge-play-header">
     <div>
         <h1>@Model.CurrentChallenge.Title</h1>
-        <p class="lead">Ein offizieller Challenge-Versuch kann nicht freiwillig neu gestartet werden.</p>
+        <p class="lead">Runde @Model.CurrentRound von @Model.CurrentChallenge.RoundCount · Ein offizieller Challenge-Versuch kann nicht freiwillig neu gestartet werden.</p>
     </div>
 </section>
 
@@ -21,3 +21,7 @@
     <button type="button" data-start>Starten</button>
     <div data-result></div>
 </section>
+
+<div class="page-actions">
+    <a class="button secondary" asp-page="/Herausforderungen/Details" asp-route-id="@Model.CurrentChallenge.Id">Zum Serienstand</a>
+</div>

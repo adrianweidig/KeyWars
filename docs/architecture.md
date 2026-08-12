@@ -1,25 +1,45 @@
 # Architektur
 
-KeyWars läuft als Single-Instance-Anwendung in genau einem Container. Kestrel, Razor Pages, Minimal APIs, SignalR, SQLite-Zugriff, Raumengine und Hintergrundlogik laufen im selben Prozess.
+KeyWars hat zwei Betriebsarten mit demselben Anwendungscode.
 
-Persistente Daten liegen ausschließlich unter `/data`: SQLite-Datenbank, WAL/SHM-Dateien, Data-Protection-Schlüssel, Backups und Instanzkennung. Live-Räume liegen im Arbeitsspeicher; ein Neustart darf laufende Rennen abbrechen und erzeugt keine Ratingänderung.
+## Einzelinstanz
 
-Das Challenge-Modell verwendet `Challenge`, `ChallengeParticipant`, `ChallengeRound` und `ChallengeRoundResult`. Es gibt kein Creator/Opponent-Sonderfeld und keine Zwei-Personen-Annahme.
+`compose.yaml` startet einen ASP.NET-Core-Prozess mit Razor Pages, Minimal APIs,
+SignalR, Raumengine und Hintergrundarbeit. SQLite, Data-Protection-Schlüssel und
+Backups liegen unter `/data`. Live-Räume und vorbereitete Tippversuche sind
+prozesslokal; ein Neustart darf laufende Rennen ohne Ratingänderung abbrechen.
 
-Die Live-Arena nutzt `LiveRoomManager` mit konfigurierbaren Kapazitätsgrenzen,
-einer serverseitigen Raumphase und einem synchronisierten Countdown. Fortschritt
-wird im Speicher verarbeitet; SQLite erhält nur zusammengefasste Ergebnisse.
-Öffentliche Verträge liegen in `LiveRoomContracts`, der veränderliche interne
-Zustand in `LiveRoomState`, Fortschrittsberechnungen in `LiveRoomProgress` und
-Runden-, Serien- sowie Teamwertungen in `LiveRoomScoring`. Der Manager
-koordiniert diese Bausteine unter den jeweiligen Raumsperren.
-Abschlussdaten laufen über `LiveRoomCompletionQueue` und
-`SqliteLiveRoomCompletionWriter`: begrenzte In-Process-Queue, Idempotenz pro
-Raum/Runde/Version, SQLite-Transaktion, Retry für transiente Locks und
-Shutdown-Flush. Laufende Countdown- und Rennräume werden beim Shutdown als
-serverseitig abgebrochen gespeichert und bewirken keine Ratingänderung.
-Der heiße SignalR-Progresspfad sendet keine Vollsnapshots mehr, sondern
-koaleszierte `LiveProgressDelta`-Batches über `LiveProgressBroadcaster`.
-Zuverlässige Raumereignisse bleiben direkte Commands mit Vollsnapshot;
-eine vollständige RoomCommand-Pipeline für alle Befehle bleibt weiterer
-KW-015-/KW-052-Ausbau.
+Dieser Modus ist der einfache Standard für einen einzelnen Host. Er wird nicht
+durch zusätzliche Replikate desselben Compose-Dienstes skaliert.
+
+## Scale-Modus
+
+`compose.scale.yaml` trennt Laufzeitrollen:
+
+| Rolle | Verantwortung |
+| --- | --- |
+| `web` | Razor Pages, HTTP-Endpunkte und Anmeldung |
+| `arena` | SignalR und Live-Arena |
+| `worker` | asynchrone Abschluss- und Hintergrundarbeit |
+| `migrate` | einmalige PostgreSQL-Migration vor dem Start |
+| `all` | kombinierte Rolle der Einzelinstanz |
+
+PostgreSQL speichert dauerhafte Daten. Redis stellt Data-Protection-Schlüssel,
+SignalR-Backplane und verteilten Laufzeitzustand bereit. `web`, `arena` und
+`worker` starten im Scale-Modus ohne diese Abhängigkeiten nicht. Swarm und
+Kubernetes verwenden dieselben Rollen; die Referenz für Betrieb und Wartung ist
+weiterhin Compose. Details: [Skalierter Betrieb](scale-operations.md).
+
+## Fachliche Grenzen
+
+Das Challenge-Modell verwendet `Challenge`, `ChallengeParticipant`,
+`ChallengeRound` und `ChallengeRoundResult`; es gibt keine Zwei-Personen-Annahme.
+
+Die Live-Arena verarbeitet Tippfortschritt transient und persistiert nur
+zusammengefasste Ergebnisse. `LiveRoomContracts` enthält öffentliche Verträge,
+`LiveRoomState` den veränderlichen Zustand, `LiveRoomProgress` die
+Fortschrittsberechnung und `LiveRoomScoring` die Wertung.
+
+Abschlussdaten laufen idempotent über `LiveRoomCompletionQueue`. Der heiße
+SignalR-Pfad sendet koaleszierte `LiveProgressDelta`-Batches; zuverlässige
+Raumereignisse bleiben vollständige Commands.

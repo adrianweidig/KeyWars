@@ -3,6 +3,8 @@ using KeyWars.Domain;
 using KeyWars.Services;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using System.Data.Common;
 
 namespace KeyWars.IntegrationTests;
 
@@ -14,7 +16,11 @@ public sealed class ProfileInsightsServiceTests
         var now = DateTimeOffset.Parse("2026-06-19T12:00:00Z");
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
-        var options = new DbContextOptionsBuilder<KeyWarsDbContext>().UseSqlite(connection).Options;
+        var commandCounter = new TrendCommandCounter();
+        var options = new DbContextOptionsBuilder<KeyWarsDbContext>()
+            .UseSqlite(connection)
+            .AddInterceptors(commandCounter)
+            .Options;
         await using var db = new KeyWarsDbContext(options);
         await db.Database.EnsureCreatedAsync();
         var profile = new UserProfile
@@ -107,15 +113,17 @@ public sealed class ProfileInsightsServiceTests
             CreatedAt = now.AddHours(-1)
         });
         await db.SaveChangesAsync();
+        commandCounter.Reset();
         var service = new ProfileInsightsService(db, new ManualTimeProvider(now));
 
         var insights = await service.GetAsync(profile, 2, 10, CancellationToken.None);
 
         Assert.Equal("MM", insights.Initials);
-        Assert.Equal("Gold", insights.Division);
+        Assert.Equal("Diamant", insights.Division);
         Assert.Equal(125, insights.Totals.CompletedAttempts);
         Assert.Equal(attempts.Sum(item => item.CorrectCharacters + item.IncorrectCharacters), insights.Totals.TypedCharacters);
         Assert.Equal(3, insights.Trends.Count);
+        Assert.Equal(1, commandCounter.TrendQueryCount);
         Assert.True(insights.Trends.Single(item => item.Days == 7).SampleCount > 0);
         Assert.Equal(90, insights.ActivityDays.Count);
         var today = insights.ActivityDays[^1];
@@ -307,5 +315,26 @@ public sealed class ProfileInsightsServiceTests
     private sealed class ManualTimeProvider(DateTimeOffset utcNow) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => utcNow;
+    }
+
+    private sealed class TrendCommandCounter : DbCommandInterceptor
+    {
+        public int TrendQueryCount { get; private set; }
+
+        public void Reset() => TrendQueryCount = 0;
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.Contains("WITH windows", StringComparison.OrdinalIgnoreCase))
+            {
+                TrendQueryCount++;
+            }
+
+            return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+        }
     }
 }

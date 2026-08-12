@@ -9,15 +9,25 @@
     <div>
         <span class="eyebrow">Tageswertung</span>
         <h1>Tageschallenge</h1>
-        <p class="lead">Ein fokussierter Tageslauf mit festem Text. Dein erster gültiger Versuch zählt für die Tageswertung, danach kannst du weiter trainieren.</p>
+        <p class="lead">Ein fokussierter Tageslauf mit festem Text. Dein bestes gültiges Ergebnis der letzten 24 Stunden zählt.</p>
         <div class="hero-stat-row" aria-label="Challenge-Regeln">
-            <span><strong>1 Versuch</strong> zählt offiziell</span>
-            <span><strong>@Model.Text.CharacterCount</strong> Zeichen</span>
+            <span><strong>Bestwert</strong> der letzten 24 Stunden</span>
+            <span><strong>@(Model.Text?.CharacterCount ?? 0)</strong> Zeichen</span>
             <span><strong>90%+</strong> Zielgenauigkeit</span>
         </div>
     </div>
 </section>
 
+@if (Model.Text is null)
+{
+    <section class="card empty-state">
+        <h2>Keine Tageschallenge verfügbar</h2>
+        <p>Es ist noch kein wertbarer Standardtext eingerichtet. Bitte wende dich an die Administration.</p>
+        <a class="button secondary" asp-page="/Spielen/Index">Zum freien Training</a>
+    </section>
+}
+else
+{
 <section class="card typing-session-card typing-focus-primary daily-challenge-card"
          data-typing-app
          data-mode="Text"
@@ -45,3 +55,12 @@
     </div>
     <div data-result></div>
 </section>
+
+<div class="page-actions">
+    <a class="button secondary"
+       asp-page="/Ranglisten"
+       asp-route-board="text"
+       asp-route-period="day"
+       asp-route-textId="@Model.Text.Id">24h-Wertung dieses Textes</a>
+</div>
+}

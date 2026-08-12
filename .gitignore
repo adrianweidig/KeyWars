@@ -20,6 +20,7 @@ test-results/
 .env.*
 !.env.example
 !.env.*.example
+secrets/
 compose.override.yml
 compose.override.yaml
 docker-compose.override.yml

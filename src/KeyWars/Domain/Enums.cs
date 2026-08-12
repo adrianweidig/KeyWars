@@ -43,6 +43,18 @@ public enum TrainingTextVisibility
     Organization
 }
 
+public enum ContentModerationTargetType
+{
+    TrainingText,
+    TextCollection
+}
+
+public enum ContentModerationAction
+{
+    Unpublish,
+    Quarantine
+}
+
 public enum ChallengeMode
 {
     Classic,

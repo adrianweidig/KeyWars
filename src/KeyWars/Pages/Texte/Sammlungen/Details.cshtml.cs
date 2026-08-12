@@ -15,11 +15,13 @@ public sealed class DetailsModel(CurrentUser currentUser, KeyWarsDbContext db) :
     public async Task<IActionResult> OnGetAsync(Guid id, CancellationToken cancellationToken)
     {
         var profile = await currentUser.RequireProfileAsync(User, cancellationToken);
-        Collection = await db.TextCollections.SingleAsync(item => item.Id == id && (item.OwnerProfileId == profile.Id || item.Visibility == TrainingTextVisibility.Organization), cancellationToken);
+        Collection = await db.TextCollections.SingleAsync(item => item.Id == id && !item.IsQuarantined &&
+            (item.OwnerProfileId == profile.Id || item.Visibility == TrainingTextVisibility.Organization), cancellationToken);
         Texts = await (
             from collectionItem in db.TextCollectionItems
             join text in db.TrainingTexts on collectionItem.TrainingTextId equals text.Id
             where collectionItem.TextCollectionId == id &&
+                !text.IsQuarantined &&
                 (text.IsStandard || text.Visibility == TrainingTextVisibility.Organization || text.OwnerProfileId == profile.Id)
             orderby collectionItem.SortOrder
             select text

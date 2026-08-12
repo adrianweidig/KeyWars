@@ -9,7 +9,30 @@ public enum ProfileAccessState
     Deleted
 }
 
-public sealed class ProfileAccessGate
+public interface IProfileAccessGate
+{
+    ValueTask<ProfileAccessState> GetStateAsync(
+        Guid profileId,
+        CancellationToken cancellationToken = default);
+    ValueTask<IAsyncDisposable> AcquireAsync(
+        Guid profileId,
+        CancellationToken cancellationToken = default);
+    ValueTask<IAsyncDisposable> AcquireManyAsync(
+        IEnumerable<Guid> profileIds,
+        CancellationToken cancellationToken = default);
+    ValueTask<bool> TryBeginOperationAsync(
+        Guid profileId,
+        CancellationToken cancellationToken = default);
+    Task WaitForIdleAsync(Guid profileId, CancellationToken cancellationToken = default);
+    ValueTask CompleteOperationAsync(
+        Guid profileId,
+        CancellationToken cancellationToken = default);
+    ValueTask MarkDeletedAsync(
+        Guid profileId,
+        CancellationToken cancellationToken = default);
+}
+
+public sealed class ProfileAccessGate : IProfileAccessGate
 {
     private readonly ConcurrentDictionary<Guid, ProfileAccessEntry> entries = new();
 
@@ -27,6 +50,14 @@ public sealed class ProfileAccessGate
     }
 
     public bool IsBlocked(Guid profileId) => GetState(profileId) != ProfileAccessState.Available;
+
+    public ValueTask<ProfileAccessState> GetStateAsync(
+        Guid profileId,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return ValueTask.FromResult(GetState(profileId));
+    }
 
     public IDisposable Acquire(Guid profileId)
     {
@@ -74,6 +105,22 @@ public sealed class ProfileAccessGate
         }
     }
 
+    public ValueTask<IAsyncDisposable> AcquireAsync(
+        Guid profileId,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return ValueTask.FromResult<IAsyncDisposable>(new AsyncLease(Acquire(profileId)));
+    }
+
+    public ValueTask<IAsyncDisposable> AcquireManyAsync(
+        IEnumerable<Guid> profileIds,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return ValueTask.FromResult<IAsyncDisposable>(new AsyncLease(AcquireMany(profileIds)));
+    }
+
     public bool TryBeginOperation(Guid profileId)
     {
         var entry = entries.GetOrAdd(profileId, static _ => new ProfileAccessEntry());
@@ -90,6 +137,14 @@ public sealed class ProfileAccessGate
                 : new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             return true;
         }
+    }
+
+    public ValueTask<bool> TryBeginOperationAsync(
+        Guid profileId,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return ValueTask.FromResult(TryBeginOperation(profileId));
     }
 
     public Task WaitForIdleAsync(Guid profileId, CancellationToken cancellationToken = default)
@@ -135,6 +190,15 @@ public sealed class ProfileAccessGate
         }
     }
 
+    public ValueTask CompleteOperationAsync(
+        Guid profileId,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        CompleteOperation(profileId);
+        return ValueTask.CompletedTask;
+    }
+
     public void MarkDeleted(Guid profileId)
     {
         var entry = entries.GetOrAdd(profileId, static _ => new ProfileAccessEntry());
@@ -149,6 +213,15 @@ public sealed class ProfileAccessGate
             entry.Generation++;
             entry.Idle = null;
         }
+    }
+
+    public ValueTask MarkDeletedAsync(
+        Guid profileId,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        MarkDeleted(profileId);
+        return ValueTask.CompletedTask;
     }
 
     private ProfileOperationException CreateBlockedException(Guid profileId) =>
@@ -215,6 +288,17 @@ public sealed class ProfileAccessGate
             {
                 DisposeReverse(released);
             }
+        }
+    }
+
+    private sealed class AsyncLease(IDisposable lease) : IAsyncDisposable
+    {
+        private IDisposable? current = lease;
+
+        public ValueTask DisposeAsync()
+        {
+            Interlocked.Exchange(ref current, null)?.Dispose();
+            return ValueTask.CompletedTask;
         }
     }
 }

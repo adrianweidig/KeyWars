@@ -90,7 +90,9 @@
            asp-route-board="@item.Value"
            asp-route-period="@Model.PeriodValue(query.Period)"
            asp-route-mode="@Model.ModeValue(query.Mode)"
-           asp-route-textId="@query.TextId">@item.Label</a>
+           asp-route-textId="@query.TextId"
+           asp-route-scope="@RanglistenModel.ScopeValue(query.OwnDepartmentOnly)"
+           aria-current="@(query.Board == item.Kind ? "page" : null)">@item.Label</a>
     }
 </nav>
 
@@ -137,6 +139,20 @@
         else if (query.TextId is not null)
         {
             <input type="hidden" name="textId" value="@query.TextId" />
+        }
+        @if (Model.CurrentDepartment is not null)
+        {
+            <label>
+                Bereich
+                <select name="scope">
+                    <option value="organization" selected="@(!query.OwnDepartmentOnly)">Gesamte Organisation</option>
+                    <option value="department" selected="@(query.OwnDepartmentOnly)">Meine Abteilung: @Model.CurrentDepartment</option>
+                </select>
+            </label>
+        }
+        else
+        {
+            <input type="hidden" name="scope" value="organization" />
         }
         <div class="form-actions">
             <button type="submit">Anzeigen</button>

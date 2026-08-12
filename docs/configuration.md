@@ -1,6 +1,7 @@
 # Konfiguration
 
-Für Compose gilt `.env.example` als vollständige Vorlage:
+Im Repository heißt die vollständige Compose-Vorlage `.env.example`; im
+Release wird derselbe Inhalt als `default.env.example` veröffentlicht:
 
 ```bash
 cp .env.example .env
@@ -8,8 +9,23 @@ docker compose --env-file .env config
 ```
 
 `compose.yaml` übersetzt die kurzen `.env`-Namen in die internen
-`KEYWARS__...`-Variablen. Änderungen werden erst nach einem Container-Neustart
-wirksam.
+`KEYWARS__...`-Variablen. Änderungen werden erst nach einem Neustart des
+betroffenen Dienstes wirksam.
+
+## Betriebsart
+
+Ohne weitere Auswahl läuft KeyWars als Einzelinstanz mit SQLite. Der Scale-Modus
+verwendet `compose.scale.yaml` und diese internen Variablen:
+
+| Variable | Werte | Zweck |
+| --- | --- | --- |
+| `KEYWARS__RUNTIME__ROLE` | `all`, `web`, `arena`, `worker`, `migrate` | aktive Prozessrolle |
+| `KEYWARS__DATABASE__PROVIDER` | `sqlite`, `postgresql` | Datenbankanbieter |
+| `ConnectionStrings__KeyWars` | Verbindungszeichenfolge | PostgreSQL-Verbindung im Scale-Modus |
+| `KEYWARS__REDIS__CONNECTION_STRING` | Verbindungszeichenfolge | SignalR, Data Protection und verteilter Zustand |
+
+Für Administratoren bleibt Compose die Referenz. Reihenfolge, Wartung und
+Health-Prüfungen stehen unter [Skalierter Betrieb](scale-operations.md).
 
 ## Für jeden produktiven Start
 
@@ -25,6 +41,20 @@ wirksam.
 
 LDAP-Details einschließlich `USER_BASE_DN`, StartTLS, Timeouts und eigener CA:
 [LDAP und Active Directory](ldap.md).
+
+## Content-Moderation
+
+Moderationsrechte kommen ausschließlich aus den beim Login gelesenen direkten
+LDAP-Gruppenwerten:
+
+| `.env`-Variable | Inhalt |
+| --- | --- |
+| `KEYWARS_MODERATOR_GROUP_DNS` | Semikolonliste vollständiger `memberOf`-DNs |
+| `KEYWARS_MODERATOR_GROUP_VALUES` | Semikolonliste exakter Werte oder erster RDN-Werte, etwa Gruppenname aus `CN=` |
+
+Beide Werte dürfen kombiniert werden. Leer bedeutet: keine Moderatoren. Nach
+einer Gruppenänderung muss sich die betroffene Person neu anmelden; es gibt
+keine lokale Rollenzuweisung.
 
 ## Reverse Proxy
 
@@ -71,18 +101,20 @@ Diese Werte werden bei Bedarf direkt unter `environment:` ergänzt:
 | `KEYWARS__CONTENT__MAX_TEXT_CHARACTERS` | 20000 | UTF-16-Zeichen nach Normalisierung |
 | `KEYWARS__CONTENT__MAX_TEXT_GRAPHEMES` | 20000 | Grapheme nach Normalisierung |
 | `KEYWARS__CONTENT__MAX_TEXT_LINES` | 400 | Zeilen je importiertem Text |
-| `KEYWARS__CHALLENGES__MAX_PARTICIPANTS` | 64 | mindestens 2 |
+| `KEYWARS_MAX_CHALLENGE_PARTICIPANTS` | 64 | mindestens 2; durch Compose übersetzt |
 
 `KEYWARS__AUTH__DEVELOPMENT_LOGIN=true` ist in Production gesperrt.
-`KEYWARS__DATA__DIRECTORY` bleibt im Container `/data`; dort liegen SQLite,
-Data-Protection-Schlüssel und Backups. Es gibt keinen automatischen
-Backup-Zeitplan – der Betreiber plant und exportiert Backups selbst.
+`KEYWARS__DATA__DIRECTORY` bleibt in der Einzelinstanz `/data`; dort liegen
+SQLite, Data-Protection-Schlüssel und Backups. Im Scale-Modus liegen dauerhafte
+Anwendungsdaten in PostgreSQL und der gemeinsame Schlüsselring in Redis. Es gibt
+keinen automatischen Backup-Zeitplan – der Betreiber plant und exportiert
+Backups selbst.
 
 ## Betriebsprüfungen
 
 | Pfad | Aussage |
 | --- | --- |
 | `/health/live` | Prozess läuft |
-| `/health/ready` | Datenverzeichnis und SQLite sind erreichbar |
+| `/health/ready` | die für die Rolle benötigten Daten- und Laufzeitdienste sind erreichbar |
 | `/health/arena-persistence` | Abschlussqueue, Fehler und Persistenzdauer |
 | `/health/arena-progress` | aktive Räume, Deltas, Koaleszierungen, Drops und Broadcasts |

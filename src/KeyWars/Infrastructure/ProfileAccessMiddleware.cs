@@ -7,7 +7,7 @@ namespace KeyWars.Infrastructure;
 
 public sealed class ProfileAccessMiddleware(RequestDelegate next)
 {
-    public async Task InvokeAsync(HttpContext context, ProfileAccessGate accessGate)
+    public async Task InvokeAsync(HttpContext context, IProfileAccessGate accessGate)
     {
         if (!ShouldLease(context) ||
             !Guid.TryParse(context.User.FindFirstValue(KeyWarsClaims.ProfileId), out var profileId))
@@ -18,7 +18,7 @@ public sealed class ProfileAccessMiddleware(RequestDelegate next)
 
         try
         {
-            using var lease = accessGate.Acquire(profileId);
+            await using var lease = await accessGate.AcquireAsync(profileId, context.RequestAborted);
             await next(context);
         }
         catch (ProfileOperationException exception) when (!context.Response.HasStarted)

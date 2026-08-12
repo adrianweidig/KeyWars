@@ -53,7 +53,10 @@ public interface ILiveRoomCompletionWriter
     Task PersistAsync(CompletedRoomRecord record, CancellationToken cancellationToken);
 }
 
-public sealed class LiveRoomCompletionQueue : BackgroundService, ILiveRoomCompletionSink
+public sealed class LiveRoomCompletionQueue : BackgroundService,
+    ILiveRoomCompletionSink,
+    ILiveRoomCompletionDrain,
+    ILiveRoomCompletionMonitor
 {
     private const int MaxPersistenceAttempts = 3;
     private static readonly TimeSpan[] RetryDelays = [TimeSpan.FromMilliseconds(100), TimeSpan.FromMilliseconds(500)];
@@ -548,7 +551,7 @@ public sealed class LiveRoomCompletionQueue : BackgroundService, ILiveRoomComple
     }
 }
 
-public sealed class SqliteLiveRoomCompletionWriter(IServiceScopeFactory scopeFactory) : ILiveRoomCompletionWriter
+public sealed class RelationalLiveRoomCompletionWriter(IServiceScopeFactory scopeFactory) : ILiveRoomCompletionWriter
 {
     public async Task PersistAsync(CompletedRoomRecord record, CancellationToken cancellationToken)
     {
@@ -556,6 +559,17 @@ public sealed class SqliteLiveRoomCompletionWriter(IServiceScopeFactory scopeFac
         var db = scope.ServiceProvider.GetRequiredService<KeyWarsDbContext>();
         var motivation = scope.ServiceProvider.GetRequiredService<MotivationService>();
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        if (db.Database.IsNpgsql())
+        {
+            foreach (var profileId in record.Participants.Select(item => item.UserProfileId).Distinct().Order())
+            {
+                var advisoryKey = BitConverter.ToInt64(profileId.ToByteArray(), 0);
+                await db.Database.ExecuteSqlInterpolatedAsync(
+                    $"SELECT pg_advisory_xact_lock({advisoryKey});",
+                    cancellationToken);
+            }
+        }
+
         if (await db.LiveRoomSummaries.AnyAsync(item => item.Id == record.Id || item.IdempotencyKey == record.IdempotencyKey, cancellationToken))
         {
             await transaction.CommitAsync(cancellationToken);
@@ -571,6 +585,7 @@ public sealed class SqliteLiveRoomCompletionWriter(IServiceScopeFactory scopeFac
             throw new InvalidOperationException("Mindestens ein Arena-Teilnehmerprofil fehlt oder ist gelöscht; das Ergebnis wird nicht gewertet.");
         }
 
+        var profilesById = profiles.ToDictionary(profile => profile.Id);
         var ratingChanges = profiles.ToDictionary(profile => profile.Id, profile => new RatingChange(profile.Id, profile.ArenaRating, 0, profile.ArenaRating));
         var rankingInput = record.Participants
             .Select(item => new RaceResult(
@@ -625,6 +640,7 @@ public sealed class SqliteLiveRoomCompletionWriter(IServiceScopeFactory scopeFac
             AbortedByServer = isServerAbort
         });
 
+        var motivationInputs = new List<ArenaMotivationInput>(record.Participants.Count);
         foreach (var participant in record.Participants)
         {
             var ratingChange = ratingChanges[participant.UserProfileId];
@@ -645,16 +661,16 @@ public sealed class SqliteLiveRoomCompletionWriter(IServiceScopeFactory scopeFac
 
             if (!isServerAbort && participant.Status == ParticipantStatus.Finished)
             {
-                await motivation.ApplyArenaResultAsync(
-                    participant.UserProfileId,
+                motivationInputs.Add(new ArenaMotivationInput(
+                    profilesById[participant.UserProfileId],
                     $"{record.IdempotencyKey}:{participant.UserProfileId:N}",
                     participant.Wpm,
                     participant.Accuracy,
-                    participant.DurationMilliseconds,
-                    cancellationToken);
+                    participant.DurationMilliseconds));
             }
         }
 
+        await motivation.ApplyArenaResultsAsync(motivationInputs, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }

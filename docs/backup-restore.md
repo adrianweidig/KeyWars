@@ -1,4 +1,15 @@
-# Backup und Restore
+# Backup und Disaster Recovery
+
+Die Sicherung hängt vom Betriebsmodus ab:
+
+- Einzelinstanz: SQLite-Datenbank und Manifest gemeinsam exportieren.
+- Scale-Modus: PostgreSQL ist die fachlich führende Datenbank. Redis enthält
+  Laufzeitzustand und Data-Protection-Schlüssel.
+
+Backups immer verschlüsselt auf unabhängigen Speicher übertragen und einen
+Restore regelmäßig in einer isolierten Umgebung testen.
+
+## Einzelinstanz mit SQLite
 
 KeyWars erstellt konsistente SQLite-Online-Backups. Ein Backup besteht immer
 aus Datenbank **und** Manifest; beide Dateien müssen gemeinsam außerhalb des
@@ -59,3 +70,84 @@ Vor dem Austausch validiert KeyWars Manifest, Hash, Größe, SQLite-Integrität
 und Migrationsstand. Eine vorhandene Datenbank wird zusätzlich als
 `keywars-pre-restore-*.db` samt Manifest gesichert. Auch dieses Paar muss bei
 Bedarf aus dem Volume exportiert werden.
+
+## Scale-Modus mit PostgreSQL
+
+`pg_dump` in einem zur Server-Hauptversion passenden Client erzeugt ein
+portables Custom-Format. Beispiel für Scale-Compose:
+
+```bash
+mkdir -p keywars-dr
+docker compose --env-file .env.scale -f compose.scale.yaml exec -T postgres \
+  pg_dump -U keywars -d keywars --format=custom > "keywars-dr/postgres-$(date -u +%Y%m%dT%H%M%SZ).dump"
+```
+
+Im mitgelieferten Swarm-Stack auf einem Manager:
+
+```bash
+mkdir -p keywars-dr
+pg_container="$(docker ps --filter label=com.docker.swarm.service.name=keywars_keywars-postgres -q | head -n 1)"
+test -n "$pg_container"
+docker exec "$pg_container" pg_dump -U keywars -d keywars --format=custom \
+  > "keywars-dr/postgres-$(date -u +%Y%m%dT%H%M%SZ).dump"
+```
+
+Bei externem PostgreSQL den Backupdienst des Anbieters und zusätzlich
+regelmäßige logische Dumps nutzen. Aufbewahrung, Verschlüsselung, PITR und
+regionsgetrennte Kopien liegen beim Betreiber.
+
+### PostgreSQL wiederherstellen
+
+1. Edge, Web, Arena und Worker stoppen; in Kubernetes vorher HPAs entfernen.
+2. Ziel und Backup-Zeitpunkt nochmals prüfen.
+3. In eine leere Datenbank oder kontrolliert mit `--clean --if-exists`
+   wiederherstellen.
+4. Die zur Image-Version gehörende Rolle `migrate` erfolgreich ausführen.
+5. Anwendung starten und `/health/ready`, Anmeldung, Tippversuch und Arena
+   prüfen.
+
+Swarm-Beispiel bei bereits gestoppten Anwendungsdiensten:
+
+```bash
+pg_container="$(docker ps --filter label=com.docker.swarm.service.name=keywars_keywars-postgres -q | head -n 1)"
+test -n "$pg_container"
+test -f keywars-dr/postgres-restore.dump
+docker exec -i "$pg_container" pg_restore -U keywars -d keywars \
+  --clean --if-exists --no-owner < keywars-dr/postgres-restore.dump
+```
+
+Ein Datenbankschema nicht isoliert zurückrollen. Bei inkompatibler Migration
+immer passendes Datenbank-Backup und vorherige Image-Version gemeinsam nutzen.
+
+## Redis
+
+Redis ist nicht die führende Ablage für Ergebnisse, enthält aber aktive
+Sitzungen, SignalR-/Laufzeitzustand und Data-Protection-Schlüssel. Ein Verlust
+bricht laufende Arenen ab und macht bestehende Anmelde-Cookies ungültig; neue
+Anmeldungen und PostgreSQL-Daten bleiben möglich.
+
+Der Swarm-Stack aktiviert AOF. Vor einem Storage-Snapshot `redis-cli SAVE`
+ausführen und danach das **gesamte** Redis-Volume einschließlich AOF sichern.
+Bei Managed Redis die Backup-/Restore-Funktion des Anbieters verwenden. Ein
+einzelnes `dump.rdb` ersetzt bei aktivem AOF keinen Volume-Snapshot.
+
+Redis nur bei gestoppten Anwendungsdiensten wiederherstellen und exakt dieselbe
+oder eine kompatible Redis-Hauptversion verwenden. Ist Sitzungsfortbestand
+nicht erforderlich, ist ein bewusst leer gestartetes Redis sicherer als ein
+unklarer oder nur teilweise kopierter Datenbestand.
+
+## Vollständiger DR-Satz
+
+Außer den Daten gehören in die verschlüsselte Betriebsablage:
+
+- verwendeter Image-Tag und nach Möglichkeit Digest;
+- Compose-/Swarm-/Kubernetes-Manifeste;
+- nicht geheime Site-Konfiguration und LDAP-CA-Zertifikate;
+- TLS-Proxy- beziehungsweise Ingress-Konfiguration;
+- Wiederanlaufreihenfolge und getestete RTO/RPO-Werte;
+- Referenzen auf Secrets im Secret Manager, nicht deren Klartext im Repo.
+
+Wiederanlauf: PostgreSQL und Redis bereitstellen, Daten wiederherstellen,
+Migration ausführen, Worker/Arena/Web starten, Edge zuletzt freigeben. Danach
+fachliche Tests durchführen; ein grüner Healthcheck allein ist kein
+Restore-Nachweis.

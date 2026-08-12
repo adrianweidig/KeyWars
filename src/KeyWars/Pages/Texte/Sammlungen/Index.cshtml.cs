@@ -14,7 +14,8 @@ public sealed class IndexModel(CurrentUser currentUser, KeyWarsDbContext db) : P
     {
         var profile = await currentUser.RequireProfileAsync(User, cancellationToken);
         Collections = await db.TextCollections
-            .Where(item => item.OwnerProfileId == profile.Id || item.Visibility == TrainingTextVisibility.Organization)
+            .Where(item => !item.IsQuarantined &&
+                (item.OwnerProfileId == profile.Id || item.Visibility == TrainingTextVisibility.Organization))
             .OrderBy(item => item.Name)
             .ToListAsync(cancellationToken);
     }

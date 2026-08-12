@@ -1,7 +1,8 @@
 # LDAP und Active Directory
 
-KeyWars bindet direkt mit Benutzername und Passwort. Es gibt kein Servicekonto
-und keine Gruppenfreigabe. Das Passwort wird weder gespeichert noch geloggt.
+KeyWars bindet direkt mit Benutzername und Passwort. Es gibt kein Servicekonto;
+das Passwort wird weder gespeichert noch geloggt. Direkte `memberOf`-Werte
+steuern optional die Content-Moderation, aber nicht den allgemeinen Zugang.
 
 ## Erforderliche `.env`-Werte
 
@@ -20,6 +21,10 @@ Optional:
 | `KEYWARS_LDAP_CONNECT_TIMEOUT_SECONDS` | 5 | Verbindungs-/Bind-Timeout, 1 bis 60 Sekunden |
 | `KEYWARS_LDAP_OPERATION_TIMEOUT_SECONDS` | 10 | Such-Timeout, 1 bis 120 Sekunden |
 | `KEYWARS_LDAP_ALLOW_STARTTLS` | `false` | muss für jedes `ldap://`-Ziel `true` sein |
+
+Moderationsgruppen werden separat über `KEYWARS_MODERATOR_GROUP_DNS` oder
+`KEYWARS_MODERATOR_GROUP_VALUES` konfiguriert. Leere Werte vergeben keine
+Rechte. Details: [Konfiguration](configuration.md#content-moderation).
 
 LDAPS ist der Standard. Bei einer eigenen CA müssen die LDAP-DNS-Namen zum
 Zertifikat passen. Ohne eigenen CA-Pfad gilt der Zertifikatsspeicher des

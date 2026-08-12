@@ -1,0 +1,374 @@
+---
+x-keywars-image: &keywars-image
+  image: ${KEYWARS_IMAGE:-ghcr.io/adrianweidig/keywars}:${KEYWARS_VERSION:-v0.5.0}
+
+x-keywars-environment: &keywars-environment
+  ASPNETCORE_ENVIRONMENT: Production
+  ASPNETCORE_HTTP_PORTS: "8080"
+  KEYWARS__DATABASE__PROVIDER: postgresql
+  KEYWARS__DATAPROTECTION__APPLICATION_NAME: KeyWars
+  KEYWARS__LDAP__URLS: ${KEYWARS_LDAP_URLS:?LDAP URLs required}
+  KEYWARS__LDAP__BASE_DN: ${KEYWARS_LDAP_BASE_DN:?LDAP Base DN required}
+  KEYWARS__LDAP__UPN_SUFFIX: ${KEYWARS_LDAP_UPN_SUFFIX:?LDAP UPN suffix required}
+  KEYWARS__LDAP__USER_BASE_DN: ${KEYWARS_LDAP_USER_BASE_DN:-}
+  KEYWARS__LDAP__CA_CERTIFICATE_PATH: /run/configs/ldap-ca.crt
+  KEYWARS__LDAP__ALLOW_STARTTLS: ${KEYWARS_LDAP_ALLOW_STARTTLS:-false}
+  KEYWARS__LDAP__CONNECT_TIMEOUT_SECONDS: ${KEYWARS_LDAP_CONNECT_TIMEOUT_SECONDS:-5}
+  KEYWARS__LDAP__OPERATION_TIMEOUT_SECONDS: ${KEYWARS_LDAP_OPERATION_TIMEOUT_SECONDS:-10}
+  KEYWARS__MODERATION__MODERATOR_GROUP_DNS: ${KEYWARS_MODERATOR_GROUP_DNS:-}
+  KEYWARS__MODERATION__MODERATOR_GROUP_VALUES: ${KEYWARS_MODERATOR_GROUP_VALUES:-}
+  KEYWARS__PROXY__KNOWN_PROXIES: ${KEYWARS_PROXY_KNOWN_PROXIES:-}
+  KEYWARS__PROXY__KNOWN_NETWORKS: ${KEYWARS_PROXY_KNOWN_NETWORKS:-10.42.10.0/24}
+  TZ: ${KEYWARS_TIME_ZONE:-Europe/Berlin}
+  KEYWARS__LIVE__MAX_PARTICIPANTS_PER_ROOM: ${KEYWARS_MAX_LIVE_PARTICIPANTS:-64}
+  KEYWARS__LIVE__MAX_CONCURRENT_ROOMS: ${KEYWARS_MAX_LIVE_ROOMS:-200}
+  KEYWARS__LIVE__MAX_CONNECTIONS_PER_USER: ${KEYWARS_MAX_CONNECTIONS_PER_USER:-3}
+  KEYWARS__LIVE__PROGRESS_BROADCAST_HZ: ${KEYWARS_LIVE_BROADCAST_HZ:-10}
+  KEYWARS__RETENTION__ENABLED: ${KEYWARS_RETENTION_ENABLED:-false}
+  KEYWARS__RETENTION__DRY_RUN: ${KEYWARS_RETENTION_DRY_RUN:-true}
+  KEYWARS__RETENTION__INTERVAL_HOURS: ${KEYWARS_RETENTION_INTERVAL_HOURS:-24}
+  KEYWARS__RETENTION__BATCH_SIZE: ${KEYWARS_RETENTION_BATCH_SIZE:-250}
+  KEYWARS__RETENTION__MAX_BATCHES_PER_RUN: ${KEYWARS_RETENTION_MAX_BATCHES_PER_RUN:-20}
+  KEYWARS__RETENTION__STALE_ATTEMPT_HOURS: ${KEYWARS_RETENTION_STALE_ATTEMPT_HOURS:-2}
+  KEYWARS__RETENTION__ABANDONED_ATTEMPT_RETENTION_DAYS: ${KEYWARS_RETENTION_ABANDONED_ATTEMPT_DAYS:-90}
+  KEYWARS__RETENTION__SEEN_GAMIFICATION_EVENT_RETENTION_DAYS: ${KEYWARS_RETENTION_SEEN_EVENT_DAYS:-180}
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+
+x-keywars-service: &keywars-service
+  <<: *keywars-image
+  entrypoint: ["/bin/sh", "-ec"]
+  command:
+    - |
+      export ConnectionStrings__KeyWars="$(cat /run/secrets/keywars_database_connection)"
+      export KEYWARS__REDIS__CONNECTION_STRING="$(cat /run/secrets/keywars_redis_connection)"
+      exec dotnet KeyWars.dll
+  environment: *keywars-environment
+  secrets:
+    - source: keywars-database-connection
+      target: keywars_database_connection
+    - source: keywars-redis-connection
+      target: keywars_redis_connection
+  configs:
+    - source: keywars-ldap-ca
+      target: /run/configs/ldap-ca.crt
+  networks:
+    - backend
+  read_only: true
+  tmpfs:
+    - /tmp:size=64m,mode=1777,noexec,nosuid,nodev
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  ulimits:
+    nofile:
+      soft: 65536
+      hard: 65536
+  healthcheck:
+    test: ["CMD", "dotnet", "KeyWars.dll", "healthcheck"]
+    interval: 15s
+    timeout: 5s
+    retries: 4
+    start_period: 30s
+  stop_grace_period: 60s
+
+services:
+  keywars-edge:
+    image: ${CADDY_IMAGE:-caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648}
+    command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+    configs:
+      - source: keywars-edge-config
+        target: /etc/caddy/Caddyfile
+    ports:
+      - target: 8080
+        published: ${KEYWARS_PORT:-8080}
+        protocol: tcp
+        mode: ingress
+    networks:
+      - frontend
+    read_only: true
+    tmpfs:
+      - /data:size=16m,mode=1777,noexec,nosuid,nodev
+      - /config:size=16m,mode=1777,noexec,nosuid,nodev
+      - /tmp:size=16m,mode=1777,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8080/health/edge"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    stop_grace_period: 30s
+    deploy:
+      replicas: ${KEYWARS_EDGE_REPLICAS:-2}
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+        failure_action: rollback
+        monitor: 30s
+      rollback_config:
+        parallelism: 1
+        delay: 5s
+        order: stop-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 5
+        window: 60s
+      resources:
+        reservations:
+          cpus: "0.05"
+          memory: 64M
+        limits:
+          cpus: "0.50"
+          memory: 256M
+
+  keywars-web:
+    <<: *keywars-service
+    environment:
+      <<: *keywars-environment
+      KEYWARS__RUNTIME__ROLE: web
+    networks:
+      - frontend
+      - backend
+    deploy:
+      replicas: ${KEYWARS_WEB_REPLICAS:-2}
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+        failure_action: rollback
+        monitor: 45s
+      rollback_config:
+        parallelism: 1
+        delay: 5s
+        order: stop-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 5
+        window: 60s
+      resources:
+        reservations:
+          cpus: "0.20"
+          memory: 256M
+        limits:
+          cpus: "1.00"
+          memory: 768M
+
+  keywars-arena:
+    <<: *keywars-service
+    environment:
+      <<: *keywars-environment
+      KEYWARS__RUNTIME__ROLE: arena
+    networks:
+      - frontend
+      - backend
+    deploy:
+      replicas: ${KEYWARS_ARENA_REPLICAS:-2}
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+        failure_action: rollback
+        monitor: 45s
+      rollback_config:
+        parallelism: 1
+        delay: 5s
+        order: stop-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 5
+        window: 60s
+      resources:
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+        limits:
+          cpus: "2.00"
+          memory: 1G
+
+  keywars-worker:
+    <<: *keywars-service
+    environment:
+      <<: *keywars-environment
+      KEYWARS__RUNTIME__ROLE: worker
+    deploy:
+      replicas: ${KEYWARS_WORKER_REPLICAS:-1}
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+        failure_action: rollback
+        monitor: 45s
+      rollback_config:
+        parallelism: 1
+        delay: 5s
+        order: stop-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 5
+        window: 60s
+      resources:
+        reservations:
+          cpus: "0.10"
+          memory: 256M
+        limits:
+          cpus: "1.00"
+          memory: 768M
+
+  keywars-migrate:
+    <<: *keywars-service
+    environment:
+      <<: *keywars-environment
+      KEYWARS__RUNTIME__ROLE: migrate
+    healthcheck:
+      disable: true
+    stop_grace_period: 30s
+    deploy:
+      mode: replicated-job
+      replicas: ${KEYWARS_MIGRATE_REPLICAS:-1}
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 12
+        window: 180s
+      resources:
+        reservations:
+          cpus: "0.10"
+          memory: 128M
+        limits:
+          cpus: "1.00"
+          memory: 512M
+
+  keywars-postgres:
+    image: ${POSTGRES_IMAGE:-postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15}
+    environment:
+      POSTGRES_DB: keywars
+      POSTGRES_USER: keywars
+      POSTGRES_PASSWORD_FILE: /run/secrets/keywars_postgres_password
+    secrets:
+      - source: keywars-postgres-password
+        target: keywars_postgres_password
+    volumes:
+      - keywars-postgres-data:/var/lib/postgresql
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keywars -d keywars"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    stop_grace_period: 120s
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.keywars.data == true
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+      resources:
+        reservations:
+          cpus: "0.25"
+          memory: 512M
+        limits:
+          cpus: "2.00"
+          memory: 2G
+
+  keywars-redis:
+    image: ${REDIS_IMAGE:-redis:8.6.5-alpine@sha256:cd218f4b106a332c5c992e38a9480bfb9d7e9f8f7b0ec9a0023bfa36d9a408f9}
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --save
+      - "60"
+      - "1000"
+      - --maxmemory-policy
+      - noeviction
+    volumes:
+      - keywars-redis-data:/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    stop_grace_period: 60s
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.keywars.data == true
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+      resources:
+        reservations:
+          cpus: "0.10"
+          memory: 256M
+        limits:
+          cpus: "1.00"
+          memory: 1G
+
+configs:
+  keywars-edge-config:
+    file: ./Caddyfile
+  keywars-ldap-ca:
+    external: true
+    name: ${KEYWARS_LDAP_CA_CONFIG:-keywars-ldap-ca}
+
+secrets:
+  keywars-postgres-password:
+    external: true
+    name: ${KEYWARS_POSTGRES_PASSWORD_SECRET:-keywars-postgres-password}
+  keywars-database-connection:
+    external: true
+    name: ${KEYWARS_DATABASE_CONNECTION_SECRET:-keywars-database-connection}
+  keywars-redis-connection:
+    external: true
+    name: ${KEYWARS_REDIS_CONNECTION_SECRET:-keywars-redis-connection}
+
+networks:
+  frontend:
+    driver: overlay
+    driver_opts:
+      encrypted: "true"
+    ipam:
+      config:
+        - subnet: ${KEYWARS_FRONTEND_SUBNET:-10.42.10.0/24}
+  backend:
+    driver: overlay
+    driver_opts:
+      encrypted: "true"
+    ipam:
+      config:
+        - subnet: ${KEYWARS_BACKEND_SUBNET:-10.42.11.0/24}
+
+volumes:
+  keywars-postgres-data:
+  keywars-redis-data:

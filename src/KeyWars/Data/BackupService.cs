@@ -48,6 +48,125 @@ public sealed class BackupService
     public Task<string> CreateBackupAsync(CancellationToken cancellationToken = default) =>
         CreateBackupCoreAsync("keywars", cancellationToken);
 
+    public async Task<BackupRetentionResult> ApplyRetentionAsync(
+        DateTimeOffset cutoffUtc,
+        int minimumPairsPerFamily,
+        bool dryRun,
+        CancellationToken cancellationToken = default)
+    {
+        if (minimumPairsPerFamily is < 1 or > 100)
+        {
+            throw new ArgumentOutOfRangeException(nameof(minimumPairsPerFamily));
+        }
+
+        cutoffUtc = cutoffUtc.ToUniversalTime();
+        var backupRoot = Path.GetFullPath(Path.Combine(DataDirectory, "backups"));
+        if (!Directory.Exists(backupRoot))
+        {
+            return new BackupRetentionResult(
+                dryRun,
+                cutoffUtc,
+                minimumPairsPerFamily,
+                ValidPairs: 0,
+                CandidatePairs: 0,
+                DeletedPairs: 0,
+                FailedPairs: 0,
+                CandidateBytes: 0,
+                IgnoredEntries: 0);
+        }
+
+        var pairs = new List<BackupPair>();
+        var ignoredEntries = 0;
+        var discoveredDatabasePaths = Directory
+            .EnumerateFiles(backupRoot, "keywars-*.db", SearchOption.TopDirectoryOnly)
+            .ToArray();
+        foreach (var databasePath in discoveredDatabasePaths)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                var manifest = await ReadAndValidateManifestAsync(databasePath, cancellationToken);
+                await ValidateDatabaseFileAsync(databasePath, manifest, cancellationToken);
+                var manifestPath = GetManifestPath(databasePath);
+                var family = Path.GetFileName(databasePath).StartsWith(
+                    "keywars-pre-restore-",
+                    StringComparison.Ordinal)
+                    ? "pre-restore"
+                    : "regular";
+                pairs.Add(new BackupPair(
+                    databasePath,
+                    manifestPath,
+                    family,
+                    manifest.CreatedAtUtc,
+                    checked(new FileInfo(databasePath).Length + new FileInfo(manifestPath).Length)));
+            }
+            catch (Exception exception) when (exception is InvalidOperationException or IOException or UnauthorizedAccessException)
+            {
+                ignoredEntries++;
+                logger.LogWarning(exception, "Ungültiges oder unvollständiges Backup-Paar wird von der Retention nicht verändert: {BackupPath}", databasePath);
+            }
+        }
+
+        var databasePaths = discoveredDatabasePaths.ToHashSet(StringComparer.Ordinal);
+        ignoredEntries += Directory
+            .EnumerateFiles(backupRoot, "keywars-*.db.manifest.json", SearchOption.TopDirectoryOnly)
+            .Count(manifestPath => !databasePaths.Contains(
+                manifestPath[..^".manifest.json".Length]));
+
+        var candidates = pairs
+            .GroupBy(pair => pair.Family, StringComparer.Ordinal)
+            .SelectMany(group => group
+                .OrderByDescending(pair => pair.CreatedAtUtc)
+                .ThenByDescending(pair => pair.DatabasePath, StringComparer.Ordinal)
+                .Skip(minimumPairsPerFamily)
+                .Where(pair => pair.CreatedAtUtc < cutoffUtc))
+            .OrderBy(pair => pair.CreatedAtUtc)
+            .ThenBy(pair => pair.DatabasePath, StringComparer.Ordinal)
+            .ToList();
+        var candidateBytes = candidates.Sum(pair => pair.SizeBytes);
+        if (dryRun || candidates.Count == 0)
+        {
+            return new BackupRetentionResult(
+                dryRun,
+                cutoffUtc,
+                minimumPairsPerFamily,
+                pairs.Count,
+                candidates.Count,
+                0,
+                0,
+                candidateBytes,
+                ignoredEntries);
+        }
+
+        var deletedPairs = 0;
+        var failedPairs = 0;
+        foreach (var candidate in candidates)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                DeleteBackupPair(candidate);
+                deletedPairs++;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                failedPairs++;
+                logger.LogError(exception, "Backup-Paar konnte nicht durch Retention entfernt werden: {BackupPath}", candidate.DatabasePath);
+            }
+        }
+
+        return new BackupRetentionResult(
+            dryRun,
+            cutoffUtc,
+            minimumPairsPerFamily,
+            pairs.Count,
+            candidates.Count,
+            deletedPairs,
+            failedPairs,
+            candidateBytes,
+            ignoredEntries);
+    }
+
     public async Task RestoreAsync(string backupPath, CancellationToken cancellationToken = default)
     {
         var dataDirectory = DataDirectory;
@@ -525,6 +644,85 @@ public sealed class BackupService
         return builder.ToString();
     }
 
+    private void DeleteBackupPair(BackupPair pair)
+    {
+        EnsureRegularFile(pair.DatabasePath, "Backup");
+        EnsureRegularFile(pair.ManifestPath, "Backup-Manifest");
+        var suffix = Guid.NewGuid().ToString("N");
+        var stagedDatabasePath = $"{pair.DatabasePath}.retention-{suffix}";
+        var stagedManifestPath = $"{pair.ManifestPath}.retention-{suffix}";
+
+        File.Move(pair.DatabasePath, stagedDatabasePath);
+        try
+        {
+            File.Move(pair.ManifestPath, stagedManifestPath);
+        }
+        catch (Exception stagingException)
+        {
+            try
+            {
+                File.Move(stagedDatabasePath, pair.DatabasePath);
+            }
+            catch (Exception rollbackException)
+            {
+                throw new AggregateException(
+                    "Das Backup-Manifest konnte nicht vorgemerkt und die Datenbank nicht zurückgesetzt werden.",
+                    stagingException,
+                    rollbackException);
+            }
+
+            throw;
+        }
+
+        try
+        {
+            File.Delete(stagedDatabasePath);
+        }
+        catch (Exception deletionException)
+        {
+            var restoreExceptions = new List<Exception>();
+            try
+            {
+                File.Move(stagedDatabasePath, pair.DatabasePath);
+            }
+            catch (Exception exception)
+            {
+                restoreExceptions.Add(exception);
+            }
+
+            try
+            {
+                File.Move(stagedManifestPath, pair.ManifestPath);
+            }
+            catch (Exception exception)
+            {
+                restoreExceptions.Add(exception);
+            }
+
+            if (restoreExceptions.Count > 0)
+            {
+                restoreExceptions.Insert(0, deletionException);
+                throw new AggregateException(
+                    "Ein nicht löschbares Backup-Paar konnte nicht vollständig zurückgesetzt werden.",
+                    restoreExceptions);
+            }
+
+            throw;
+        }
+
+        try
+        {
+            File.Delete(stagedManifestPath);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            logger.LogWarning(
+                exception,
+                "Das Backup wurde gelöscht, aber sein vorgemerktes Manifest konnte nicht entfernt werden: {ManifestPath}",
+                stagedManifestPath);
+        }
+    }
+
     private void TryDeleteFile(string path)
     {
         try
@@ -557,6 +755,45 @@ public sealed class BackupService
     }
 
     private sealed record MigrationState(string[] Expected, string[] Applied);
+
+    private sealed record BackupPair(
+        string DatabasePath,
+        string ManifestPath,
+        string Family,
+        DateTimeOffset CreatedAtUtc,
+        long SizeBytes);
+}
+
+public sealed record BackupRetentionResult(
+    bool DryRun,
+    DateTimeOffset CutoffUtc,
+    int MinimumPairsPerFamily,
+    int ValidPairs,
+    int CandidatePairs,
+    int DeletedPairs,
+    int FailedPairs,
+    long CandidateBytes,
+    int IgnoredEntries,
+    bool Applicable = true,
+    string? SkippedReason = null)
+{
+    public static BackupRetentionResult NotApplicable(
+        bool dryRun,
+        DateTimeOffset cutoffUtc,
+        int minimumPairsPerFamily,
+        string reason) =>
+        new(
+            dryRun,
+            cutoffUtc,
+            minimumPairsPerFamily,
+            ValidPairs: 0,
+            CandidatePairs: 0,
+            DeletedPairs: 0,
+            FailedPairs: 0,
+            CandidateBytes: 0,
+            IgnoredEntries: 0,
+            Applicable: false,
+            SkippedReason: reason);
 }
 
 public sealed record BackupManifest

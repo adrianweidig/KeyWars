@@ -942,11 +942,6 @@ a:hover {
     table-layout: fixed;
   }
 
-  .competition-table th:first-child,
-  .competition-table td:first-child {
-    width: 64px;
-  }
-
   .competition-table th:nth-child(3),
   .competition-table td:nth-child(3) {
     width: 92px;
@@ -1710,6 +1705,12 @@ select:focus-visible {
   color: var(--danger);
   border-radius: 8px;
   padding: 12px;
+}
+
+.validation-summary-errors:focus,
+.field-validation-error:focus {
+  outline: 3px solid rgba(238, 107, 95, 0.3);
+  outline-offset: 3px;
 }
 
 .success {
@@ -2517,6 +2518,49 @@ select:focus-visible {
   width: 38%;
 }
 
+.arena-roster-card {
+  min-width: 0;
+}
+
+.arena-roster-header {
+  display: grid;
+  gap: 10px;
+}
+
+.arena-roster-header h2,
+.arena-roster-status {
+  margin: 0;
+}
+
+.arena-roster-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.arena-roster-controls input,
+.arena-roster-controls select {
+  flex: 1 1 148px;
+  min-width: 0;
+  min-height: 40px;
+  padding: 8px 10px;
+}
+
+.arena-roster-controls button {
+  flex: 0 0 auto;
+}
+
+.arena-roster-status {
+  min-height: 1.3em;
+  font-size: 0.86rem;
+}
+
+.arena-roster-table-wrap {
+  min-width: 0;
+  overflow-x: auto;
+}
+
 .pill {
   display: inline-flex;
   border-radius: 999px;
@@ -2645,6 +2689,104 @@ select:focus-visible {
 .challenge-row:hover {
   text-decoration: none;
   border-color: var(--accent);
+}
+
+.person-picker {
+  display: grid;
+  gap: 12px;
+}
+
+.person-picker-results {
+  display: grid;
+  gap: 8px;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.person-picker-result {
+  justify-content: flex-start;
+  width: 100%;
+  text-align: left;
+}
+
+.person-picker-result:disabled {
+  opacity: 0.55;
+}
+
+.person-picker-selection,
+.person-picker-chips {
+  display: grid;
+  gap: 8px;
+}
+
+.person-picker-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.challenge-filter-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.challenge-filter-list a[aria-current="page"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.arena-host-controls {
+  display: grid;
+  gap: 12px;
+}
+
+.arena-host-controls .form-actions {
+  flex-wrap: wrap;
+}
+
+.onboarding-prompt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.onboarding-prompt h2 {
+  margin: 4px 0;
+}
+
+.onboarding-progress {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.onboarding-progress li {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.onboarding-progress li.active {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.onboarding-card {
+  max-width: 760px;
+  margin-inline: auto;
 }
 
 .section-title-row {
@@ -3270,11 +3412,6 @@ select:focus-visible {
   .play-hero-copy {
     min-height: 0;
     padding: 16px;
-  }
-
-  .play-hero-copy::after {
-    content: none;
-    display: none;
   }
 
   .play-hero-stats {
@@ -5617,11 +5754,6 @@ body.app-authenticated::before {
   align-content: start;
 }
 
-.play-focus-list {
-  display: grid;
-  gap: 10px;
-}
-
 .play-focus-list .play-mode-link {
   min-height: 82px;
   padding: 14px;
@@ -6914,13 +7046,55 @@ body.app-public.auth-exit-page .shell {
     grid-template-columns: 1fr !important;
   }
 
-  .arena-room-page .arena-page-header .lead,
+  .arena-room-page .arena-page-header .lead {
+    display: block;
+    margin-top: 5px;
+    font-size: 0.84rem;
+    line-height: 1.4;
+  }
+
   .arena-room-page .arena-page-header .room-code-share {
-    display: none;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+    margin-top: 5px;
+  }
+
+  .arena-room-page .arena-page-header {
+    gap: 5px;
+  }
+
+  .arena-room-page .room-code-share .room-code,
+  .arena-room-page .room-code-share .copy-status {
+    grid-column: 1 / -1;
+  }
+
+  .arena-room-page .room-code-share button {
+    width: 100%;
+    min-height: 38px;
+    padding-inline: 8px;
   }
 
   .arena-room-page .arena-phase-steps {
-    display: none;
+    display: grid;
+    gap: 4px;
+  }
+
+  .arena-room-page .arena-phase-steps li {
+    min-height: 32px;
+    padding: 5px 3px;
+    font-size: clamp(0.65rem, 2.4vw, 0.76rem);
+  }
+
+  .arena-roster-controls {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .arena-roster-controls input,
+  .arena-roster-controls button {
+    grid-column: 1 / -1;
+    width: 100%;
   }
 
   .arena-room-page .typing-target,
@@ -7535,8 +7709,17 @@ body.app-public.auth-exit-page .shell {
 
 @media (max-width: 1023.98px) {
   .zen-mode-toggle {
-    right: 14px;
-    bottom: calc(76px + env(safe-area-inset-bottom));
+    top: 7px;
+    right: 110px;
+    bottom: auto;
+    width: 42px;
+    min-height: 42px;
+    justify-content: center;
+    padding: 9px;
+  }
+
+  .zen-mode-toggle [data-zen-label] {
+    display: none;
   }
 
   :root[data-zen="true"] body.typing-focus-page .app-main {

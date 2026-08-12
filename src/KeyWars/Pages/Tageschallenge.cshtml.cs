@@ -5,20 +5,24 @@ using Microsoft.EntityFrameworkCore;
 
 namespace KeyWars.Pages;
 
-public sealed class TageschallengeModel(KeyWarsDbContext db) : PageModel
+public sealed class TageschallengeModel(KeyWarsDbContext db, TimeProvider timeProvider) : PageModel
 {
-    public TrainingText Text { get; private set; } = new();
+    public TrainingText? Text { get; private set; }
 
     public async Task OnGetAsync(CancellationToken cancellationToken)
     {
-        var texts = await db.TrainingTexts.Where(item => item.IsStandard).OrderBy(item => item.SourceKey).ToListAsync(cancellationToken);
-        var index = DateOnly.FromDateTime(DateTime.UtcNow).DayNumber % Math.Max(1, texts.Count);
-        Text = texts.ElementAtOrDefault(index) ?? BuildFallbackText();
-    }
+        var texts = await db.TrainingTexts
+            .AsNoTracking()
+            .Where(item => item.IsStandard && item.RatingEligible && !item.IsQuarantined)
+            .OrderBy(item => item.SourceKey)
+            .ThenBy(item => item.Id)
+            .ToListAsync(cancellationToken);
+        if (texts.Count == 0)
+        {
+            return;
+        }
 
-    private static TrainingText BuildFallbackText()
-    {
-        var body = TypingEngine.BuildWordTest(60);
-        return new TrainingText { Title = "Tageschallenge", Body = body, CharacterCount = body.Length };
+        var today = DateOnly.FromDateTime(timeProvider.GetLocalNow().DateTime);
+        Text = texts[today.DayNumber % texts.Count];
     }
 }

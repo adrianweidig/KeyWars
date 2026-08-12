@@ -427,7 +427,7 @@ test("Theme fällt bei ungültigem oder blockiertem Storage deterministisch zur�
 test("Sidebar-Navigation hält lange Labels im aktiven Button", async ({ page }) => {
   await login(page, "browser.sidebar.nav");
   await page.goto("/herausforderungen");
-  await expect(page.getByRole("heading", { name: "Herausforderungen" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Herausforderungen", exact: true })).toBeVisible();
 
   const metrics = await page.locator(".desktop-sidebar").evaluate((sidebar) => {
     const activeLink = sidebar.querySelector(".sidebar-nav a.active");
@@ -847,13 +847,15 @@ test("Challenge-Spiel bleibt nach vorbereiteter Runde und Reload spielbar", asyn
     await login(page, `browser.challenge.owner.${suffix}`);
     await page.goto("/herausforderungen/neu");
     await page.getByLabel("Titel").fill(`Browser Challenge ${suffix}`);
-    const firstPerson = page.locator('fieldset input[type="checkbox"]').first();
-    await expect(firstPerson).toBeVisible();
-    await firstPerson.check();
+    await page.getByLabel("Person suchen").fill(`browser.challenge.partner.${suffix}`);
+    const partnerResult = page.locator(".person-picker-result").filter({ hasText: displayName(`browser.challenge.partner.${suffix}`) });
+    await expect(partnerResult).toBeVisible();
+    await partnerResult.click();
+    await expect(page.locator(".person-picker-chip")).toContainText(displayName(`browser.challenge.partner.${suffix}`));
     await page.getByRole("button", { name: "Herausforderung senden" }).click();
     await expect(page).toHaveURL(/\/herausforderungen\/[0-9a-f-]{36}$/i);
 
-    await page.getByRole("link", { name: "Runde spielen" }).click();
+    await page.getByRole("link", { name: "Runde 1 spielen" }).click();
     await expect(page).toHaveURL(/\/herausforderungen\/[0-9a-f-]{36}\/spielen$/i);
     await expect(page.locator("[data-input]")).toBeEnabled({ timeout: 15_000 });
     await expect(page.locator("[data-target]")).not.toContainText("konnte nicht vorbereitet werden");
@@ -913,6 +915,46 @@ test("Challenge-Spiel bleibt nach vorbereiteter Runde und Reload spielbar", asyn
   }
 });
 
+test("Best-of-Challenge unterstützt Suche, Abbruch, Revanche und ungelesene Einladung", async ({ page, browser, baseURL }, testInfo) => {
+  const suffix = `${testInfo.workerIndex}.${Date.now()}`;
+  const partnerName = `browser.challenge.rematch.partner.${suffix}`;
+  const ownerName = `browser.challenge.rematch.owner.${suffix}`;
+  const partnerContext = await browser.newContext({ baseURL, colorScheme: "dark", reducedMotion: "reduce" });
+  try {
+    const partner = await partnerContext.newPage();
+    await login(partner, partnerName);
+    await login(page, ownerName);
+
+    await page.goto("/herausforderungen/neu");
+    await page.getByLabel("Titel").fill(`Best of Browser ${suffix}`);
+    await page.getByLabel("Modus").selectOption("BestOf");
+    await page.getByLabel("Runden").selectOption("3");
+    await page.getByLabel("Person suchen").fill(partnerName);
+    const result = page.locator(".person-picker-result").filter({ hasText: displayName(partnerName) });
+    await expect(result).toBeVisible();
+    await result.click();
+    await expect(page.locator(".person-picker-chip")).toContainText(displayName(partnerName));
+    await page.getByRole("button", { name: "Herausforderung senden" }).click();
+
+    await expect(page.getByText("Best-of-Serie")).toBeVisible();
+    await expect(page.getByText("3 Runden")).toBeVisible();
+    await page.getByRole("button", { name: "Herausforderung abbrechen" }).click();
+    await expect(page.getByRole("button", { name: "Revanche mit gleicher Gruppe" })).toBeVisible();
+    const sourceUrl = page.url();
+    await page.getByRole("button", { name: "Revanche mit gleicher Gruppe" }).click();
+    await expect(page).toHaveURL(/\/herausforderungen\/[0-9a-f-]{36}$/i);
+    expect(page.url()).not.toBe(sourceUrl);
+    await expect(page.getByRole("heading", { name: /Revanche/ })).toBeVisible();
+
+    await partner.goto("/herausforderungen?status=einladungen");
+    await expect(partner.getByRole("link", { name: /Einladungen/ })).toHaveAttribute("aria-current", "page");
+    await expect(partner.getByText("Neu", { exact: true })).toBeVisible();
+    await expect(partner.getByRole("link", { name: /Revanche/ })).toBeVisible();
+  } finally {
+    await partnerContext.close();
+  }
+});
+
 test("Textbibliothek bleibt auf Desktop und Mobile sauber ausgerichtet", async ({ page }) => {
   await login(page, "browser.texts.ui");
   await page.goto("/texte");
@@ -964,7 +1006,7 @@ test("Spielseite zeigt Sofortrunde und Modi sauber auf Desktop und Mobile", asyn
   await login(page, "browser.play.ui");
   await page.goto("/spielen");
   await expect(page.locator(".play-quickstart")).toBeVisible();
-  await expect(page.locator(".play-mode-link")).toHaveCount(4);
+  await expect(page.locator(".play-mode-link")).toHaveCount(5);
   await expect(page.locator(".play-text-card").first()).toBeVisible();
   await expectNoHorizontalOverflow(page);
 
@@ -993,7 +1035,7 @@ test("Spielseite zeigt Sofortrunde und Modi sauber auf Desktop und Mobile", asyn
   await expectCompactMobileHeader(page);
   await expectResponsiveAppShell(page, 390);
   await expect(page.locator(".play-quickstart")).toBeVisible();
-  await expect(page.locator(".play-mode-link")).toHaveCount(4);
+  await expect(page.locator(".play-mode-link")).toHaveCount(5);
   await expectNoHorizontalOverflow(page);
 
   const mobileLayout = await page.evaluate(() => {
@@ -1419,6 +1461,21 @@ test("Arena läuft mit zwei getrennten Browserkontexten über SignalR", async ({
     await expect(guest.getByRole("button", { name: "Starten" })).toHaveCount(0);
     await expectArenaConnected(host);
     await expectArenaConnected(guest);
+
+    await expect(host.getByRole("heading", { name: "Raum verwalten" })).toBeVisible();
+    await expect(guest.getByRole("heading", { name: "Raum verwalten" })).toBeHidden();
+    await host.getByRole("button", { name: "Lobby sperren" }).click();
+    await expect(host.locator("[data-arena-lobby-state]")).toHaveText("Lobby gesperrt");
+    await host.getByRole("button", { name: "Lobby öffnen" }).click();
+    await expect(host.locator("[data-arena-lobby-state]")).toHaveText("Lobby offen");
+
+    await host.locator("[data-arena-host-target]").selectOption({ label: `${displayName(guestName)} · Beigetreten` });
+    await host.getByRole("button", { name: "Leitung übergeben" }).click();
+    await expect(guest.getByRole("heading", { name: "Raum verwalten" })).toBeVisible();
+    await expect(host.getByRole("heading", { name: "Raum verwalten" })).toBeHidden();
+    await guest.locator("[data-arena-host-target]").selectOption({ label: `${displayName(hostName)} · Beigetreten` });
+    await guest.getByRole("button", { name: "Leitung übergeben" }).click();
+    await expect(host.getByRole("heading", { name: "Raum verwalten" })).toBeVisible();
 
     await guest.getByRole("button", { name: "Bereit" }).click();
     await expect(guest.getByRole("button", { name: "Nicht bereit" })).toBeVisible();

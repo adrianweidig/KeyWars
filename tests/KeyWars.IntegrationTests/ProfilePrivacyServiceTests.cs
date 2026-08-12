@@ -381,7 +381,7 @@ public sealed class ProfilePrivacyServiceTests
 
         var export = await service.BuildExportAsync(context.Profile.Id);
 
-        Assert.Equal(2, export.Version);
+        Assert.Equal(3, export.Version);
         Assert.Equal(context.Profile.Id, export.Profile.Id);
         var exportedAttempt = Assert.Single(export.Attempts);
         Assert.Equal(profileAttempt.Id, exportedAttempt.Id);
@@ -442,6 +442,7 @@ public sealed class ProfilePrivacyServiceTests
             nameof(KeyWarsDbContext.TrainingTexts),
             nameof(KeyWarsDbContext.TextCollections),
             nameof(KeyWarsDbContext.TextCollectionItems),
+            nameof(KeyWarsDbContext.ContentModerationAuditEntries),
             nameof(KeyWarsDbContext.TypingAttempts),
             nameof(KeyWarsDbContext.TypingAttemptErrors),
             nameof(KeyWarsDbContext.Challenges),
@@ -573,7 +574,7 @@ public sealed class ProfilePrivacyServiceTests
 
         public ProfilePrivacyService CreatePrivacyService() => new(
             Db,
-            LiveRooms,
+            new LocalLiveRoomDispatcher(LiveRooms),
             Completions,
             Sessions,
             AccessGate,
