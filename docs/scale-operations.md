@@ -4,6 +4,23 @@
 SQLite. Der Scale-Modus trennt Web, Arena und Hintergrundarbeit und nutzt
 PostgreSQL sowie Redis.
 
+Alle Replikate eines Rollouts müssen dasselbe Cluster-Protokoll verwenden. Ein
+normaler Start prüft `KEYWARS__CLUSTER__PROTOCOL_VERSION=1` gegen den stabilen
+Redis-Marker `keywars:cluster:protocol-version` und bricht bei fehlendem oder
+abweichendem Marker ab. Nur der explizite Cutover-Befehl setzt einen fehlenden
+Marker; einen abweichenden vorhandenen Wert überschreibt er nie. Dafür zuerst
+die Abschlussqueue des bisherigen Releases vollständig leerlaufen lassen und
+erst danach **alle** KeyWars-Anwendungsreplikate stoppen. Der Cutover lehnt den
+alten Redis-Namespace ab, solange `keywars:completion:pending` oder
+`keywars:completion:failed` Einträge oder `keywars:completion:record:*`-Payloads
+enthält; dabei bleibt der Protokollmarker unverändert. Abgelaufene
+`keywars:completion:status:*`-Einträge blockieren nicht. Alte Daten nicht
+löschen: Das bisherige Release erneut starten und drainen.
+Erst dann Cutover, Datenbankmigration und neues Image starten. Bei späteren
+Protokollwechseln zusätzlich die in den Release Notes genannten flüchtigen
+Namespaces migrieren oder leeren. PostgreSQL-Daten und
+`keywars:dataprotection:keys` bleiben unberührt.
+
 | Betrieb | Geeignet für | Einstieg |
 | --- | --- | --- |
 | Einzelinstanz | ein Host, einfache Wartung | `compose.yaml` |
@@ -20,6 +37,12 @@ Browser- und Lasttest-Clients verwenden dafür WebSockets ohne SignalR-
 Negotiation, sodass Verbindungsaufbau und Socket nicht auf derselben Replik
 landen müssen.
 Beim Update verbinden sich Clients nach kurzer Unterbrechung neu.
+
+Release v0.5 behandelt Redis als einen logischen Primary mit optionaler
+Replikation. Ein Redis-Cluster verteilt den Raumzustand, aber noch nicht alle
+Attempt-, Presence-, Progress-, Completion- und Profilzugriffs-Namespaces auf
+mehrere Slots. Diese Grenze gehört vor großen Lastabnahmen in die
+Kapazitätsplanung.
 
 Der mitgelieferte Arena-HPA nutzt CPU als überall verfügbaren Startwert und
 skaliert langsam zurück. Mit Prometheus Adapter können zusätzlich
@@ -44,6 +67,8 @@ Raumgröße messen; siehe [Lasttests](load-testing.md).
   `ConnectionStrings__KeyWars`.
 - Redis: `KEYWARS__REDIS__CONNECTION_STRING`.
 - Nur `migrate` ändert das PostgreSQL-Schema und beendet sich danach.
+- `maintenance cluster-protocol cutover --confirm-apps-stopped` setzt den
+  Redis-Protokollmarker idempotent; die Bestätigung ist bewusst verpflichtend.
 - `/health/live` prüft den Prozess, `/health/ready` zusätzlich PostgreSQL und
   Redis.
 - Der öffentliche Weg muss TLS terminieren. Port `8080` ist nur das Backend
@@ -83,17 +108,24 @@ $connection = "Host=postgres;Port=5432;Database=keywars;Username=keywars;Passwor
 Remove-Variable plainPassword, quotedPassword, connection, credential, securePassword
 # Die interne LDAP-CA als secrets/ldap-ca.crt ablegen.
 docker compose --env-file .env.scale -f compose.scale.yaml config
+$queue = Invoke-RestMethod "http://127.0.0.1:8080/health/arena-persistence"
+if ($queue.pendingJobs -ne 0 -or $queue.failedRecords -ne 0) { throw "Arena-Abschlussqueue zuerst leerlaufen lassen." }
+docker compose --env-file .env.scale -f compose.scale.yaml stop keywars-edge keywars-web keywars-arena keywars-worker
 docker compose --env-file .env.scale -f compose.scale.yaml up -d postgres redis
+docker compose --env-file .env.scale -f compose.scale.yaml run --rm keywars-protocol-cutover
 docker compose --env-file .env.scale -f compose.scale.yaml run --rm keywars-migrate
 docker compose --env-file .env.scale -f compose.scale.yaml up -d keywars-edge keywars-web keywars-arena keywars-worker
 ```
 
 `.env.scale` bleibt außerhalb von Git und bekommt nur für den Administrator
 Leserechte. Der sichere Standard bindet Caddy nur an `127.0.0.1`; ein lokaler
-TLS-Proxy spricht diesen Port an. Vor einem Upgrade: [Backup](backup-restore.md), die vier
-lang laufenden Anwendungsdienste stoppen, Images laden, `keywars-migrate`
-erfolgreich ausführen und Dienste wieder starten. Compose prüft die Topologie,
-ist aber weder Datenbank-HA noch ein Ersatz für Swarm/Kubernetes.
+TLS-Proxy spricht diesen Port an. Vor einem Upgrade: [Backup](backup-restore.md),
+`pendingJobs=0` und `failedRecords=0` abwarten, die vier lang laufenden
+Anwendungsdienste stoppen, Images laden, den Cutover und `keywars-migrate`
+erfolgreich ausführen und Dienste wieder starten. Die beiden
+Einmal-Dienste liegen im Profil `operations` und starten nie versehentlich mit
+`docker compose up`. Compose ist weder Datenbank-HA noch ein Ersatz für
+Swarm/Kubernetes.
 
 ## Swarm
 
@@ -121,18 +153,28 @@ Secrets ebenso unter einem neuen Namen anlegen und über
 dabei kontrolliert in Datenbank, Server-Secret und Connection-Secret
 konsistent ändern.
 
-Erst Infrastruktur, dann Migration, zuletzt die Anwendung starten:
+Bei Upgrades zuerst über `/health/arena-persistence` `pendingJobs=0` und
+`failedRecords=0` abwarten. Danach Edge, Web, Arena und Worker auf null
+skalieren und den Stillstand prüfen. Dann Infrastruktur, Protokoll-Cutover,
+Migration und zuletzt die Anwendung starten:
 
 ```bash
 KEYWARS_EDGE_REPLICAS=0 KEYWARS_WEB_REPLICAS=0 KEYWARS_ARENA_REPLICAS=0 \
-KEYWARS_WORKER_REPLICAS=0 KEYWARS_MIGRATE_REPLICAS=0 \
+KEYWARS_WORKER_REPLICAS=0 KEYWARS_CUTOVER_REPLICAS=0 KEYWARS_MIGRATE_REPLICAS=0 \
 docker stack deploy -c deploy/swarm/stack.yaml keywars
 
+docker stack services keywars
 docker service ps keywars_keywars-postgres
 docker service ps keywars_keywars-redis
 
 KEYWARS_EDGE_REPLICAS=0 KEYWARS_WEB_REPLICAS=0 KEYWARS_ARENA_REPLICAS=0 \
-KEYWARS_WORKER_REPLICAS=0 KEYWARS_MIGRATE_REPLICAS=1 \
+KEYWARS_WORKER_REPLICAS=0 KEYWARS_CUTOVER_REPLICAS=1 KEYWARS_MIGRATE_REPLICAS=0 \
+docker stack deploy -c deploy/swarm/stack.yaml keywars
+docker service logs keywars_keywars-protocol-cutover
+docker service ps keywars_keywars-protocol-cutover --no-trunc
+
+KEYWARS_EDGE_REPLICAS=0 KEYWARS_WEB_REPLICAS=0 KEYWARS_ARENA_REPLICAS=0 \
+KEYWARS_WORKER_REPLICAS=0 KEYWARS_CUTOVER_REPLICAS=0 KEYWARS_MIGRATE_REPLICAS=1 \
 docker stack deploy -c deploy/swarm/stack.yaml keywars
 docker service logs keywars_keywars-migrate
 docker service ps keywars_keywars-migrate --no-trunc
@@ -140,8 +182,9 @@ docker service ps keywars_keywars-migrate --no-trunc
 docker stack deploy -c deploy/swarm/stack.yaml keywars
 ```
 
-Nur nach Status `Complete` des Migration-Jobs den letzten Befehl ausführen.
-Bei jedem Upgrade dieselbe Reihenfolge mit neuem `KEYWARS_VERSION` verwenden.
+Nur nach Status `Complete` beider Jobs den letzten Befehl ausführen. Web, Arena
+und Worker nutzen bewusst `stop-first` ohne automatischen Rollback. Bei jedem
+Upgrade dieselbe Reihenfolge mit neuem `KEYWARS_VERSION` verwenden.
 Die Standardnetze `10.42.10.0/24` und `10.42.11.0/24` bei Konflikten über
 `KEYWARS_FRONTEND_SUBNET` und `KEYWARS_BACKEND_SUBNET` ändern; das Frontendnetz
 dann auch als `KEYWARS_PROXY_KNOWN_NETWORKS` setzen.
@@ -156,8 +199,9 @@ docker service scale keywars_keywars-web=4 keywars_keywars-worker=2
 docker service rollback keywars_keywars-web
 ```
 
-`rollback` ist nur bei rückwärtskompatiblem Schema sicher. Sonst vorherige
-Image-Version **und** Datenbank-Backup gemeinsam wiederherstellen. Das
+`rollback` ist nur bei gleichem Cluster-Protokoll und rückwärtskompatiblem
+Schema sicher. Sonst Image, PostgreSQL-Backup und den in den Release Notes
+beschriebenen Redis-Protokollzustand gemeinsam wiederherstellen. Das
 Routing-Mesh veröffentlicht `8080` auf Swarm-Knoten; Firewallzugriff auf den
 TLS-Proxy begrenzen.
 
@@ -204,9 +248,22 @@ printf '%s' "$KEYWARS_REDIS_CONNECTION" | kubectl -n keywars create secret gener
   --from-file=connection-string=/dev/stdin --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-Migration und Rollout bleiben getrennt:
+Bei einem Upgrade zuerst über `/health/arena-persistence` `pendingJobs=0` und
+`failedRecords=0` abwarten. Danach alle laufenden KeyWars-Anwendungs-Pods
+stoppen und das Ergebnis prüfen. Der Cutover ist ein eigener Job; Migration und
+Rollout bleiben getrennt:
 
 ```bash
+kubectl -n keywars delete hpa keywars-web keywars-arena keywars-worker --ignore-not-found
+kubectl -n keywars scale deployment/keywars-edge deployment/keywars-web \
+  deployment/keywars-arena deployment/keywars-worker --replicas=0
+kubectl -n keywars wait --for=delete pod \
+  -l 'app.kubernetes.io/component in (edge,web,arena,worker)' --timeout=5m
+kubectl -n keywars delete job keywars-protocol-cutover --ignore-not-found
+kubectl apply -f deploy/k8s/runtime-config.yaml
+kubectl apply -k deploy/k8s/cutover
+kubectl -n keywars wait --for=condition=complete job/keywars-protocol-cutover --timeout=5m
+kubectl -n keywars logs job/keywars-protocol-cutover
 kubectl -n keywars delete job keywars-migrate --ignore-not-found
 kubectl apply -k deploy/k8s/migration
 kubectl -n keywars wait --for=condition=complete job/keywars-migrate --timeout=15m
@@ -215,6 +272,10 @@ kubectl apply -k deploy/k8s
 kubectl -n keywars rollout status deployment/keywars-web --timeout=5m
 kubectl -n keywars rollout status deployment/keywars-arena --timeout=5m
 ```
+
+Bei der Erstinstallation entfällt nur der `scale`-/`wait`-Block, weil noch
+keine Anwendungs-Pods existieren. Die Deployments verwenden `Recreate`; dadurch
+erzwingt Kubernetes keinen stillen Mischbetrieb oder automatischen Rollback.
 
 `keywars-edge` ist absichtlich `ClusterIP`. Ein vorhandener TLS-Ingress zeigt
 auf Service `keywars-edge`, Port `8080`; Hostname, Zertifikat und
@@ -226,6 +287,10 @@ kubectl -n keywars get events --sort-by=.lastTimestamp
 kubectl -n keywars logs deployment/keywars-arena --since=15m
 kubectl -n keywars rollout undo deployment/keywars-web
 ```
+
+Auch `rollout undo` ist nur innerhalb derselben Cluster-Protokollversion sicher.
+Bei einem Protokollwechsel gilt die gemeinsame Wiederherstellung von Image,
+PostgreSQL und dem dokumentierten Redis-Protokollzustand.
 
 Kubernetes setzt CPU-/Speichergrenzen, aber keine portable Pod-Option für
 `nofile`. Den Wert auf den Knoten beziehungsweise in der Container-Runtime

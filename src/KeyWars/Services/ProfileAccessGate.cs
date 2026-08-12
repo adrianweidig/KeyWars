@@ -14,13 +14,13 @@ public interface IProfileAccessGate
     ValueTask<ProfileAccessState> GetStateAsync(
         Guid profileId,
         CancellationToken cancellationToken = default);
-    ValueTask<IAsyncDisposable> AcquireAsync(
+    ValueTask<IOperationLease> AcquireAsync(
         Guid profileId,
         CancellationToken cancellationToken = default);
-    ValueTask<IAsyncDisposable> AcquireManyAsync(
+    ValueTask<IOperationLease> AcquireManyAsync(
         IEnumerable<Guid> profileIds,
         CancellationToken cancellationToken = default);
-    ValueTask<bool> TryBeginOperationAsync(
+    ValueTask<IOperationLease?> TryBeginOperationAsync(
         Guid profileId,
         CancellationToken cancellationToken = default);
     Task WaitForIdleAsync(Guid profileId, CancellationToken cancellationToken = default);
@@ -105,20 +105,20 @@ public sealed class ProfileAccessGate : IProfileAccessGate
         }
     }
 
-    public ValueTask<IAsyncDisposable> AcquireAsync(
+    public ValueTask<IOperationLease> AcquireAsync(
         Guid profileId,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return ValueTask.FromResult<IAsyncDisposable>(new AsyncLease(Acquire(profileId)));
+        return ValueTask.FromResult<IOperationLease>(new AsyncLease(Acquire(profileId)));
     }
 
-    public ValueTask<IAsyncDisposable> AcquireManyAsync(
+    public ValueTask<IOperationLease> AcquireManyAsync(
         IEnumerable<Guid> profileIds,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return ValueTask.FromResult<IAsyncDisposable>(new AsyncLease(AcquireMany(profileIds)));
+        return ValueTask.FromResult<IOperationLease>(new AsyncLease(AcquireMany(profileIds)));
     }
 
     public bool TryBeginOperation(Guid profileId)
@@ -139,12 +139,15 @@ public sealed class ProfileAccessGate : IProfileAccessGate
         }
     }
 
-    public ValueTask<bool> TryBeginOperationAsync(
+    public ValueTask<IOperationLease?> TryBeginOperationAsync(
         Guid profileId,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return ValueTask.FromResult(TryBeginOperation(profileId));
+        return ValueTask.FromResult<IOperationLease?>(
+            TryBeginOperation(profileId)
+                ? new LocalOperationLease(this, profileId)
+                : null);
     }
 
     public Task WaitForIdleAsync(Guid profileId, CancellationToken cancellationToken = default)
@@ -291,13 +294,40 @@ public sealed class ProfileAccessGate : IProfileAccessGate
         }
     }
 
-    private sealed class AsyncLease(IDisposable lease) : IAsyncDisposable
+    private sealed class AsyncLease(IDisposable lease) : IOperationLease
     {
         private IDisposable? current = lease;
+
+        public CancellationToken LeaseLost => CancellationToken.None;
+
+        public void ThrowIfLost()
+        {
+        }
 
         public ValueTask DisposeAsync()
         {
             Interlocked.Exchange(ref current, null)?.Dispose();
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class LocalOperationLease(ProfileAccessGate owner, Guid profileId) : IOperationLease
+    {
+        private int disposed;
+
+        public CancellationToken LeaseLost => CancellationToken.None;
+
+        public void ThrowIfLost()
+        {
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            if (Interlocked.Exchange(ref disposed, 1) == 0)
+            {
+                owner.CompleteOperation(profileId);
+            }
+
             return ValueTask.CompletedTask;
         }
     }

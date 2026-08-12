@@ -124,6 +124,27 @@ public sealed class ProfilePrivacyServiceTests
     }
 
     [Fact]
+    public async Task LostExclusiveLeaseCancelsPrivacyOperationAndDoesNotMutateProfile()
+    {
+        await using var context = await PrivacyTestContext.CreateAsync();
+        await context.SeedStatisticsAsync();
+        var accessGate = new LostLeaseProfileAccessGate();
+        var service = new ProfilePrivacyService(
+            context.Db,
+            new LocalLiveRoomDispatcher(context.LiveRooms),
+            context.Completions,
+            context.Sessions,
+            accessGate,
+            context.Time);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            service.ResetStatisticsAsync(context.Profile.Id));
+
+        Assert.Equal(900, context.Profile.ExperiencePoints);
+        Assert.True(accessGate.Disposed);
+    }
+
+    [Fact]
     public async Task DrainTimeoutAbortsAttemptsButLeavesStatisticsAndReleasesGate()
     {
         await using var context = await PrivacyTestContext.CreateAsync();
@@ -745,6 +766,51 @@ public sealed class ProfilePrivacyServiceTests
             new TypingEngine(timeProvider),
             NullLogger<LiveRoomManager>.Instance,
             completionSink);
+    }
+
+    private sealed class LostLeaseProfileAccessGate : IProfileAccessGate
+    {
+        private readonly CancellationTokenSource lost = new();
+
+        public bool Disposed { get; private set; }
+
+        public ValueTask<ProfileAccessState> GetStateAsync(Guid profileId, CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(ProfileAccessState.Available);
+
+        public ValueTask<IOperationLease> AcquireAsync(Guid profileId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public ValueTask<IOperationLease> AcquireManyAsync(IEnumerable<Guid> profileIds, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public ValueTask<IOperationLease?> TryBeginOperationAsync(Guid profileId, CancellationToken cancellationToken = default)
+        {
+            var lease = new LostLease(lost.Token, () => Disposed = true);
+            lost.Cancel();
+            return ValueTask.FromResult<IOperationLease?>(lease);
+        }
+
+        public Task WaitForIdleAsync(Guid profileId, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask.WaitAsync(cancellationToken);
+
+        public ValueTask CompleteOperationAsync(Guid profileId, CancellationToken cancellationToken = default) =>
+            ValueTask.CompletedTask;
+
+        public ValueTask MarkDeletedAsync(Guid profileId, CancellationToken cancellationToken = default) =>
+            ValueTask.CompletedTask;
+
+        private sealed class LostLease(CancellationToken leaseLost, Action dispose) : IOperationLease
+        {
+            public CancellationToken LeaseLost => leaseLost;
+
+            public void ThrowIfLost() => LeaseLost.ThrowIfCancellationRequested();
+
+            public ValueTask DisposeAsync()
+            {
+                dispose();
+                return ValueTask.CompletedTask;
+            }
+        }
     }
 
     private sealed class ManualTimeProvider(DateTimeOffset utcNow) : TimeProvider

@@ -22,6 +22,25 @@ public sealed record RuntimeTopology(
     string? RedisConnectionString,
     string DataProtectionApplicationName)
 {
+    public const string ClusterProtocolVersion = "1";
+    public const string ClusterProtocolVersionKey = "keywars:cluster:protocol-version";
+    public const string LegacyCompletionPendingKey = "keywars:completion:pending";
+    public const string LegacyCompletionFailedKey = "keywars:completion:failed";
+    public const string LegacyCompletionRecordPattern = "keywars:completion:record:*";
+    public const string ClusterProtocolCutoverCommand =
+        "maintenance cluster-protocol cutover --confirm-apps-stopped";
+    public const string ClusterProtocolCutoverScript = """
+        local active = redis.call('GET', KEYS[1])
+        if not active then
+            redis.call('SET', KEYS[1], ARGV[1])
+            return 1
+        end
+        if active == ARGV[1] then
+            return 0
+        end
+        return -1
+        """;
+
     public bool IsCluster => DatabaseProvider == KeyWarsDatabaseProvider.PostgreSql;
     public bool HostsHttp => Role != RuntimeRole.Migrate;
     public bool HostsApplication => Role is RuntimeRole.All or RuntimeRole.Web or RuntimeRole.Arena;
@@ -29,6 +48,50 @@ public sealed record RuntimeTopology(
     public bool RunsWorkers => Role is RuntimeRole.All or RuntimeRole.Worker;
     public bool RunsMigrations => Role == RuntimeRole.Migrate || !IsCluster && Role == RuntimeRole.All;
     public bool UsesRuntimeFileLock => !IsCluster;
+
+    public static bool IsClusterProtocolCutoverCommand(IReadOnlyList<string> arguments) =>
+        arguments.Count == 4 &&
+        string.Equals(arguments[0], "maintenance", StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(arguments[1], "cluster-protocol", StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(arguments[2], "cutover", StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(arguments[3], "--confirm-apps-stopped", StringComparison.Ordinal);
+
+    public static void RequireActiveClusterProtocol(string? activeVersion)
+    {
+        if (activeVersion is null)
+        {
+            throw new InvalidOperationException(
+                $"Der Redis-Keyspace ist noch nicht auf Cluster-Protokoll {ClusterProtocolVersion} vorbereitet. " +
+                $"Stoppe alle KeyWars-Anwendungsreplikate und führe einmalig `{ClusterProtocolCutoverCommand}` mit Rolle migrate aus.");
+        }
+
+        if (!string.Equals(activeVersion, ClusterProtocolVersion, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Dieser Redis-Keyspace verwendet Cluster-Protokoll {activeVersion}; " +
+                $"dieses Image benötigt {ClusterProtocolVersion}. " +
+                "Der Marker blieb unverändert. Stoppe alle KeyWars-Anwendungsreplikate und folge dem " +
+                "versionsspezifischen Cutover in den Release Notes.");
+        }
+    }
+
+    public static void RequireLegacyCompletionQueueDrained(
+        long pendingJobs,
+        long failedRecords,
+        long legacyRecordCount)
+    {
+        if (pendingJobs == 0 && failedRecords == 0 && legacyRecordCount == 0)
+        {
+            return;
+        }
+
+        throw new InvalidOperationException(
+            "Der alte Redis-Completion-Namespace enthält noch " +
+            $"{pendingJobs} offene, {failedRecords} fehlgeschlagene und " +
+            $"{legacyRecordCount} gespeicherte Abschlussaufträge. " +
+            "Starte das bisherige Release erneut, lasse die Abschlussqueue vollständig leerlaufen und " +
+            "stoppe danach alle Anwendungsreplikate. Der Cluster-Protokollmarker blieb unverändert.");
+    }
 
     public static RuntimeTopology Resolve(IConfiguration configuration)
     {
@@ -72,6 +135,14 @@ public sealed record RuntimeTopology(
             {
                 throw new InvalidOperationException(
                     "KEYWARS__REDIS__CONNECTION_STRING ist im PostgreSQL-Modus erforderlich.");
+            }
+
+            var configuredProtocolVersion = configuration["KEYWARS:CLUSTER:PROTOCOL_VERSION"]?.Trim();
+            if (!string.IsNullOrEmpty(configuredProtocolVersion) &&
+                configuredProtocolVersion != ClusterProtocolVersion)
+            {
+                throw new InvalidOperationException(
+                    $"KEYWARS__CLUSTER__PROTOCOL_VERSION muss {ClusterProtocolVersion} sein.");
             }
         }
 

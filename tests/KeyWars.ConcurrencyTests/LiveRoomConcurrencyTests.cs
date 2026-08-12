@@ -1,3 +1,4 @@
+using System.Reflection;
 using KeyWars.Domain;
 using KeyWars.Services;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -263,6 +264,68 @@ public sealed class LiveRoomConcurrencyTests
     }
 
     [Fact]
+    public void TargetedProfileRemovalLeavesOtherImportedRoomUntouched()
+    {
+        var manager = CreateManager();
+        var profileId = Guid.CreateVersion7();
+        var first = manager.CreateRoom(new CreateLiveRoomRequest(profileId, "A", "Erster Raum", "Text", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 8));
+        var second = manager.CreateRoom(new CreateLiveRoomRequest(profileId, "A", "Zweiter Raum", "Text", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 8));
+        var secondVersion = second.StateVersion;
+
+        manager.RemoveProfileFromRoom(first.RoomId, profileId);
+
+        Assert.Equal(ParticipantStatus.LeftBeforeStart, manager.Snapshot(first.RoomId).Participants.Single().Status);
+        var untouched = manager.Snapshot(second.RoomId);
+        Assert.Equal(ParticipantStatus.Joined, untouched.Participants.Single().Status);
+        Assert.Equal(secondVersion, untouched.StateVersion);
+    }
+
+    [Fact]
+    public void ResolvedCodeJoinTargetsTheRedisResolvedRoomAndPreservesNewerLocalMapping()
+    {
+        var source = CreateManager();
+        var first = source.CreateRoom(new CreateLiveRoomRequest(
+            Guid.CreateVersion7(), "A", "Erster Raum", "Text", LiveRoomMode.Classic, LiveRoomVisibility.Code, 1, 8));
+        var second = source.CreateRoom(new CreateLiveRoomRequest(
+            Guid.CreateVersion7(), "B", "Zweiter Raum", "Text", LiveRoomMode.Classic, LiveRoomVisibility.Code, 1, 8));
+        var firstState = source.ExportRoomState(first.RoomId);
+        var secondState = source.ExportRoomState(second.RoomId) with { Code = first.Code };
+        var manager = CreateManager();
+        Assert.True(manager.ImportRoomState(firstState));
+        Assert.True(manager.ImportRoomState(secondState));
+        var profileId = Guid.CreateVersion7();
+
+        var joined = manager.JoinByResolvedCode(first.RoomId, first.Code, profileId, "Gast");
+
+        Assert.Equal(first.RoomId, joined.RoomId);
+        Assert.Contains(joined.Participants, participant => participant.ProfileId == profileId);
+        Assert.DoesNotContain(manager.Snapshot(second.RoomId).Participants, participant => participant.ProfileId == profileId);
+        Assert.True(manager.RemoveRoomState(first.RoomId));
+        Assert.Equal(second.RoomId, manager.ResolveRoomIdByCode(first.Code));
+    }
+
+    [Fact]
+    public void TemporaryRoomUnloadPreservesSharedUpdateSenderState()
+    {
+        var sender = new RecordingRoomUpdateSender();
+        var manager = CreateManager(updateSender: sender);
+        var room = manager.CreateRoom(new CreateLiveRoomRequest(
+            Guid.CreateVersion7(), "A", "Raum", "Text", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 8));
+        var state = manager.ExportRoomState(room.RoomId);
+
+        var unload = typeof(LiveRoomManager).GetMethod(
+            "UnloadRoomState",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(unload);
+        Assert.True((bool)unload.Invoke(manager, [room.RoomId])!);
+        Assert.Empty(sender.RemovedRooms);
+
+        Assert.True(manager.ImportRoomState(state));
+        Assert.True(manager.RemoveRoomState(room.RoomId));
+        Assert.Equal([room.RoomId], sender.RemovedRooms);
+    }
+
+    [Fact]
     public void PrivacyRemovalDoesNotExcludeProfileFromRoomsItNeverJoined()
     {
         var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-06-18T12:00:00Z"));
@@ -426,6 +489,22 @@ public sealed class LiveRoomConcurrencyTests
             8);
     }
 
+
+    [Fact]
+    public void ClusterCreateIgnoresTransientLocalRoomCapacity()
+    {
+        var manager = CreateManager(new LiveOptions { MaxConcurrentRooms = 1 });
+        var first = manager.CreateRoom(new CreateLiveRoomRequest(
+            Guid.CreateVersion7(), "A", "Importierter Raum", "Text", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 8));
+
+        var second = manager.CreateRoom(
+            new CreateLiveRoomRequest(
+                Guid.CreateVersion7(), "B", "Cluster-Raum", "Text", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 8),
+            enforceLocalRoomCapacity: false);
+
+        Assert.NotEqual(first.RoomId, second.RoomId);
+    }
+
     [Fact]
     public void ShutdownAbortEnqueuesServerAbortWithoutRatingResult()
     {
@@ -441,6 +520,7 @@ public sealed class LiveRoomConcurrencyTests
         manager.Start(room.RoomId, first);
         time.Advance(TimeSpan.FromSeconds(3));
         Assert.Equal(LiveRoomPhase.Running, manager.Snapshot(room.RoomId).Phase);
+        Assert.Equal(2, manager.MetricsSnapshot().Participants);
 
         var aborted = manager.AbortActiveRooms();
 
@@ -448,6 +528,7 @@ public sealed class LiveRoomConcurrencyTests
         var record = Assert.Single(sink.Records);
         Assert.All(record.Participants, participant => Assert.Equal(ParticipantStatus.AbortedByServer, participant.Status));
         Assert.Equal(LiveRoomPhase.Aborted, manager.Snapshot(room.RoomId).Phase);
+        Assert.Equal(0, manager.MetricsSnapshot().Participants);
         Assert.Equal(0, manager.AbortActiveRooms());
         Assert.Single(sink.Records);
     }
@@ -462,6 +543,37 @@ public sealed class LiveRoomConcurrencyTests
 
         Assert.Equal(0, manager.AbortActiveRooms());
         Assert.Empty(sink.Records);
+    }
+
+    [Fact]
+    public void TargetedShutdownAbortLeavesOtherImportedRoomUntouched()
+    {
+        var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-06-18T12:00:00Z"));
+        var sink = new RecordingCompletionSink();
+        var manager = CreateManager(new LiveOptions { CountdownSeconds = 1 }, time, sink);
+        var first = StartRoom("Erster Raum");
+        var second = StartRoom("Zweiter Raum");
+        time.Advance(TimeSpan.FromSeconds(1));
+        manager.Snapshot(first.RoomId);
+        var secondRunning = manager.Snapshot(second.RoomId);
+
+        Assert.Equal(1, manager.AbortActiveRoom(first.RoomId));
+
+        Assert.Equal(LiveRoomPhase.Aborted, manager.Snapshot(first.RoomId).Phase);
+        var untouched = manager.Snapshot(second.RoomId);
+        Assert.Equal(LiveRoomPhase.Running, untouched.Phase);
+        Assert.Equal(secondRunning.StateVersion, untouched.StateVersion);
+
+        LiveRoomSnapshot StartRoom(string title)
+        {
+            var host = Guid.CreateVersion7();
+            var guest = Guid.CreateVersion7();
+            var room = manager.CreateRoom(new CreateLiveRoomRequest(host, "A", title, "Text", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 8));
+            manager.Join(room.RoomId, guest, "B");
+            manager.SetReady(room.RoomId, host, true);
+            manager.SetReady(room.RoomId, guest, true);
+            return manager.Start(room.RoomId, host);
+        }
     }
 
     [Fact]
@@ -1187,13 +1299,15 @@ public sealed class LiveRoomConcurrencyTests
         LiveOptions? options = null,
         TimeProvider? timeProvider = null,
         ILiveRoomCompletionSink? completionSink = null,
-        LiveProgressBroadcaster? progressBroadcaster = null) => new(
+        LiveProgressBroadcaster? progressBroadcaster = null,
+        ILiveRoomUpdateSender? updateSender = null) => new(
         Options.Create(options ?? new LiveOptions()),
         timeProvider ?? TimeProvider.System,
         new TypingEngine(timeProvider ?? TimeProvider.System),
         NullLogger<LiveRoomManager>.Instance,
         completionSink,
-        progressBroadcaster);
+        progressBroadcaster,
+        updateSender);
 
     private static LivePresenceTracker CreatePresence(LiveOptions? options = null, TimeProvider? timeProvider = null) => new(
         Options.Create(options ?? new LiveOptions()),
@@ -1232,12 +1346,15 @@ public sealed class LiveRoomConcurrencyTests
     private sealed class RecordingRoomUpdateSender : ILiveRoomUpdateSender
     {
         public List<LiveRoomSnapshot> Snapshots { get; } = [];
+        public List<Guid> RemovedRooms { get; } = [];
 
         public Task SendAsync(LiveRoomSnapshot snapshot, CancellationToken cancellationToken)
         {
             Snapshots.Add(snapshot);
             return Task.CompletedTask;
         }
+
+        public void RemoveRoom(Guid roomId) => RemovedRooms.Add(roomId);
     }
 
     private sealed class RecordingCompletionSink : ILiveRoomCompletionSink

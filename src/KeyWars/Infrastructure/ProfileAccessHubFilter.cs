@@ -31,6 +31,11 @@ public sealed class ProfileAccessHubFilter(
         await using var lease = await accessGate.AcquireAsync(
             parsedProfileId,
             invocationContext.Context.ConnectionAborted);
-        return await next(invocationContext);
+        using var leaseLostRegistration = lease.LeaseLost.Register(
+            invocationContext.Context.Abort);
+        lease.ThrowIfLost();
+        var result = await next(invocationContext);
+        lease.ThrowIfLost();
+        return result;
     }
 }

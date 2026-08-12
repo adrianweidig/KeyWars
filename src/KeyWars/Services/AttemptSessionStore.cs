@@ -57,8 +57,18 @@ public sealed class AttemptSessionStore : IAttemptSessionStateStore
         }
     }
 
-    public ValueTask<IAsyncDisposable> AcquireLifecycleLockAsync(Guid id, CancellationToken cancellationToken = default) =>
-        lifecycleLocks.AcquireAsync(id, cancellationToken);
+    public async ValueTask<IOperationLease> AcquireLifecycleLockAsync(Guid id, CancellationToken cancellationToken = default) =>
+        new AttemptOperationLease(await lifecycleLocks.AcquireAsync(id, cancellationToken));
+
+    private sealed class AttemptOperationLease(IAsyncDisposable lease) : IOperationLease
+    {
+        public CancellationToken LeaseLost => CancellationToken.None;
+        public void ThrowIfLost()
+        {
+        }
+
+        public ValueTask DisposeAsync() => lease.DisposeAsync();
+    }
 
     public IReadOnlyList<Guid> GetExpiredIds(DateTimeOffset now, TimeSpan lifetime)
     {
@@ -66,6 +76,7 @@ public sealed class AttemptSessionStore : IAttemptSessionStateStore
         {
             return sessions
                 .Where(item => IsExpired(item.Value, now, lifetime))
+                .Take(100)
                 .Select(item => item.Key)
                 .ToArray();
         }

@@ -82,6 +82,8 @@ jobs:
           echo "${KUBECTL_SHA256}  ${kubectl}" | sha256sum --check --strict
           chmod +x "$kubectl"
           "$kubectl" kustomize deploy/k8s > "$RUNNER_TEMP/keywars-app.yaml"
+          "$kubectl" kustomize deploy/k8s/cutover > "$RUNNER_TEMP/keywars-cutover.yaml"
           "$kubectl" kustomize deploy/k8s/migration > "$RUNNER_TEMP/keywars-migration.yaml"
           "$RUNNER_TEMP/kubeconform" -strict -summary \
-            "$RUNNER_TEMP/keywars-app.yaml" "$RUNNER_TEMP/keywars-migration.yaml"
+            "$RUNNER_TEMP/keywars-app.yaml" "$RUNNER_TEMP/keywars-cutover.yaml" \
+            "$RUNNER_TEMP/keywars-migration.yaml"

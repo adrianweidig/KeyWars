@@ -58,4 +58,94 @@ public sealed class RuntimeTopologyTests
 
         Assert.Contains("SQLite unterstützt ausschließlich", error.Message);
     }
+
+    [Fact]
+    public void ClusterRejectsAnIncompatibleProtocolVersionBeforeConnecting()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["KEYWARS:DATABASE:PROVIDER"] = "postgresql",
+                ["ConnectionStrings:KeyWars"] = "Host=postgres;Database=keywars",
+                ["KEYWARS:REDIS:CONNECTION_STRING"] = "redis:6379",
+                ["KEYWARS:CLUSTER:PROTOCOL_VERSION"] = "0"
+            })
+            .Build();
+
+        var error = Assert.Throws<InvalidOperationException>(() => RuntimeTopology.Resolve(configuration));
+
+        Assert.Contains(RuntimeTopology.ClusterProtocolVersion, error.Message);
+    }
+
+    [Fact]
+    public void ClusterProtocolCutoverRequiresTheExplicitConfirmationCommand()
+    {
+        Assert.True(RuntimeTopology.IsClusterProtocolCutoverCommand(
+            ["maintenance", "cluster-protocol", "cutover", "--confirm-apps-stopped"]));
+        Assert.False(RuntimeTopology.IsClusterProtocolCutoverCommand(
+            ["maintenance", "cluster-protocol", "cutover"]));
+        Assert.False(RuntimeTopology.IsClusterProtocolCutoverCommand(
+            ["maintenance", "cluster-protocol", "cutover", "--confirm-apps-running"]));
+    }
+
+    [Fact]
+    public void ClusterProtocolCutoverAcceptsAnEmptyLegacyCompletionQueue()
+    {
+        RuntimeTopology.RequireLegacyCompletionQueueDrained(0, 0, 0);
+    }
+
+    [Theory]
+    [InlineData(1, 0, 0)]
+    [InlineData(0, 1, 0)]
+    [InlineData(0, 0, 1)]
+    [InlineData(2, 3, 4)]
+    public void ClusterProtocolCutoverRejectsLegacyCompletionWorkWithoutChangingTheMarker(
+        long pendingJobs,
+        long failedRecords,
+        long legacyRecordCount)
+    {
+        var error = Assert.Throws<InvalidOperationException>(
+            () => RuntimeTopology.RequireLegacyCompletionQueueDrained(
+                pendingJobs,
+                failedRecords,
+                legacyRecordCount));
+
+        Assert.Contains($"{pendingJobs} offene", error.Message);
+        Assert.Contains($"{failedRecords} fehlgeschlagene", error.Message);
+        Assert.Contains($"{legacyRecordCount} gespeicherte", error.Message);
+        Assert.Contains("Cluster-Protokollmarker blieb unverändert", error.Message);
+    }
+
+    [Fact]
+    public void LegacyCompletionQueueKeysRemainThePreCutoverNamespace()
+    {
+        Assert.Equal("keywars:completion:pending", RuntimeTopology.LegacyCompletionPendingKey);
+        Assert.Equal("keywars:completion:failed", RuntimeTopology.LegacyCompletionFailedKey);
+        Assert.Equal("keywars:completion:record:*", RuntimeTopology.LegacyCompletionRecordPattern);
+    }
+
+    [Fact]
+    public void NormalClusterStartFailsClosedWithoutProtocolMarker()
+    {
+        var error = Assert.Throws<InvalidOperationException>(
+            () => RuntimeTopology.RequireActiveClusterProtocol(null));
+
+        Assert.Contains(RuntimeTopology.ClusterProtocolCutoverCommand, error.Message);
+    }
+
+    [Fact]
+    public void NormalClusterStartFailsClosedForDifferentProtocolMarker()
+    {
+        var error = Assert.Throws<InvalidOperationException>(
+            () => RuntimeTopology.RequireActiveClusterProtocol("0"));
+
+        Assert.Contains("verwendet Cluster-Protokoll 0", error.Message);
+        Assert.Contains(RuntimeTopology.ClusterProtocolVersion, error.Message);
+    }
+
+    [Fact]
+    public void NormalClusterStartAcceptsExactProtocolMarker()
+    {
+        RuntimeTopology.RequireActiveClusterProtocol(RuntimeTopology.ClusterProtocolVersion);
+    }
 }

@@ -23,6 +23,7 @@ verwendet `compose.scale.yaml` und diese internen Variablen:
 | `KEYWARS__DATABASE__PROVIDER` | `sqlite`, `postgresql` | Datenbankanbieter |
 | `ConnectionStrings__KeyWars` | Verbindungszeichenfolge | PostgreSQL-Verbindung im Scale-Modus |
 | `KEYWARS__REDIS__CONNECTION_STRING` | Verbindungszeichenfolge | SignalR, Data Protection und verteilter Zustand |
+| `KEYWARS__CLUSTER__PROTOCOL_VERSION` | Releasewert, aktuell `1` | verhindert gemischte Redis-Laufzeitprotokolle |
 
 Für Administratoren bleibt Compose die Referenz. Reihenfolge, Wartung und
 Health-Prüfungen stehen unter [Skalierter Betrieb](scale-operations.md).

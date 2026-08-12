@@ -44,6 +44,8 @@ DEPLOYMENT_BUNDLE_FILES = (
     "compose.scale.yaml",
     "deploy/images.txt",
     "deploy/k8s/arena.yaml",
+    "deploy/k8s/cutover/job.yaml",
+    "deploy/k8s/cutover/kustomization.yaml",
     "deploy/k8s/edge.yaml",
     "deploy/k8s/hpa.yaml",
     "deploy/k8s/kustomization.yaml",

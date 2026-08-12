@@ -278,11 +278,7 @@ public sealed class ProfileExportService(KeyWarsDbContext db, TimeProvider timeP
                     .OrderBy(item => item.TextCollectionId).ThenBy(item => item.SortOrder).ThenBy(item => item.TrainingTextId)),
             ExportSequence<ContentModerationAuditEntry>.FromQuery(
                 db.ContentModerationAuditEntries.AsNoTracking()
-                    .Where(item => item.ActorProfileId == profileId ||
-                        (item.TargetType == ContentModerationTargetType.TrainingText &&
-                            db.TrainingTexts.Any(text => text.Id == item.TargetId && text.OwnerProfileId == profileId)) ||
-                        (item.TargetType == ContentModerationTargetType.TextCollection &&
-                            db.TextCollections.Any(collection => collection.Id == item.TargetId && collection.OwnerProfileId == profileId)))
+                    .Where(item => item.ActorProfileId == profileId || item.TargetOwnerProfileId == profileId)
                     .OrderBy(item => item.Id),
                 item => IncludesTimestamp(item.CreatedAt),
                 includeAll),

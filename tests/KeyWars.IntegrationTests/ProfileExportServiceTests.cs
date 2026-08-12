@@ -1,4 +1,5 @@
 using System.Text.Json;
+using KeyWars.Auth;
 using KeyWars.Data;
 using KeyWars.Domain;
 using KeyWars.Services;
@@ -9,6 +10,7 @@ using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace KeyWars.IntegrationTests;
 
@@ -157,6 +159,62 @@ public sealed class ProfileExportServiceTests
         Assert.Single(root.GetProperty("AttemptErrors").EnumerateArray());
         Assert.Single(root.GetProperty("RewardLedger").EnumerateArray());
         Assert.Equal(ownedText.Id, root.GetProperty("OwnedTexts")[0].GetProperty("Id").GetGuid());
+        Assert.Empty(context.Db.ChangeTracker.Entries());
+    }
+
+    [Fact]
+    public async Task TargetOwnerModerationAuditRemainsExportableAfterTargetDeletion()
+    {
+        await using var context = await ExportTestContext.CreateAsync();
+        var moderator = new UserProfile
+        {
+            DirectoryObjectGuid = Guid.CreateVersion7().ToString(),
+            SamAccountName = "moderator",
+            DisplayName = "Mara Moderation"
+        };
+        var target = new TrainingText
+        {
+            OwnerProfileId = context.ProfileId,
+            Title = "Gelöschtes Moderationsziel",
+            Body = "Dieser Zieltext wird nach der Moderation gelöscht."
+        };
+        var auditEntry = new ContentModerationAuditEntry
+        {
+            ActorProfileId = moderator.Id,
+            ActorDisplayName = moderator.DisplayName,
+            TargetType = ContentModerationTargetType.TrainingText,
+            TargetId = target.Id,
+            TargetOwnerProfileId = context.ProfileId,
+            TargetTitle = target.Title,
+            Action = ContentModerationAction.Unpublish,
+            Reason = "Nachweis nach Ziel-Löschung",
+            CreatedAt = context.Time.GetUtcNow()
+        };
+        context.Db.UserProfiles.Add(moderator);
+        context.Db.TrainingTexts.Add(target);
+        context.Db.ContentModerationAuditEntries.Add(auditEntry);
+        await context.Db.SaveChangesAsync();
+
+        var textLibrary = new TextLibraryService(
+            context.Db,
+            new CurrentUser(context.Db),
+            Options.Create(new ContentOptions()));
+        await textLibrary.DeleteAsync(context.ProfileId, target.Id);
+        context.Db.ChangeTracker.Clear();
+        var service = context.CreateService();
+        var range = ProfileExportRange.Create(null, null);
+
+        var preview = await service.GetPreviewAsync(context.ProfileId, range);
+        await using var output = new MemoryStream();
+        await service.WriteAsync(context.ProfileId, range, context.Time.GetUtcNow(), output, CancellationToken.None);
+        output.Position = 0;
+        using var document = await JsonDocument.ParseAsync(output);
+        var exportedAudit = Assert.Single(document.RootElement.GetProperty("ContentModerationAuditEntries").EnumerateArray());
+
+        Assert.Equal(1, preview.ActivityRecords);
+        Assert.Equal(auditEntry.Id, exportedAudit.GetProperty("Id").GetGuid());
+        Assert.Equal(context.ProfileId, exportedAudit.GetProperty("TargetOwnerProfileId").GetGuid());
+        Assert.False(await context.Db.TrainingTexts.AnyAsync(item => item.Id == target.Id));
         Assert.Empty(context.Db.ChangeTracker.Entries());
     }
 

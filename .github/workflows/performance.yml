@@ -165,6 +165,16 @@ jobs:
           "${compose[@]}" config --quiet
           "${compose[@]}" up -d --wait postgres redis
           "${compose[@]}" run --rm postgres-tests
+          "${compose[@]}" run --rm keywars-protocol-cutover
+          "${compose[@]}" run --rm keywars-protocol-cutover
+          "${compose[@]}" exec -T redis redis-cli SET keywars:cluster:protocol-version 2 >/dev/null
+          if "${compose[@]}" run --rm keywars-protocol-cutover; then
+            echo "Cutover hat einen inkompatiblen Protokollmarker überschrieben." >&2
+            exit 1
+          fi
+          test "$("${compose[@]}" exec -T redis redis-cli --raw GET keywars:cluster:protocol-version)" = 2
+          "${compose[@]}" exec -T redis redis-cli DEL keywars:cluster:protocol-version >/dev/null
+          "${compose[@]}" run --rm keywars-protocol-cutover
           "${compose[@]}" run --rm keywars-migrate
           "${compose[@]}" up -d --wait \
             --scale keywars-web=2 --scale keywars-arena=2 --scale keywars-worker=1 \

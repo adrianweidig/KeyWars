@@ -13,5 +13,6 @@ public interface ILiveRoomCompletionMonitor
     int PendingCount { get; }
     int FailedRecordCount { get; }
     long FailedAttempts { get; }
+    TimeSpan OldestPendingAge { get; }
     LiveRoomCompletionMetrics GetMetrics();
 }

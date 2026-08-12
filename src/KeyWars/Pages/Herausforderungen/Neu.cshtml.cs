@@ -53,7 +53,8 @@ public sealed class NeuModel(
                 Input.Mode,
                 Input.ParticipantIds,
                 Input.RoundCount,
-                Input.ExpiryDays), cancellationToken);
+                Input.ExpiryDays,
+                Input.RequestId), cancellationToken);
             return RedirectToPage("/Herausforderungen/Details", new { id = challenge.Id });
         }
         catch (ChallengeLifecycleException exception)
@@ -90,6 +91,7 @@ public sealed class NeuModel(
 
     public sealed class ChallengeInput
     {
+        public Guid RequestId { get; set; } = Guid.CreateVersion7();
         [MaxLength(160)]
         public string Title { get; set; } = "";
         [Required]

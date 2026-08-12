@@ -13,7 +13,7 @@ public interface IAttemptSessionStateStore
     ValueTask<IReadOnlyList<AttemptSession>> RemoveProfileAsync(
         Guid profileId,
         CancellationToken cancellationToken = default);
-    ValueTask<IAsyncDisposable> AcquireLifecycleLockAsync(
+    ValueTask<IOperationLease> AcquireLifecycleLockAsync(
         Guid id,
         CancellationToken cancellationToken = default);
     ValueTask<IReadOnlyList<Guid>> GetExpiredIdsAsync(

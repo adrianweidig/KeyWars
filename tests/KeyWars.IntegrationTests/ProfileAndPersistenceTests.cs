@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Text;
 using KeyWars.Auth;
 using KeyWars.Data;
@@ -6,6 +7,7 @@ using KeyWars.Infrastructure;
 using KeyWars.Services;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
@@ -175,6 +177,30 @@ public sealed class ProfileAndPersistenceTests
             Assert.Equal((AttemptErrorCodes.InvalidRequest, 400), (error.Code, error.StatusCode));
         }
 
+        Assert.Empty(await db.TypingAttempts.ToListAsync());
+    }
+
+    [Fact]
+    public async Task StartRejectsQuarantinedTextOwnedByProfile()
+    {
+        await using var context = await AttemptTestContext.CreateAsync();
+        await using var db = new KeyWarsDbContext(context.Options);
+        var text = new TrainingText
+        {
+            OwnerProfileId = context.ProfileId,
+            Title = "Quarantänisierter Eigentext",
+            Body = "Dieser Text darf nicht gestartet werden.",
+            Visibility = TrainingTextVisibility.Private,
+            IsQuarantined = true
+        };
+        db.TrainingTexts.Add(text);
+        await db.SaveChangesAsync();
+        var service = context.CreateService(db);
+
+        var error = await Assert.ThrowsAsync<AttemptLifecycleException>(() =>
+            service.StartAsync(context.ProfileId, new StartAttemptRequest(TrainingMode.Text, text.Id, null, null)));
+
+        Assert.Equal((AttemptErrorCodes.InvalidRequest, 400), (error.Code, error.StatusCode));
         Assert.Empty(await db.TypingAttempts.ToListAsync());
     }
 
@@ -480,6 +506,79 @@ public sealed class ProfileAndPersistenceTests
 
         Assert.Equal(AttemptPhase.Expired, attempt.Phase);
         Assert.Null(attempt.FinishedAt);
+    }
+
+    [Fact]
+    public async Task RequestSweepDoesNotRunGlobalDatabaseReconciliation()
+    {
+        var interceptor = new RejectGlobalAttemptReconciliationInterceptor();
+        await using var context = await AttemptTestContext.CreateAsync(interceptor);
+        await using var db = new KeyWarsDbContext(context.Options);
+        var service = context.CreateService(db);
+
+        await service.StartAsync(context.ProfileId, new StartAttemptRequest(TrainingMode.Words10, null, null, 10));
+
+        Assert.Equal(0, interceptor.ReconciliationQueryCount);
+    }
+
+    [Fact]
+    public async Task ExpiredDatabaseAttemptIsTerminalizedAfterSessionStateAlreadyVanished()
+    {
+        await using var context = await AttemptTestContext.CreateAsync();
+        await using var db = new KeyWarsDbContext(context.Options);
+        var service = context.CreateService(db);
+
+        var session = await service.StartAsync(context.ProfileId, new StartAttemptRequest(TrainingMode.Words10, null, null, 10));
+        Assert.True(context.SessionStore.TryRemove(session.Id, out _));
+        context.Time.Advance(TimeSpan.FromHours(2).Add(TimeSpan.FromSeconds(1)));
+
+        await service.ReconcileExpiredDatabaseAttemptsAsync();
+
+        var attempt = await db.TypingAttempts.SingleAsync(item => item.Id == session.Id);
+        Assert.Equal(AttemptPhase.Expired, attempt.Phase);
+    }
+
+    [Fact]
+    public async Task ExpirationQueryFailureLeavesSessionRecoverable()
+    {
+        var interceptor = new ThrowNextReaderInterceptor();
+        await using var context = await AttemptTestContext.CreateAsync(interceptor);
+        await using var db = new KeyWarsDbContext(context.Options);
+        var service = context.CreateService(db);
+        var session = await service.StartAsync(context.ProfileId, new StartAttemptRequest(TrainingMode.Words10, null, null, 10));
+        context.Time.Advance(TimeSpan.FromHours(2).Add(TimeSpan.FromSeconds(1)));
+        interceptor.Arm();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.ReconcileExpiredDatabaseAttemptsAsync());
+
+        Assert.True(context.SessionStore.TryGet(session.Id, out _));
+        await service.ReconcileExpiredDatabaseAttemptsAsync();
+        Assert.False(context.SessionStore.TryGet(session.Id, out _));
+        Assert.Equal(
+            AttemptPhase.Expired,
+            await db.TypingAttempts.Where(item => item.Id == session.Id).Select(item => item.Phase).SingleAsync());
+    }
+
+    [Fact]
+    public async Task StartPublishesSessionFirstAndCompensatesWhenDatabaseInsertFails()
+    {
+        await using var context = await AttemptTestContext.CreateAsync();
+        await using var db = new KeyWarsDbContext(context.Options);
+        var store = new FailDatabaseInsertAfterPublicationStore(db);
+        var service = new AttemptService(
+            db,
+            new TypingEngine(context.Time),
+            new MotivationService(db, context.Time),
+            context.Time,
+            store);
+
+        await Assert.ThrowsAsync<DbUpdateException>(() =>
+            service.StartAsync(context.ProfileId, new StartAttemptRequest(TrainingMode.Words10, null, null, 10)));
+
+        Assert.False(store.DatabaseRowExistedWhenPublished);
+        Assert.Empty(await store.RemoveProfileAsync(context.ProfileId));
+        Assert.Empty(await db.TypingAttempts.AsNoTracking().ToListAsync());
     }
 
     [Fact]
@@ -798,11 +897,17 @@ public sealed class ProfileAndPersistenceTests
         public ManualTimeProvider Time { get; }
         public Guid ProfileId { get; }
 
-        public static async Task<AttemptTestContext> CreateAsync()
+        public static async Task<AttemptTestContext> CreateAsync(DbCommandInterceptor? interceptor = null)
         {
             var connection = new SqliteConnection("Data Source=:memory:");
             await connection.OpenAsync();
-            var options = new DbContextOptionsBuilder<KeyWarsDbContext>().UseSqlite(connection).Options;
+            var optionsBuilder = new DbContextOptionsBuilder<KeyWarsDbContext>().UseSqlite(connection);
+            if (interceptor is not null)
+            {
+                optionsBuilder.AddInterceptors(interceptor);
+            }
+
+            var options = optionsBuilder.Options;
             var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-06-18T12:00:00Z"));
             await using var db = new KeyWarsDbContext(options);
             await db.Database.EnsureCreatedAsync();
@@ -831,5 +936,109 @@ public sealed class ProfileAndPersistenceTests
         public override DateTimeOffset GetUtcNow() => utcNow;
 
         public void Advance(TimeSpan value) => utcNow += value;
+    }
+
+    private sealed class ThrowNextReaderInterceptor : DbCommandInterceptor
+    {
+        private bool armed;
+
+        public void Arm() => armed = true;
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (armed)
+            {
+                armed = false;
+                throw new InvalidOperationException("Simulierter Datenbank-Lesefehler.");
+            }
+
+            return ValueTask.FromResult(result);
+        }
+    }
+
+    private sealed class RejectGlobalAttemptReconciliationInterceptor : DbCommandInterceptor
+    {
+        public int ReconciliationQueryCount { get; private set; }
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.Contains("TypingAttempts", StringComparison.Ordinal) &&
+                command.CommandText.Contains("LIMIT 100", StringComparison.Ordinal))
+            {
+                ReconciliationQueryCount++;
+                throw new InvalidOperationException("Globale Attempt-Reconciliation im Requestpfad erkannt.");
+            }
+
+            return ValueTask.FromResult(result);
+        }
+    }
+
+    private sealed class FailDatabaseInsertAfterPublicationStore(KeyWarsDbContext db) : IAttemptSessionStateStore
+    {
+        private readonly IAttemptSessionStateStore inner = new AttemptSessionStore();
+
+        public bool DatabaseRowExistedWhenPublished { get; private set; }
+
+        public async ValueTask AddAsync(
+            AttemptSession session,
+            TimeSpan lifetime,
+            CancellationToken cancellationToken = default)
+        {
+            DatabaseRowExistedWhenPublished = await db.TypingAttempts
+                .AsNoTracking()
+                .AnyAsync(item => item.Id == session.Id, cancellationToken);
+            await inner.AddAsync(session, lifetime, cancellationToken);
+            await db.Database.ExecuteSqlRawAsync("""
+                CREATE TRIGGER fail_attempt_insert_after_session_publication
+                BEFORE INSERT ON TypingAttempts
+                BEGIN
+                    SELECT RAISE(ABORT, 'forced attempt insert failure');
+                END;
+                """, cancellationToken);
+        }
+
+        public ValueTask<AttemptSession?> GetAsync(Guid id, CancellationToken cancellationToken = default) =>
+            inner.GetAsync(id, cancellationToken);
+
+        public ValueTask<bool> TryUpdateAsync(
+            AttemptSession current,
+            AttemptSession updated,
+            TimeSpan lifetime,
+            CancellationToken cancellationToken = default) =>
+            inner.TryUpdateAsync(current, updated, lifetime, cancellationToken);
+
+        public ValueTask<AttemptSession?> RemoveAsync(Guid id, CancellationToken cancellationToken = default) =>
+            inner.RemoveAsync(id, cancellationToken);
+
+        public ValueTask<IReadOnlyList<AttemptSession>> RemoveProfileAsync(
+            Guid profileId,
+            CancellationToken cancellationToken = default) =>
+            inner.RemoveProfileAsync(profileId, cancellationToken);
+
+        public ValueTask<IOperationLease> AcquireLifecycleLockAsync(
+            Guid id,
+            CancellationToken cancellationToken = default) =>
+            inner.AcquireLifecycleLockAsync(id, cancellationToken);
+
+        public ValueTask<IReadOnlyList<Guid>> GetExpiredIdsAsync(
+            DateTimeOffset now,
+            TimeSpan lifetime,
+            CancellationToken cancellationToken = default) =>
+            inner.GetExpiredIdsAsync(now, lifetime, cancellationToken);
+
+        public ValueTask<AttemptSession?> TryRemoveExpiredAsync(
+            Guid id,
+            DateTimeOffset now,
+            TimeSpan lifetime,
+            CancellationToken cancellationToken = default) =>
+            inner.TryRemoveExpiredAsync(id, now, lifetime, cancellationToken);
     }
 }

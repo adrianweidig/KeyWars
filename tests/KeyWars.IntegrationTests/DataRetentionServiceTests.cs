@@ -35,7 +35,9 @@ public sealed class DataRetentionServiceTests : IAsyncLifetime
         await using var db = await CreateDatabaseAsync();
         var seeded = await SeedAsync(db, now);
         db.ChangeTracker.Clear();
-        var service = CreateService(db, options, now);
+        var challengeLocks = new RecordingChallengeLockProvider();
+        var attemptSessions = new RecordingAttemptSessionStateStore();
+        var service = CreateService(db, options, now, challengeLocks, attemptSessions);
 
         var dryRun = await service.RunAsync(dryRun: true);
 
@@ -50,6 +52,8 @@ public sealed class DataRetentionServiceTests : IAsyncLifetime
         Assert.Equal(AttemptPhase.Prepared, await ReadAttemptPhaseAsync(db, seeded.StaleAttemptId));
         Assert.Equal(ChallengeStatus.Open, await ReadChallengeStatusAsync(db, seeded.DueChallengeId));
         Assert.True(await db.TypingAttempts.AsNoTracking().AnyAsync(item => item.Id == seeded.DeletableAttemptId));
+        Assert.Empty(challengeLocks.AcquiredChallengeIds);
+        Assert.Empty(attemptSessions.AcquiredAttemptIds);
 
         var applied = await service.RunAsync(dryRun: false);
         db.ChangeTracker.Clear();
@@ -69,10 +73,62 @@ public sealed class DataRetentionServiceTests : IAsyncLifetime
         Assert.False(await db.TypingAttempts.AsNoTracking().AnyAsync(item => item.Id == seeded.DeletableAttemptId));
         Assert.True(await db.TypingAttempts.AsNoTracking().AnyAsync(item => item.Id == seeded.LedgerProtectedAttemptId));
         Assert.True(await db.TypingAttempts.AsNoTracking().AnyAsync(item => item.Id == seeded.BindingProtectedAttemptId));
+        Assert.Equal(AttemptPhase.Aborted, await ReadAttemptPhaseAsync(db, seeded.BindingProtectedAttemptId));
+        Assert.Empty(await db.ChallengeAttemptBindings.AsNoTracking().Where(item => item.TypingAttemptId == seeded.BindingProtectedAttemptId).ToListAsync());
         Assert.True(await db.TypingAttempts.AsNoTracking().AnyAsync(item => item.Id == seeded.CompletedAttemptId));
         Assert.True(await db.GamificationEvents.AsNoTracking().AnyAsync(item => item.Id == seeded.UnseenEventId));
         Assert.Single(await db.RewardLedgerEntries.AsNoTracking().ToListAsync());
         Assert.Contains(nameof(KeyWarsDbContext.RewardLedgerEntries), applied.ProtectedDataSets);
+        Assert.Equal([seeded.DueChallengeId], challengeLocks.AcquiredChallengeIds);
+        Assert.Contains(seeded.StaleAttemptId, attemptSessions.AcquiredAttemptIds);
+    }
+
+    [Fact]
+    public async Task AttemptExpirationDoesNotMutateBeforeItsLifecycleFenceIsAcquired()
+    {
+        var now = new DateTimeOffset(2026, 8, 11, 12, 0, 0, TimeSpan.Zero);
+        await using var db = await CreateDatabaseAsync();
+        var seeded = await SeedAsync(db, now);
+        db.ChangeTracker.Clear();
+        var attemptSessions = new RecordingAttemptSessionStateStore(rejectAcquisition: true);
+        var service = CreateService(
+            db,
+            new RetentionOptions(),
+            now,
+            attemptSessions: attemptSessions);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => service.RunAsync(dryRun: false));
+
+        Assert.Equal("Attempt-Fence nicht verfügbar.", exception.Message);
+        Assert.Equal([seeded.StaleAttemptId], attemptSessions.AcquiredAttemptIds);
+        db.ChangeTracker.Clear();
+        var attempt = await db.TypingAttempts.AsNoTracking()
+            .SingleAsync(item => item.Id == seeded.StaleAttemptId);
+        Assert.Equal(AttemptPhase.Prepared, attempt.Phase);
+        Assert.Null(attempt.FinishedAt);
+    }
+
+    [Fact]
+    public async Task ChallengeExpirationDoesNotMutateBeforeItsFenceIsAcquired()
+    {
+        var now = new DateTimeOffset(2026, 8, 11, 12, 0, 0, TimeSpan.Zero);
+        await using var db = await CreateDatabaseAsync();
+        var seeded = await SeedAsync(db, now);
+        db.ChangeTracker.Clear();
+        var challengeLocks = new RejectingChallengeLockProvider();
+        var service = CreateService(db, new RetentionOptions(), now, challengeLocks);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => service.RunAsync(dryRun: false));
+
+        Assert.Equal("Challenge-Fence nicht verfügbar.", exception.Message);
+        Assert.Equal([seeded.DueChallengeId], challengeLocks.AcquiredChallengeIds);
+        db.ChangeTracker.Clear();
+        var challenge = await db.Challenges.AsNoTracking()
+            .SingleAsync(item => item.Id == seeded.DueChallengeId);
+        Assert.Equal(ChallengeStatus.Open, challenge.Status);
+        Assert.Null(challenge.FinishedAt);
     }
 
     [PostgreSqlFact]
@@ -138,6 +194,138 @@ public sealed class DataRetentionServiceTests : IAsyncLifetime
         }
     }
 
+    [PostgreSqlFact]
+    public async Task PostgreSqlChallengeExpirationWaitsForAdvisoryFenceAndRechecksState()
+    {
+        var connectionString = Environment.GetEnvironmentVariable(
+            PostgreSqlFactAttribute.ConnectionStringEnvironmentVariable)!;
+        var schema = $"keywars_retention_fence_{Guid.NewGuid():N}";
+        var scopedConnectionString = await CreatePostgreSqlSchemaAsync(connectionString, schema);
+        try
+        {
+            var dbOptions = new DbContextOptionsBuilder<PostgresKeyWarsDbContext>()
+                .UseNpgsql(scopedConnectionString)
+                .Options;
+            var now = new DateTimeOffset(2026, 8, 11, 12, 0, 0, TimeSpan.Zero);
+            DueChallengeSeed seeded;
+            await using (var setupDb = new PostgresKeyWarsDbContext(dbOptions))
+            {
+                await setupDb.Database.ExecuteSqlRawAsync(setupDb.Database.GenerateCreateScript());
+                seeded = await SeedDueChallengeAsync(setupDb, now);
+            }
+
+            await using var blockerDb = new PostgresKeyWarsDbContext(dbOptions);
+            await using var retentionDb = new PostgresKeyWarsDbContext(dbOptions);
+            await using var blockerTransaction = await blockerDb.Database.BeginTransactionAsync();
+            var advisoryKey = ChallengeAdvisoryKey(seeded.ChallengeId);
+            await blockerDb.Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT pg_advisory_xact_lock({advisoryKey});");
+
+            var challengeLocks = new SignalingChallengeLockProvider();
+            var service = CreateService(retentionDb, new RetentionOptions(), now, challengeLocks);
+            var retentionTask = service.RunAsync(dryRun: false);
+            Assert.Equal(
+                seeded.ChallengeId,
+                await challengeLocks.Acquired.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+
+            await Task.Delay(200);
+            Assert.False(retentionTask.IsCompleted);
+
+            var finishedAt = now.AddMinutes(-1);
+            await blockerDb.Challenges
+                .Where(item => item.Id == seeded.ChallengeId)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(item => item.Status, ChallengeStatus.Finished)
+                    .SetProperty(item => item.FinishedAt, finishedAt));
+            await blockerTransaction.CommitAsync();
+
+            var report = await retentionTask.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal(1, report.ExpiredChallenges.Candidates);
+            Assert.Equal(0, report.ExpiredChallenges.Affected);
+            Assert.Equal(0, report.ExpiredChallenges.Remaining);
+
+            var challenge = await retentionDb.Challenges.AsNoTracking()
+                .SingleAsync(item => item.Id == seeded.ChallengeId);
+            Assert.Equal(ChallengeStatus.Finished, challenge.Status);
+            Assert.Equal(finishedAt, challenge.FinishedAt);
+            var participant = await retentionDb.ChallengeParticipants.AsNoTracking()
+                .SingleAsync(item =>
+                    item.ChallengeId == seeded.ChallengeId &&
+                    item.UserProfileId == seeded.ParticipantId);
+            Assert.Equal(ParticipantStatus.Joined, participant.Status);
+            Assert.Null(participant.FinishedAt);
+        }
+        finally
+        {
+            await DropPostgreSqlSchemaAsync(connectionString, schema);
+        }
+    }
+
+    [PostgreSqlFact]
+    public async Task PostgreSqlAttemptExpirationWaitsForAdvisoryFenceAndRechecksState()
+    {
+        var connectionString = Environment.GetEnvironmentVariable(
+            PostgreSqlFactAttribute.ConnectionStringEnvironmentVariable)!;
+        var schema = $"keywars_retention_attempt_fence_{Guid.NewGuid():N}";
+        var scopedConnectionString = await CreatePostgreSqlSchemaAsync(connectionString, schema);
+        try
+        {
+            var dbOptions = new DbContextOptionsBuilder<PostgresKeyWarsDbContext>()
+                .UseNpgsql(scopedConnectionString)
+                .Options;
+            var now = new DateTimeOffset(2026, 8, 11, 12, 0, 0, TimeSpan.Zero);
+            SeededIds seeded;
+            await using (var setupDb = new PostgresKeyWarsDbContext(dbOptions))
+            {
+                await setupDb.Database.ExecuteSqlRawAsync(setupDb.Database.GenerateCreateScript());
+                seeded = await SeedAsync(setupDb, now);
+            }
+
+            await using var blockerDb = new PostgresKeyWarsDbContext(dbOptions);
+            await using var retentionDb = new PostgresKeyWarsDbContext(dbOptions);
+            await using var blockerTransaction = await blockerDb.Database.BeginTransactionAsync();
+            var advisoryKey = AttemptAdvisoryKey(seeded.StaleAttemptId);
+            await blockerDb.Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT pg_advisory_xact_lock({advisoryKey});");
+
+            var attemptSessions = new RecordingAttemptSessionStateStore(signalAcquisition: true);
+            var service = CreateService(
+                retentionDb,
+                new RetentionOptions(),
+                now,
+                attemptSessions: attemptSessions);
+            var retentionTask = service.RunAsync(dryRun: false);
+            Assert.Equal(
+                seeded.StaleAttemptId,
+                await attemptSessions.Acquired.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+
+            await Task.Delay(200);
+            Assert.False(retentionTask.IsCompleted);
+
+            var finishedAt = now.AddMinutes(-1);
+            await blockerDb.TypingAttempts
+                .Where(item => item.Id == seeded.StaleAttemptId)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(item => item.Phase, AttemptPhase.Finished)
+                    .SetProperty(item => item.FinishedAt, finishedAt));
+            await blockerTransaction.CommitAsync();
+
+            var report = await retentionTask.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal(1, report.StaleAttempts.Candidates);
+            Assert.Equal(0, report.StaleAttempts.Affected);
+            Assert.Equal(0, report.StaleAttempts.Remaining);
+
+            var attempt = await retentionDb.TypingAttempts.AsNoTracking()
+                .SingleAsync(item => item.Id == seeded.StaleAttemptId);
+            Assert.Equal(AttemptPhase.Finished, attempt.Phase);
+            Assert.Equal(finishedAt, attempt.FinishedAt);
+        }
+        finally
+        {
+            await DropPostgreSqlSchemaAsync(connectionString, schema);
+        }
+    }
+
     public Task InitializeAsync() => Task.CompletedTask;
 
     public Task DisposeAsync()
@@ -167,7 +355,12 @@ public sealed class DataRetentionServiceTests : IAsyncLifetime
         return db;
     }
 
-    private DataRetentionService CreateService(KeyWarsDbContext db, RetentionOptions options, DateTimeOffset now)
+    private DataRetentionService CreateService(
+        KeyWarsDbContext db,
+        RetentionOptions options,
+        DateTimeOffset now,
+        IChallengeLockProvider? challengeLocks = null,
+        IAttemptSessionStateStore? attemptSessions = null)
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -184,7 +377,8 @@ public sealed class DataRetentionServiceTests : IAsyncLifetime
         return new DataRetentionService(
             db,
             backups,
-            new AttemptSessionStore(),
+            attemptSessions ?? new AttemptSessionStore(),
+            challengeLocks ?? LocalChallengeLockProvider.Shared,
             Options.Create(options),
             new ManualTimeProvider(now),
             NullLogger<DataRetentionService>.Instance);
@@ -238,7 +432,8 @@ public sealed class DataRetentionServiceTests : IAsyncLifetime
         var staleAttempt = Attempt(profile.Id, text.Id, AttemptPhase.Prepared, now.AddHours(-3));
         var deletableAttempt = Attempt(profile.Id, text.Id, AttemptPhase.Expired, now.AddDays(-120));
         var ledgerProtectedAttempt = Attempt(profile.Id, text.Id, AttemptPhase.Expired, now.AddDays(-120));
-        var bindingProtectedAttempt = Attempt(profile.Id, text.Id, AttemptPhase.Aborted, now.AddDays(-120));
+        var bindingProtectedAttempt = Attempt(profile.Id, text.Id, AttemptPhase.Prepared, now.AddMinutes(-30));
+        bindingProtectedAttempt.StartedAt = bindingProtectedAttempt.PreparedAt;
         var completedAttempt = Attempt(profile.Id, text.Id, AttemptPhase.Finished, now.AddDays(-120));
         completedAttempt.Completed = true;
         completedAttempt.Official = true;
@@ -305,6 +500,61 @@ public sealed class DataRetentionServiceTests : IAsyncLifetime
             unseenEvent.Id);
     }
 
+    private static async Task<DueChallengeSeed> SeedDueChallengeAsync(
+        KeyWarsDbContext db,
+        DateTimeOffset now)
+    {
+        var profile = new UserProfile
+        {
+            DirectoryObjectGuid = Guid.NewGuid().ToString("D"),
+            SamAccountName = "retention-fence-user",
+            UserPrincipalName = "retention-fence-user@example.local",
+            DisplayName = "Retention Fence User"
+        };
+        var text = new TrainingText
+        {
+            Title = "Retention-Fence-Text",
+            SourceKey = "retention-fence-text",
+            Body = "Ein transaktional geschützter Testtext.",
+            IsStandard = true,
+            RatingEligible = true,
+            Visibility = TrainingTextVisibility.Organization,
+            CharacterCount = 39
+        };
+        var challenge = new Challenge
+        {
+            CreatorProfileId = profile.Id,
+            TrainingTextId = text.Id,
+            Title = "Gefencete Challenge",
+            Status = ChallengeStatus.Running,
+            CreatedAt = now.AddDays(-2),
+            ExpiresAt = now.AddDays(-1)
+        };
+        var participant = new ChallengeParticipant
+        {
+            ChallengeId = challenge.Id,
+            UserProfileId = profile.Id,
+            Status = ParticipantStatus.Joined,
+            InvitedAt = challenge.CreatedAt,
+            RespondedAt = challenge.CreatedAt.AddMinutes(1)
+        };
+        db.AddRange(profile, text, challenge, participant);
+        await db.SaveChangesAsync();
+        return new DueChallengeSeed(challenge.Id, profile.Id);
+    }
+
+    private static long ChallengeAdvisoryKey(Guid challengeId)
+    {
+        const long challengeLockNamespace = unchecked((long)0x4348414C4C454E00);
+        return BitConverter.ToInt64(challengeId.ToByteArray(), 0) ^ challengeLockNamespace;
+    }
+
+    private static long AttemptAdvisoryKey(Guid attemptId)
+    {
+        const long attemptLockNamespace = unchecked((long)0x415454454D505400);
+        return BitConverter.ToInt64(attemptId.ToByteArray(), 0) ^ attemptLockNamespace;
+    }
+
     private static TypingAttempt Attempt(Guid profileId, Guid textId, AttemptPhase phase, DateTimeOffset preparedAt) =>
         new()
         {
@@ -357,6 +607,132 @@ public sealed class DataRetentionServiceTests : IAsyncLifetime
         Guid CompletedAttemptId,
         Guid DueChallengeId,
         Guid UnseenEventId);
+
+    private sealed record DueChallengeSeed(Guid ChallengeId, Guid ParticipantId);
+
+    private sealed class RecordingAttemptSessionStateStore(
+        bool rejectAcquisition = false,
+        bool signalAcquisition = false) : IAttemptSessionStateStore
+    {
+        private readonly IAttemptSessionStateStore inner = new AttemptSessionStore();
+
+        public List<Guid> AcquiredAttemptIds { get; } = [];
+        public TaskCompletionSource<Guid> Acquired { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public ValueTask AddAsync(
+            AttemptSession session,
+            TimeSpan lifetime,
+            CancellationToken cancellationToken = default) =>
+            inner.AddAsync(session, lifetime, cancellationToken);
+
+        public ValueTask<AttemptSession?> GetAsync(
+            Guid id,
+            CancellationToken cancellationToken = default) =>
+            inner.GetAsync(id, cancellationToken);
+
+        public ValueTask<bool> TryUpdateAsync(
+            AttemptSession current,
+            AttemptSession updated,
+            TimeSpan lifetime,
+            CancellationToken cancellationToken = default) =>
+            inner.TryUpdateAsync(current, updated, lifetime, cancellationToken);
+
+        public ValueTask<AttemptSession?> RemoveAsync(
+            Guid id,
+            CancellationToken cancellationToken = default) =>
+            inner.RemoveAsync(id, cancellationToken);
+
+        public ValueTask<IReadOnlyList<AttemptSession>> RemoveProfileAsync(
+            Guid profileId,
+            CancellationToken cancellationToken = default) =>
+            inner.RemoveProfileAsync(profileId, cancellationToken);
+
+        public async ValueTask<IOperationLease> AcquireLifecycleLockAsync(
+            Guid id,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            AcquiredAttemptIds.Add(id);
+            if (signalAcquisition)
+            {
+                Acquired.TrySetResult(id);
+            }
+
+            if (rejectAcquisition)
+            {
+                throw new InvalidOperationException("Attempt-Fence nicht verfügbar.");
+            }
+
+            return await inner.AcquireLifecycleLockAsync(id, cancellationToken);
+        }
+
+        public ValueTask<IReadOnlyList<Guid>> GetExpiredIdsAsync(
+            DateTimeOffset now,
+            TimeSpan lifetime,
+            CancellationToken cancellationToken = default) =>
+            inner.GetExpiredIdsAsync(now, lifetime, cancellationToken);
+
+        public ValueTask<AttemptSession?> TryRemoveExpiredAsync(
+            Guid id,
+            DateTimeOffset now,
+            TimeSpan lifetime,
+            CancellationToken cancellationToken = default) =>
+            inner.TryRemoveExpiredAsync(id, now, lifetime, cancellationToken);
+    }
+
+    private sealed class RecordingChallengeLockProvider : IChallengeLockProvider
+    {
+        public List<Guid> AcquiredChallengeIds { get; } = [];
+
+        public ValueTask<IOperationLease> AcquireAsync(
+            Guid challengeId,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            AcquiredChallengeIds.Add(challengeId);
+            return ValueTask.FromResult<IOperationLease>(new TestOperationLease());
+        }
+    }
+
+    private sealed class RejectingChallengeLockProvider : IChallengeLockProvider
+    {
+        public List<Guid> AcquiredChallengeIds { get; } = [];
+
+        public ValueTask<IOperationLease> AcquireAsync(
+            Guid challengeId,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            AcquiredChallengeIds.Add(challengeId);
+            throw new InvalidOperationException("Challenge-Fence nicht verfügbar.");
+        }
+    }
+
+    private sealed class SignalingChallengeLockProvider : IChallengeLockProvider
+    {
+        public TaskCompletionSource<Guid> Acquired { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public ValueTask<IOperationLease> AcquireAsync(
+            Guid challengeId,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Acquired.TrySetResult(challengeId);
+            return ValueTask.FromResult<IOperationLease>(new TestOperationLease());
+        }
+    }
+
+    private sealed class TestOperationLease : IOperationLease
+    {
+        public CancellationToken LeaseLost => CancellationToken.None;
+        public void ThrowIfLost()
+        {
+        }
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
 
     private sealed class ManualTimeProvider(DateTimeOffset utcNow) : TimeProvider
     {

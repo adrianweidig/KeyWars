@@ -32,6 +32,13 @@ if (args is ["healthcheck", ..])
     return response.IsSuccessStatusCode ? 0 : 1;
 }
 
+var clusterProtocolCutover = RuntimeTopology.IsClusterProtocolCutoverCommand(args);
+if (!clusterProtocolCutover && args is ["maintenance", "cluster-protocol", ..])
+{
+    throw new InvalidOperationException(
+        $"Erlaubt ist ausschließlich `{RuntimeTopology.ClusterProtocolCutoverCommand}`.");
+}
+
 var builder = WebApplication.CreateBuilder(args);
 builder.Configuration.AddEnvironmentVariables();
 
@@ -39,6 +46,12 @@ var germanCulture = CultureInfo.GetCultureInfo("de-DE");
 
 var startupLogger = LoggerFactory.Create(logging => logging.AddConsole()).CreateLogger("Startup");
 var topology = RuntimeTopology.Resolve(builder.Configuration);
+if (clusterProtocolCutover && (!topology.IsCluster || topology.Role != RuntimeRole.Migrate))
+{
+    throw new InvalidOperationException(
+        "Der Cluster-Protokoll-Cutover erfordert PostgreSQL und KEYWARS__RUNTIME__ROLE=migrate.");
+}
+
 if (!topology.IsCluster || topology.HostsApplication)
 {
     StartupValidator.Validate(
@@ -58,6 +71,53 @@ if (topology.IsCluster)
     redisConfiguration.AbortOnConnectFail = true;
     redisConfiguration.ConnectTimeout = Math.Clamp(redisConfiguration.ConnectTimeout, 1_000, 15_000);
     clusterRedis = await ConnectionMultiplexer.ConnectAsync(redisConfiguration);
+    var protocolDatabase = clusterRedis.GetDatabase();
+    try
+    {
+        if (clusterProtocolCutover)
+        {
+            var legacyPendingJobs = await protocolDatabase.SortedSetLengthAsync(
+                RuntimeTopology.LegacyCompletionPendingKey);
+            var legacyFailedRecords = await protocolDatabase.SortedSetLengthAsync(
+                RuntimeTopology.LegacyCompletionFailedKey);
+            var legacyRecordCount = await CountLegacyCompletionRecordsAsync(
+                clusterRedis,
+                protocolDatabase.Database);
+            RuntimeTopology.RequireLegacyCompletionQueueDrained(
+                legacyPendingJobs,
+                legacyFailedRecords,
+                legacyRecordCount);
+
+            var cutoverResult = (long)await protocolDatabase.ScriptEvaluateAsync(
+                RuntimeTopology.ClusterProtocolCutoverScript,
+                [RuntimeTopology.ClusterProtocolVersionKey],
+                [RuntimeTopology.ClusterProtocolVersion]);
+            if (cutoverResult < 0)
+            {
+                var incompatibleProtocol = await protocolDatabase.StringGetAsync(
+                    RuntimeTopology.ClusterProtocolVersionKey);
+                RuntimeTopology.RequireActiveClusterProtocol(
+                    incompatibleProtocol.IsNull ? null : incompatibleProtocol.ToString());
+            }
+        }
+
+        var activeClusterProtocol = await protocolDatabase.StringGetAsync(RuntimeTopology.ClusterProtocolVersionKey);
+        RuntimeTopology.RequireActiveClusterProtocol(
+            activeClusterProtocol.IsNull ? null : activeClusterProtocol.ToString());
+    }
+    catch
+    {
+        await clusterRedis.DisposeAsync();
+        throw;
+    }
+
+    if (clusterProtocolCutover)
+    {
+        Console.WriteLine($"Cluster-Protokoll {RuntimeTopology.ClusterProtocolVersion} ist aktiv.");
+        await clusterRedis.DisposeAsync();
+        return 0;
+    }
+
     builder.Services.AddSingleton<IConnectionMultiplexer>(clusterRedis);
     builder.Services.AddSingleton(services =>
         new RedisConnectionLifetime(services.GetRequiredService<IConnectionMultiplexer>()));
@@ -105,9 +165,7 @@ if (topology.DatabaseProvider == KeyWarsDatabaseProvider.Sqlite)
 else
 {
     builder.Services.AddDbContext<PostgresKeyWarsDbContext>(options =>
-        options.UseNpgsql(
-            topology.DatabaseConnectionString,
-            postgres => postgres.EnableRetryOnFailure(5, TimeSpan.FromSeconds(10), null)));
+        options.UseNpgsql(topology.DatabaseConnectionString));
     builder.Services.AddScoped<KeyWarsDbContext>(services =>
         services.GetRequiredService<PostgresKeyWarsDbContext>());
 }
@@ -225,6 +283,11 @@ else
     builder.Services.AddSingleton<ILiveRoomStateCoordinator, SingleNodeLiveRoomStateCoordinator>();
 }
 
+if (topology.HostsArena)
+{
+    builder.Services.AddHostedService<OperationalMetricsService>();
+}
+
 if (topology.IsCluster)
 {
     builder.Services.AddSingleton<ILivePresenceStateStore, RedisLivePresenceStateStore>();
@@ -245,6 +308,7 @@ if (topology.HostsArena)
 if (!topology.IsCluster && topology.Role == RuntimeRole.All ||
     topology.IsCluster && topology.Role is RuntimeRole.All or RuntimeRole.Worker)
 {
+    builder.Services.AddHostedService<AttemptSessionReconciliationService>();
     builder.Services.AddHostedService<DataRetentionHostedService>();
 }
 
@@ -477,10 +541,14 @@ if (args is ["maintenance", "retention", ..])
         ? await app.Services.GetRequiredService<IMaintenanceLease>().TryAcquireAsync("retention")
             ?? throw new InvalidOperationException("Ein anderer Cluster-Worker führt bereits Retention aus.")
         : null;
+    using var retentionCancellation = retentionClusterLease is null
+        ? new CancellationTokenSource()
+        : CancellationTokenSource.CreateLinkedTokenSource(retentionClusterLease.LeaseLost);
     await using var scope = app.Services.CreateAsyncScope();
     var report = await scope.ServiceProvider
         .GetRequiredService<DataRetentionService>()
-        .RunAsync(dryRun: !apply);
+        .RunAsync(dryRun: !apply, retentionCancellation.Token);
+    retentionClusterLease?.ThrowIfLost();
     Console.WriteLine(JsonSerializer.Serialize(
         report,
         new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true }));
@@ -640,6 +708,31 @@ if (topology.RunsMigrations)
 }
 await app.RunAsync();
 return 0;
+
+static async Task<long> CountLegacyCompletionRecordsAsync(
+    IConnectionMultiplexer redis,
+    int database)
+{
+    var count = 0L;
+    foreach (var endpoint in redis.GetEndPoints())
+    {
+        var server = redis.GetServer(endpoint);
+        if (server.IsReplica)
+        {
+            continue;
+        }
+
+        await foreach (var _ in server.KeysAsync(
+            database,
+            RuntimeTopology.LegacyCompletionRecordPattern,
+            pageSize: 250))
+        {
+            count = checked(count + 1);
+        }
+    }
+
+    return count;
+}
 
 public partial class Program
 {

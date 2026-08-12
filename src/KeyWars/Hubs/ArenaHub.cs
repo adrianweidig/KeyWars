@@ -269,7 +269,7 @@ public sealed class ArenaHub(
 
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
-        IAsyncDisposable? accessLease = null;
+        IOperationLease? accessLease = null;
         var profileIdValue = Context.User?.FindFirst(KeyWarsClaims.ProfileId)?.Value;
         if (Guid.TryParse(profileIdValue, out var profileId))
         {
@@ -287,7 +287,8 @@ public sealed class ArenaHub(
 
         await using (accessLease)
         {
-            var leave = await presence.RemoveConnectionAsync(Context.ConnectionId, CancellationToken.None);
+            var operationToken = accessLease?.LeaseLost ?? CancellationToken.None;
+            var leave = await presence.RemoveConnectionAsync(Context.ConnectionId, operationToken);
             if (leave is not null && leave.RoomLostLastConnection)
             {
                 try
@@ -295,8 +296,8 @@ public sealed class ArenaHub(
                     var snapshot = await rooms.DisconnectAsync(
                         leave.RoomId,
                         leave.ProfileId,
-                        CancellationToken.None);
-                    await updates.SendAsync(snapshot, CancellationToken.None);
+                        operationToken);
+                    await updates.SendAsync(snapshot, operationToken);
                 }
                 catch (InvalidOperationException ex) when (IsRoomNotFound(ex))
                 {

@@ -1,4 +1,5 @@
 using KeyWars.Data;
+using KeyWars.Services;
 using StackExchange.Redis;
 
 namespace KeyWars.Infrastructure.Cluster;
@@ -7,7 +8,7 @@ public sealed class RedisMaintenanceLease(IConnectionMultiplexer redis) : IMaint
 {
     private readonly IDatabase database = redis.GetDatabase();
 
-    public ValueTask<IAsyncDisposable?> TryAcquireAsync(
+    public async ValueTask<IOperationLease?> TryAcquireAsync(
         string operation,
         CancellationToken cancellationToken = default)
     {
@@ -17,7 +18,7 @@ public sealed class RedisMaintenanceLease(IConnectionMultiplexer redis) : IMaint
             throw new ArgumentException("Der Maintenance-Name enthält ungültige Zeichen.", nameof(operation));
         }
 
-        return RedisDistributedLease.TryAcquireAsync(
+        return await RedisDistributedLease.TryAcquireAsync(
             database,
             $"keywars:maintenance:lock:{operation.ToLowerInvariant()}",
             cancellationToken);

@@ -51,7 +51,7 @@ spec:
     matchExpressions:
       - key: app.kubernetes.io/component
         operator: In
-        values: [web, arena, worker, migrate]
+        values: [web, arena, worker, migrate, protocol-cutover]
   policyTypes:
     - Ingress
     - Egress

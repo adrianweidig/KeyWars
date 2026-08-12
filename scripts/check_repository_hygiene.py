@@ -107,6 +107,9 @@ def is_allowed(path: str) -> bool:
 def contains_mojibake(path: str) -> bool:
     try:
         content = Path(path).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        # A replacement migration can remove a tracked file before the new index is staged.
+        return False
     except UnicodeDecodeError:
         return True
 

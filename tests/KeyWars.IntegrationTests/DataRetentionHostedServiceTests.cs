@@ -1,4 +1,5 @@
 using KeyWars.Data;
+using KeyWars.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -46,7 +47,7 @@ public sealed class DataRetentionHostedServiceTests
         public int Attempts { get; private set; }
         public string? Operation { get; private set; }
 
-        public ValueTask<IAsyncDisposable?> TryAcquireAsync(
+        public ValueTask<IOperationLease?> TryAcquireAsync(
             string operation,
             CancellationToken cancellationToken = default)
         {
@@ -54,7 +55,7 @@ public sealed class DataRetentionHostedServiceTests
             Attempts++;
             Operation = operation;
             Attempted.TrySetResult();
-            return ValueTask.FromResult<IAsyncDisposable?>(null);
+            return ValueTask.FromResult<IOperationLease?>(null);
         }
     }
 

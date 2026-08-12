@@ -159,8 +159,7 @@ public static class ApiEndpoints
         api.MapPost("/herausforderungen/{id:guid}/abschliessen", async (Guid id, FinishAttemptRequest request, CurrentUser currentUser, HttpContext httpContext, AttemptService attempts, ChallengeService challenges, CancellationToken cancellationToken) =>
         {
             var profile = await currentUser.RequireProfileAsync(httpContext.User, cancellationToken);
-            var completion = await attempts.FinishAsync(profile.Id, request, cancellationToken);
-            await challenges.FinishRoundAsync(id, profile.Id, completion.Attempt, cancellationToken);
+            var completion = await challenges.FinishAttemptAsync(id, profile.Id, request, attempts, cancellationToken);
             return Results.Ok(BuildAttemptResult(completion.Attempt, profile, completion.Motivation));
         });
 

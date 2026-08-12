@@ -9,9 +9,7 @@ metadata:
 spec:
   replicas: 2
   strategy:
-    rollingUpdate:
-      maxUnavailable: 0
-      maxSurge: 1
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: keywars

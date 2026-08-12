@@ -2,7 +2,7 @@ namespace KeyWars.Services;
 
 public interface IChallengeLockProvider
 {
-    ValueTask<IAsyncDisposable> AcquireAsync(
+    ValueTask<IOperationLease> AcquireAsync(
         Guid challengeId,
         CancellationToken cancellationToken = default);
 }
@@ -13,8 +13,18 @@ public sealed class LocalChallengeLockProvider : IChallengeLockProvider
 
     private readonly AsyncKeyedLock<Guid> locks = new();
 
-    public ValueTask<IAsyncDisposable> AcquireAsync(
+    public async ValueTask<IOperationLease> AcquireAsync(
         Guid challengeId,
         CancellationToken cancellationToken = default) =>
-        locks.AcquireAsync(challengeId, cancellationToken);
+        new LocalOperationLease(await locks.AcquireAsync(challengeId, cancellationToken));
+
+    private sealed class LocalOperationLease(IAsyncDisposable lease) : IOperationLease
+    {
+        public CancellationToken LeaseLost => CancellationToken.None;
+        public void ThrowIfLost()
+        {
+        }
+
+        public ValueTask DisposeAsync() => lease.DisposeAsync();
+    }
 }

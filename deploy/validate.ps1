@@ -57,6 +57,8 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Kubernetes-Kustomization ist ungültig.' }
         & $kubectl.Source kustomize deploy/k8s/migration *> $null
         if ($LASTEXITCODE -ne 0) { throw 'Migration-Kustomization ist ungültig.' }
+        & $kubectl.Source kustomize deploy/k8s/cutover *> $null
+        if ($LASTEXITCODE -ne 0) { throw 'Protokoll-Cutover-Kustomization ist ungültig.' }
     } elseif ($RequireExternalTools) {
         throw 'kubectl fehlt.'
     } else {

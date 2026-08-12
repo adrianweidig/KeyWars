@@ -10,6 +10,60 @@ namespace KeyWars.IntegrationTests;
 public sealed class ChallengeLifecycleTests
 {
     [Fact]
+    public async Task CreateRequestIdMakesRetriesIdempotent()
+    {
+        await using var context = await ChallengeTestContext.CreateAsync();
+        var requestId = Guid.CreateVersion7();
+        var request = new CreateChallengeRequest(
+            "Einmalig",
+            context.Text.Id,
+            ChallengeMode.Classic,
+            [context.Invitee.Id],
+            1,
+            7,
+            requestId);
+
+        var first = await context.Service.CreateAsync(context.Creator.Id, request);
+        var retry = await context.Service.CreateAsync(context.Creator.Id, request);
+
+        Assert.Equal(requestId, first.Id);
+        Assert.Equal(first.Id, retry.Id);
+        Assert.Equal(1, await context.Db.Challenges.CountAsync());
+    }
+
+    [Fact]
+    public async Task CreateRequestIdRejectsDifferentPayload()
+    {
+        await using var context = await ChallengeTestContext.CreateAsync();
+        var requestId = Guid.CreateVersion7();
+        await context.Service.CreateAsync(
+            context.Creator.Id,
+            new CreateChallengeRequest(
+                "Einmalig",
+                context.Text.Id,
+                ChallengeMode.Classic,
+                [context.Invitee.Id],
+                1,
+                7,
+                requestId));
+
+        var error = await Assert.ThrowsAsync<ChallengeLifecycleException>(() =>
+            context.Service.CreateAsync(
+                context.Creator.Id,
+                new CreateChallengeRequest(
+                    "Abweichend",
+                    context.Text.Id,
+                    ChallengeMode.Classic,
+                    [context.Invitee.Id],
+                    1,
+                    7,
+                    requestId)));
+
+        Assert.Equal((ChallengeErrorCodes.Conflict, 409), (error.Code, error.StatusCode));
+        Assert.Equal("Einmalig", (await context.Db.Challenges.SingleAsync()).Title);
+    }
+
+    [Fact]
     public async Task CreateRejectsQuarantinedTrainingText()
     {
         await using var context = await ChallengeTestContext.CreateAsync();
@@ -86,10 +140,11 @@ public sealed class ChallengeLifecycleTests
         var session = await context.Service.StartAttemptAsync(challenge.Id, context.Invitee.Id, context.Attempts);
         await context.Attempts.BeginAsync(context.Invitee.Id, new BeginAttemptRequest(session.Id, session.Nonce));
         context.Time.Advance(TimeSpan.FromSeconds(10));
-        var attempt = await context.Attempts.FinishAsync(
+        var attempt = await context.Service.FinishAttemptAsync(
+            challenge.Id,
             context.Invitee.Id,
-            new FinishAttemptRequest(session.Id, session.Text, 0, 0, 10_000) { Nonce = session.Nonce });
-        await context.Service.FinishRoundAsync(challenge.Id, context.Invitee.Id, attempt);
+            new FinishAttemptRequest(session.Id, session.Text, 0, 0, 10_000) { Nonce = session.Nonce },
+            context.Attempts);
 
         var binding = await context.Db.ChallengeAttemptBindings.SingleAsync(item => item.TypingAttemptId == attempt.Id);
         var result = await context.Db.ChallengeRoundResults.SingleAsync(item => item.TypingAttemptId == attempt.Id);
@@ -99,6 +154,180 @@ public sealed class ChallengeLifecycleTests
         Assert.NotNull(binding.ConsumedAt);
         Assert.Equal(ParticipantStatus.Finished, participant.Status);
         Assert.Equal(ParticipantStatus.Finished, result.Status);
+    }
+
+    [Fact]
+    public async Task AtomicChallengeFinishCommitsAttemptRewardBindingAndResultTogether()
+    {
+        await using var context = await ChallengeTestContext.CreateAsync();
+        context.Text.Body = "Atomarer Challenge-Text mit genügend Zeichen";
+        context.Text.CharacterCount = TypingEngine.SplitGraphemes(context.Text.Body).Count;
+        await context.Db.SaveChangesAsync();
+        var challenge = await context.Service.CreateAsync(
+            context.Creator.Id,
+            new CreateChallengeRequest("Atomarer Abschluss", context.Text.Id, ChallengeMode.Classic, [context.Invitee.Id], 1, 1));
+        await context.Service.JoinAsync(challenge.Id, context.Invitee.Id);
+        var session = await context.Service.StartAttemptAsync(challenge.Id, context.Invitee.Id, context.Attempts);
+        await context.Attempts.BeginAsync(context.Invitee.Id, new BeginAttemptRequest(session.Id, session.Nonce));
+        context.Time.Advance(TimeSpan.FromSeconds(10));
+        var request = new FinishAttemptRequest(session.Id, session.Text, 0, 0, 10_000) { Nonce = session.Nonce };
+
+        var completion = await context.Service.FinishAttemptAsync(challenge.Id, context.Invitee.Id, request, context.Attempts);
+        var pending = await context.Service.StartAttemptAsync(challenge.Id, context.Creator.Id, context.Attempts);
+        await context.Attempts.BeginAsync(context.Creator.Id, new BeginAttemptRequest(pending.Id, pending.Nonce));
+        challenge.ExpiresAt = context.Time.GetUtcNow().AddSeconds(-1);
+        await context.Db.SaveChangesAsync();
+
+        var dueReplay = await context.Service.FinishAttemptAsync(challenge.Id, context.Invitee.Id, request, context.Attempts);
+
+        Assert.Equal(completion.Attempt.Id, dueReplay.Attempt.Id);
+        Assert.Equal(ChallengeStatus.Running, await context.Db.Challenges.Where(item => item.Id == challenge.Id).Select(item => item.Status).SingleAsync());
+        Assert.Equal(AttemptPhase.Started, await context.Db.TypingAttempts.Where(item => item.Id == pending.Id).Select(item => item.Phase).SingleAsync());
+
+        await context.Service.ListPageForProfileAsync(context.Creator.Id, ChallengeListFilter.All, 1, 10);
+        var expiredReplay = await context.Service.FinishAttemptAsync(challenge.Id, context.Invitee.Id, request, context.Attempts);
+
+        Assert.Equal(completion.Attempt.Id, expiredReplay.Attempt.Id);
+        Assert.Equal(ChallengeStatus.Expired, await context.Db.Challenges.Where(item => item.Id == challenge.Id).Select(item => item.Status).SingleAsync());
+        Assert.Equal(AttemptPhase.Aborted, await context.Db.TypingAttempts.Where(item => item.Id == pending.Id).Select(item => item.Phase).SingleAsync());
+        Assert.Equal(AttemptPhase.Finished, await context.Db.TypingAttempts.Where(item => item.Id == session.Id).Select(item => item.Phase).SingleAsync());
+        Assert.True(await context.Db.ChallengeAttemptBindings.Where(item => item.TypingAttemptId == session.Id).Select(item => item.Consumed).SingleAsync());
+        Assert.Single(await context.Db.ChallengeRoundResults.Where(item => item.TypingAttemptId == session.Id).ToListAsync());
+        Assert.Single(await context.Db.RewardLedgerEntries.Where(item => item.UserProfileId == context.Invitee.Id && item.Source == "attempt" && item.SourceId == session.Id.ToString("N")).ToListAsync());
+    }
+
+    [Fact]
+    public async Task AtomicChallengeFinishRollsBackAttemptRewardAndResultWhenChallengeWriteFails()
+    {
+        await using var context = await ChallengeTestContext.CreateAsync();
+        context.Text.Body = "Atomarer Challenge-Text mit genügend Zeichen";
+        context.Text.CharacterCount = TypingEngine.SplitGraphemes(context.Text.Body).Count;
+        await context.Db.SaveChangesAsync();
+        var challenge = await context.Service.CreateAsync(
+            context.Creator.Id,
+            new CreateChallengeRequest("Atomarer Fehler", context.Text.Id, ChallengeMode.Classic, [context.Invitee.Id], 1, 1));
+        await context.Service.JoinAsync(challenge.Id, context.Invitee.Id);
+        var session = await context.Service.StartAttemptAsync(challenge.Id, context.Invitee.Id, context.Attempts);
+        await context.Attempts.BeginAsync(context.Invitee.Id, new BeginAttemptRequest(session.Id, session.Nonce));
+        context.Time.Advance(TimeSpan.FromSeconds(10));
+        await context.Db.Database.ExecuteSqlRawAsync("""
+            CREATE TRIGGER fail_challenge_result
+            BEFORE INSERT ON ChallengeRoundResults
+            BEGIN
+                SELECT RAISE(ABORT, 'forced atomic challenge failure');
+            END;
+            """);
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => context.Service.FinishAttemptAsync(
+            challenge.Id,
+            context.Invitee.Id,
+            new FinishAttemptRequest(session.Id, session.Text, 0, 0, 10_000) { Nonce = session.Nonce },
+            context.Attempts));
+
+        Assert.Equal(AttemptPhase.Started, await context.Db.TypingAttempts.AsNoTracking().Where(item => item.Id == session.Id).Select(item => item.Phase).SingleAsync());
+        Assert.False(await context.Db.ChallengeAttemptBindings.AsNoTracking().Where(item => item.TypingAttemptId == session.Id).Select(item => item.Consumed).SingleAsync());
+        Assert.Empty(await context.Db.ChallengeRoundResults.AsNoTracking().Where(item => item.TypingAttemptId == session.Id).ToListAsync());
+        Assert.Empty(await context.Db.RewardLedgerEntries.AsNoTracking().Where(item => item.Source == "attempt" && item.SourceId == session.Id.ToString("N")).ToListAsync());
+
+        await context.Db.Database.ExecuteSqlRawAsync("DROP TRIGGER fail_challenge_result;");
+        var completion = await context.Service.FinishAttemptAsync(
+            challenge.Id,
+            context.Invitee.Id,
+            new FinishAttemptRequest(session.Id, session.Text, 0, 0, 10_000) { Nonce = session.Nonce },
+            context.Attempts);
+        Assert.Equal(AttemptPhase.Finished, completion.Attempt.Phase);
+        Assert.Single(await context.Db.RewardLedgerEntries.Where(item => item.Source == "attempt" && item.SourceId == session.Id.ToString("N")).ToListAsync());
+    }
+
+    [Fact]
+    public async Task GenericFinishRejectsUnconsumedChallengeAttemptWithoutReward()
+    {
+        await using var context = await ChallengeTestContext.CreateAsync();
+        context.Text.Body = "Challengegebundener Versuch mit genügend Zeichen";
+        context.Text.CharacterCount = TypingEngine.SplitGraphemes(context.Text.Body).Count;
+        await context.Db.SaveChangesAsync();
+        var challenge = await context.Service.CreateAsync(
+            context.Creator.Id,
+            new CreateChallengeRequest("Kein Bypass", context.Text.Id, ChallengeMode.Classic, [context.Invitee.Id], 1, 1));
+        await context.Service.JoinAsync(challenge.Id, context.Invitee.Id);
+        var session = await context.Service.StartAttemptAsync(challenge.Id, context.Invitee.Id, context.Attempts);
+        await context.Attempts.BeginAsync(context.Invitee.Id, new BeginAttemptRequest(session.Id, session.Nonce));
+        context.Time.Advance(TimeSpan.FromSeconds(10));
+
+        var error = await Assert.ThrowsAsync<AttemptLifecycleException>(() => context.Attempts.FinishAsync(
+            context.Invitee.Id,
+            new FinishAttemptRequest(session.Id, session.Text, 0, 0, 10_000) { Nonce = session.Nonce }));
+
+        Assert.Equal((AttemptErrorCodes.ChallengeBound, 409), (error.Code, error.StatusCode));
+        Assert.Equal(AttemptPhase.Started, await context.Db.TypingAttempts.AsNoTracking().Where(item => item.Id == session.Id).Select(item => item.Phase).SingleAsync());
+        Assert.False(await context.Db.ChallengeAttemptBindings.AsNoTracking().Where(item => item.TypingAttemptId == session.Id).Select(item => item.Consumed).SingleAsync());
+        Assert.Empty(await context.Db.RewardLedgerEntries.AsNoTracking().Where(item => item.Source == "attempt" && item.SourceId == session.Id.ToString("N")).ToListAsync());
+    }
+
+    [Fact]
+    public async Task CancelAbortsBoundAttemptRemovesSessionAndReplaysSafely()
+    {
+        await using var context = await ChallengeTestContext.CreateAsync();
+        var challenge = await context.Service.CreateAsync(
+            context.Creator.Id,
+            new CreateChallengeRequest("Abbruch mit Versuch", context.Text.Id, ChallengeMode.Classic, [context.Invitee.Id], 1, 1));
+        await context.Service.JoinAsync(challenge.Id, context.Invitee.Id);
+        var session = await context.Service.StartAttemptAsync(challenge.Id, context.Invitee.Id, context.Attempts);
+        await context.Attempts.BeginAsync(context.Invitee.Id, new BeginAttemptRequest(session.Id, session.Nonce));
+
+        await context.Service.CancelAsync(challenge.Id, context.Creator.Id);
+        await context.Service.CancelAsync(challenge.Id, context.Creator.Id);
+
+        var attempt = await context.Db.TypingAttempts.AsNoTracking().SingleAsync(item => item.Id == session.Id);
+        Assert.Equal(AttemptPhase.Aborted, attempt.Phase);
+        Assert.NotNull(attempt.FinishedAt);
+        Assert.Empty(await context.Db.ChallengeAttemptBindings.AsNoTracking().Where(item => item.TypingAttemptId == session.Id).ToListAsync());
+        Assert.False(context.Sessions.TryGet(session.Id, out _));
+        Assert.Empty(await context.Db.RewardLedgerEntries.AsNoTracking().Where(item => item.Source == "attempt" && item.SourceId == session.Id.ToString("N")).ToListAsync());
+    }
+
+    [Fact]
+    public async Task ServiceExpiryAbortsBoundAttemptAndRemovesSession()
+    {
+        await using var context = await ChallengeTestContext.CreateAsync();
+        var challenge = await context.Service.CreateAsync(
+            context.Creator.Id,
+            new CreateChallengeRequest("Ablauf mit Versuch", context.Text.Id, ChallengeMode.Classic, [context.Invitee.Id], 1, 1));
+        await context.Service.JoinAsync(challenge.Id, context.Invitee.Id);
+        var session = await context.Service.StartAttemptAsync(challenge.Id, context.Invitee.Id, context.Attempts);
+        await context.Attempts.BeginAsync(context.Invitee.Id, new BeginAttemptRequest(session.Id, session.Nonce));
+        challenge.ExpiresAt = context.Time.GetUtcNow().AddMinutes(1);
+        await context.Db.SaveChangesAsync();
+        context.Time.Advance(TimeSpan.FromMinutes(2));
+
+        var error = await Assert.ThrowsAsync<ChallengeLifecycleException>(() =>
+            context.Service.RequirePlayableAsync(challenge.Id, context.Invitee.Id));
+
+        Assert.Equal((ChallengeErrorCodes.Expired, 410), (error.Code, error.StatusCode));
+        Assert.Equal(AttemptPhase.Aborted, await context.Db.TypingAttempts.AsNoTracking().Where(item => item.Id == session.Id).Select(item => item.Phase).SingleAsync());
+        Assert.Empty(await context.Db.ChallengeAttemptBindings.AsNoTracking().Where(item => item.TypingAttemptId == session.Id).ToListAsync());
+        Assert.False(context.Sessions.TryGet(session.Id, out _));
+    }
+
+    [Fact]
+    public async Task ChallengeStartSweepsExpiredForeignAttemptBeforeOpeningChallengeTransaction()
+    {
+        await using var context = await ChallengeTestContext.CreateAsync();
+        var expired = await context.Attempts.StartAsync(
+            context.Creator.Id,
+            new StartAttemptRequest(TrainingMode.Words10, null, null, 10));
+        var challenge = await context.Service.CreateAsync(
+            context.Creator.Id,
+            new CreateChallengeRequest("Sweep vor Start", context.Text.Id, ChallengeMode.Classic, [context.Invitee.Id], 1, 1));
+        context.Time.Advance(TimeSpan.FromHours(2).Add(TimeSpan.FromSeconds(1)));
+
+        var session = await context.Service.StartAttemptAsync(challenge.Id, context.Creator.Id, context.Attempts);
+
+        Assert.NotEqual(expired.Id, session.Id);
+        Assert.Equal(
+            AttemptPhase.Expired,
+            await context.Db.TypingAttempts.Where(item => item.Id == expired.Id).Select(item => item.Phase).SingleAsync());
+        Assert.True(await context.Db.ChallengeAttemptBindings.AnyAsync(item => item.TypingAttemptId == session.Id));
     }
 
     [Fact]
@@ -112,18 +341,18 @@ public sealed class ChallengeLifecycleTests
         var session = await context.Service.StartAttemptAsync(challenge.Id, context.Invitee.Id, context.Attempts);
         await context.Attempts.BeginAsync(context.Invitee.Id, new BeginAttemptRequest(session.Id, session.Nonce));
         context.Time.Advance(TimeSpan.FromSeconds(10));
-        var completion = await context.Attempts.FinishAsync(
-            context.Invitee.Id,
-            new FinishAttemptRequest(session.Id, session.Text, 0, 0, 10_000) { Nonce = session.Nonce });
-
         await using var firstDb = new KeyWarsDbContext(context.Options);
         await using var secondDb = new KeyWarsDbContext(context.Options);
-        var first = new ChallengeService(firstDb, Options.Create(new ChallengeOptions()), context.Time);
-        var second = new ChallengeService(secondDb, Options.Create(new ChallengeOptions()), context.Time);
+        var first = new ChallengeService(firstDb, Options.Create(new ChallengeOptions()), context.Time, attemptSessionStore: context.Sessions);
+        var second = new ChallengeService(secondDb, Options.Create(new ChallengeOptions()), context.Time, attemptSessionStore: context.Sessions);
+        var request = new FinishAttemptRequest(session.Id, session.Text, 0, 0, 10_000) { Nonce = session.Nonce };
+        var firstAttempts = new AttemptService(firstDb, new TypingEngine(context.Time), new MotivationService(firstDb, context.Time), context.Time, context.Sessions);
+        var secondAttempts = new AttemptService(secondDb, new TypingEngine(context.Time), new MotivationService(secondDb, context.Time), context.Time, context.Sessions);
 
-        await Task.WhenAll(
-            first.FinishRoundAsync(challenge.Id, context.Invitee.Id, completion),
-            second.FinishRoundAsync(challenge.Id, context.Invitee.Id, completion));
+        var completions = await Task.WhenAll(
+            first.FinishAttemptAsync(challenge.Id, context.Invitee.Id, request, firstAttempts),
+            second.FinishAttemptAsync(challenge.Id, context.Invitee.Id, request, secondAttempts));
+        var completion = completions[0];
 
         await using var verificationDb = new KeyWarsDbContext(context.Options);
         Assert.Single(await verificationDb.ChallengeRoundResults
@@ -184,10 +413,11 @@ public sealed class ChallengeLifecycleTests
         var session = await context.Service.StartAttemptAsync(first.Id, context.Invitee.Id, context.Attempts);
         await context.Attempts.BeginAsync(context.Invitee.Id, new BeginAttemptRequest(session.Id, session.Nonce));
         context.Time.Advance(TimeSpan.FromSeconds(10));
-        var attempt = await context.Attempts.FinishAsync(
+        var attempt = await context.Service.FinishAttemptAsync(
+            first.Id,
             context.Invitee.Id,
-            new FinishAttemptRequest(session.Id, session.Text, 0, 0, 10_000) { Nonce = session.Nonce });
-        await context.Service.FinishRoundAsync(first.Id, context.Invitee.Id, attempt);
+            new FinishAttemptRequest(session.Id, session.Text, 0, 0, 10_000) { Nonce = session.Nonce },
+            context.Attempts);
 
         var second = await context.Service.CreateAsync(
             context.Creator.Id,
@@ -236,9 +466,7 @@ public sealed class ChallengeLifecycleTests
         var session = await context.Service.StartAttemptAsync(challenge.Id, context.Invitee.Id, context.Attempts);
         await context.Attempts.BeginAsync(context.Invitee.Id, new BeginAttemptRequest(session.Id, session.Nonce));
         context.Time.Advance(TimeSpan.FromSeconds(10));
-        var attempt = await context.Attempts.FinishAsync(
-            context.Invitee.Id,
-            new FinishAttemptRequest(session.Id, session.Text, 0, 0, 10_000) { Nonce = session.Nonce });
+        var request = new FinishAttemptRequest(session.Id, session.Text, 0, 0, 10_000) { Nonce = session.Nonce };
         await context.Db.Database.ExecuteSqlRawAsync("""
             CREATE TRIGGER fail_challenge_close
             BEFORE UPDATE OF Status ON Challenges
@@ -249,11 +477,11 @@ public sealed class ChallengeLifecycleTests
             """);
 
         await Assert.ThrowsAsync<DbUpdateException>(() =>
-            context.Service.FinishRoundAsync(challenge.Id, context.Invitee.Id, attempt));
+            context.Service.FinishAttemptAsync(challenge.Id, context.Invitee.Id, request, context.Attempts));
 
         Assert.Empty(await context.Db.ChallengeRoundResults.AsNoTracking().Where(item => item.ChallengeRoundId != Guid.Empty).ToListAsync());
         Assert.False(await context.Db.ChallengeAttemptBindings.AsNoTracking()
-            .Where(item => item.TypingAttemptId == attempt.Id)
+            .Where(item => item.TypingAttemptId == session.Id)
             .Select(item => item.Consumed)
             .SingleAsync());
         Assert.Equal(
@@ -267,7 +495,7 @@ public sealed class ChallengeLifecycleTests
             await context.Db.Challenges.AsNoTracking().Where(item => item.Id == challenge.Id).Select(item => item.Status).SingleAsync());
 
         await context.Db.Database.ExecuteSqlRawAsync("DROP TRIGGER fail_challenge_close;");
-        await context.Service.FinishRoundAsync(challenge.Id, context.Invitee.Id, attempt);
+        await context.Service.FinishAttemptAsync(challenge.Id, context.Invitee.Id, request, context.Attempts);
         Assert.Single(await context.Db.ChallengeRoundResults.AsNoTracking().ToListAsync());
         Assert.Equal(
             ChallengeStatus.Finished,
@@ -286,8 +514,8 @@ public sealed class ChallengeLifecycleTests
         await using var declineDb = new KeyWarsDbContext(context.Options);
         var sessions = new AttemptSessionStore();
         var attempts = new AttemptService(startDb, new TypingEngine(context.Time), new MotivationService(startDb, context.Time), context.Time, sessions);
-        var starter = new ChallengeService(startDb, Options.Create(new ChallengeOptions()), context.Time);
-        var decliner = new ChallengeService(declineDb, Options.Create(new ChallengeOptions()), context.Time);
+        var starter = new ChallengeService(startDb, Options.Create(new ChallengeOptions()), context.Time, attemptSessionStore: sessions);
+        var decliner = new ChallengeService(declineDb, Options.Create(new ChallengeOptions()), context.Time, attemptSessionStore: sessions);
 
         var startTask = Task.Run(async () =>
         {
@@ -441,15 +669,47 @@ public sealed class ChallengeLifecycleTests
             profile => Assert.Equal(1, profile.RatedMatchCount));
     }
 
+    [Fact]
+    public async Task RatedClassicFinishesWithoutRatingWhenFinishedParticipantWasDeleted()
+    {
+        await using var context = await ChallengeTestContext.CreateAsync();
+        context.Creator.ArenaRating = 1200;
+        context.Invitee.ArenaRating = 1400;
+        await context.Db.SaveChangesAsync();
+        var challenge = await context.Service.CreateAsync(
+            context.Creator.Id,
+            new CreateChallengeRequest("Löschung nach Ergebnis", context.Text.Id, ChallengeMode.Classic, [context.Invitee.Id], 1, 7));
+        await context.Service.JoinAsync(challenge.Id, context.Invitee.Id);
+        await CompleteNextRoundAsync(context, challenge.Id, context.Invitee.Id);
+
+        context.Invitee.Deleted = true;
+        context.Invitee.ArenaRating = 1000;
+        context.Invitee.RatedMatchCount = 0;
+        await context.Db.SaveChangesAsync();
+
+        await CompleteNextRoundAsync(context, challenge.Id, context.Creator.Id);
+
+        var stored = await context.Db.Challenges.AsNoTracking().SingleAsync(item => item.Id == challenge.Id);
+        var creator = await context.Db.UserProfiles.AsNoTracking().SingleAsync(item => item.Id == context.Creator.Id);
+        Assert.Equal(ChallengeStatus.Finished, stored.Status);
+        Assert.False(stored.RatingEligible);
+        Assert.Equal(1200, creator.ArenaRating);
+        Assert.Equal(0, creator.RatedMatchCount);
+        Assert.All(
+            await context.Db.ChallengeParticipants.AsNoTracking().Where(item => item.ChallengeId == challenge.Id).ToListAsync(),
+            participant => Assert.Equal(ParticipantStatus.Finished, participant.Status));
+    }
+
     private static async Task CompleteNextRoundAsync(ChallengeTestContext context, Guid challengeId, Guid profileId)
     {
         var session = await context.Service.StartAttemptAsync(challengeId, profileId, context.Attempts);
         await context.Attempts.BeginAsync(profileId, new BeginAttemptRequest(session.Id, session.Nonce));
         context.Time.Advance(TimeSpan.FromSeconds(10));
-        var attempt = await context.Attempts.FinishAsync(
+        await context.Service.FinishAttemptAsync(
+            challengeId,
             profileId,
-            new FinishAttemptRequest(session.Id, session.Text, 0, 0, 10_000) { Nonce = session.Nonce });
-        await context.Service.FinishRoundAsync(challengeId, profileId, attempt);
+            new FinishAttemptRequest(session.Id, session.Text, 0, 0, 10_000) { Nonce = session.Nonce },
+            context.Attempts);
     }
 
     private sealed class ChallengeTestContext : IAsyncDisposable
@@ -472,7 +732,11 @@ public sealed class ChallengeLifecycleTests
             Creator = creator;
             Invitee = invitee;
             Text = text;
-            Service = new ChallengeService(db, global::Microsoft.Extensions.Options.Options.Create(new ChallengeOptions()), time);
+            Service = new ChallengeService(
+                db,
+                global::Microsoft.Extensions.Options.Options.Create(new ChallengeOptions()),
+                time,
+                attemptSessionStore: Sessions);
             Attempts = new AttemptService(db, new TypingEngine(time), new MotivationService(db, time), time, Sessions);
         }
 

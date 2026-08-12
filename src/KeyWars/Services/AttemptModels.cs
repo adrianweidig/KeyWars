@@ -30,6 +30,7 @@ public static class AttemptErrorCodes
     public const string NotStarted = "attempt_not_started";
     public const string StillRunning = "attempt_still_running";
     public const string Expired = "attempt_expired";
+    public const string ChallengeBound = "attempt_challenge_bound";
 }
 
 public sealed class AttemptLifecycleException(

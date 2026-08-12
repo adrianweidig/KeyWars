@@ -8,6 +8,7 @@ x-keywars-environment: &keywars-environment
   ASPNETCORE_ENVIRONMENT: Production
   ASPNETCORE_HTTP_PORTS: "8080"
   KEYWARS__DATABASE__PROVIDER: postgresql
+  KEYWARS__CLUSTER__PROTOCOL_VERSION: "1"
   KEYWARS__DATAPROTECTION__APPLICATION_NAME: KeyWars
   KEYWARS__LDAP__URLS: ${KEYWARS_LDAP_URLS:?LDAP URLs required}
   KEYWARS__LDAP__BASE_DN: ${KEYWARS_LDAP_BASE_DN:?LDAP Base DN required}
@@ -119,11 +120,27 @@ services:
     deploy:
       replicas: ${KEYWARS_WORKER_REPLICAS:-1}
 
+  keywars-protocol-cutover:
+    <<: *keywars-service
+    command:
+      - |
+        export ConnectionStrings__KeyWars="$$(cat /run/secrets/database-connection)"
+        export KEYWARS__REDIS__CONNECTION_STRING="$$(cat /run/secrets/redis-connection)"
+        exec dotnet KeyWars.dll maintenance cluster-protocol cutover --confirm-apps-stopped
+    environment:
+      <<: *keywars-environment
+      KEYWARS__RUNTIME__ROLE: migrate
+    profiles: [operations]
+    healthcheck:
+      disable: true
+    restart: "no"
+
   keywars-migrate:
     <<: *keywars-service
     environment:
       <<: *keywars-environment
       KEYWARS__RUNTIME__ROLE: migrate
+    profiles: [operations]
     healthcheck:
       disable: true
     restart: "no"

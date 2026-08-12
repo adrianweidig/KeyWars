@@ -28,11 +28,14 @@ def require(relative_path: str, fragments: list[str]) -> None:
 
 
 required_files = [
+    ".github/workflows/performance.yml",
     "compose.yaml",
     "compose.scale.yaml",
     "deploy/swarm/stack.yaml",
     "deploy/swarm/Caddyfile",
     "deploy/k8s/kustomization.yaml",
+    "deploy/k8s/cutover/kustomization.yaml",
+    "deploy/k8s/cutover/job.yaml",
     "deploy/k8s/migration/kustomization.yaml",
     "deploy/k8s/migration/job.yaml",
     "deploy/k8s/hpa.yaml",
@@ -45,6 +48,19 @@ required_files = [
 for required_file in required_files:
     load(required_file)
 
+performance_workflow = load(".github/workflows/performance.yml")
+cutover_step = 'run --rm keywars-protocol-cutover'
+migration_step = 'run --rm keywars-migrate'
+if (
+    performance_workflow.count(cutover_step) < 4
+    or migration_step not in performance_workflow
+    or performance_workflow.index(cutover_step) > performance_workflow.index(migration_step)
+    or "redis-cli --raw GET keywars:cluster:protocol-version" not in performance_workflow
+):
+    ERRORS.append(
+        ".github/workflows/performance.yml: Cluster-Cutover braucht Idempotenz-, Mismatch- und Reihenfolgetest"
+    )
+
 require("compose.yaml", ["${KEYWARS_BIND_ADDRESS:-127.0.0.1}"])
 require("compose.scale.yaml", ["${KEYWARS_BIND_ADDRESS:-127.0.0.1}"])
 require(
@@ -54,12 +70,15 @@ require(
         "keywars-web:",
         "keywars-arena:",
         "keywars-worker:",
+        "keywars-protocol-cutover:",
         "keywars-migrate:",
         "postgres:",
         "redis:",
         "KEYWARS__DATABASE__PROVIDER",
         "ConnectionStrings__KeyWars",
         "KEYWARS__REDIS__CONNECTION_STRING",
+        "maintenance cluster-protocol cutover --confirm-apps-stopped",
+        "profiles: [operations]",
         "caddy:2.11.4-alpine@sha256:",
         "postgres:18.4-alpine@sha256:",
         "redis:8.6.5-alpine@sha256:",
@@ -72,6 +91,7 @@ require(
         "keywars-web:",
         "keywars-arena:",
         "keywars-worker:",
+        "keywars-protocol-cutover:",
         "keywars-migrate:",
         "keywars-postgres:",
         "keywars-redis:",
@@ -80,6 +100,9 @@ require(
         "stop_grace_period:",
         "nofile:",
         "mode: replicated-job",
+        "KEYWARS_CUTOVER_REPLICAS:-0",
+        "KEYWARS_MIGRATE_REPLICAS:-0",
+        "maintenance cluster-protocol cutover --confirm-apps-stopped",
         "caddy:2.11.4-alpine@sha256:",
         "postgres:18.4-alpine@sha256:",
         "redis:8.6.5-alpine@sha256:",
@@ -87,14 +110,28 @@ require(
 )
 require(
     "deploy/k8s/web.yaml",
-    ["value: web", "/health/live", "/health/ready", "preStop:", "resources:"],
+    ["value: web", "/health/live", "/health/ready", "preStop:", "resources:", "type: Recreate"],
 )
 require(
     "deploy/k8s/arena.yaml",
-    ["replicas: 2", "maxUnavailable: 0", "maxSurge: 1", "value: arena"],
+    ["replicas: 2", "type: Recreate", "value: arena"],
 )
-require("deploy/k8s/worker.yaml", ["value: worker", "/health/live", "/health/ready"])
+require("deploy/k8s/worker.yaml", ["value: worker", "/health/live", "/health/ready", "type: Recreate"])
+require(
+    "deploy/k8s/cutover/job.yaml",
+    ["name: keywars-protocol-cutover", "value: migrate", "--confirm-apps-stopped", "ttlSecondsAfterFinished:"],
+)
 require("deploy/k8s/migration/job.yaml", ["value: migrate", "ttlSecondsAfterFinished:"])
+require(
+    "docs/scale-operations.md",
+    [
+        "delete hpa keywars-web keywars-arena keywars-worker",
+        "run --rm keywars-protocol-cutover",
+        "apply -f deploy/k8s/runtime-config.yaml",
+        "apply -k deploy/k8s/cutover",
+        "KEYWARS_CUTOVER_REPLICAS=1",
+    ],
+)
 require(
     "deploy/k8s/hpa.yaml",
     ["apiVersion: autoscaling/v2", "kind: HorizontalPodAutoscaler", "name: keywars-arena"],
@@ -102,7 +139,12 @@ require(
 require("deploy/k8s/pdb.yaml", ["apiVersion: policy/v1", "kind: PodDisruptionBudget"])
 require(
     "deploy/k8s/network-policy.yaml",
-    ["apiVersion: networking.k8s.io/v1", "kind: NetworkPolicy", "keywars-default-deny"],
+    [
+        "apiVersion: networking.k8s.io/v1",
+        "kind: NetworkPolicy",
+        "keywars-default-deny",
+        "values: [web, arena, worker, migrate, protocol-cutover]",
+    ],
 )
 
 route_fragments = [
@@ -143,6 +185,20 @@ require("deploy/k8s/edge.yaml", [caddy_image])
 swarm = load("deploy/swarm/stack.yaml")
 if not re.search(r"keywars-arena:.*?replicas: \$\{KEYWARS_ARENA_REPLICAS:-2\}", swarm, re.DOTALL):
     ERRORS.append("deploy/swarm/stack.yaml: Arena-Standard erlaubt keine mehreren Replikate")
+for service_name in ("keywars-web", "keywars-arena", "keywars-worker"):
+    service_match = re.search(
+        rf"^  {service_name}:$(.*?)(?=^  [a-z0-9-]+:$)",
+        swarm,
+        re.DOTALL | re.MULTILINE,
+    )
+    if service_match is None:
+        ERRORS.append(f"deploy/swarm/stack.yaml: Dienst {service_name} fehlt")
+        continue
+    service = service_match.group(1)
+    if "order: stop-first" not in service or "failure_action: pause" not in service:
+        ERRORS.append(
+            f"deploy/swarm/stack.yaml: {service_name} muss Protokoll-Upgrades stop-first und ohne Auto-Rollback ausführen"
+        )
 
 for path in (ROOT / "deploy" / "k8s").rglob("*.yaml"):
     content = path.read_text(encoding="utf-8")
@@ -174,7 +230,11 @@ if yaml is not None:
         except yaml.YAMLError as error:
             ERRORS.append(f"{path.relative_to(ROOT).as_posix()}: ungültiges YAML: {error}")
 
-    for relative_path in ("deploy/k8s/kustomization.yaml", "deploy/k8s/migration/kustomization.yaml"):
+    for relative_path in (
+        "deploy/k8s/kustomization.yaml",
+        "deploy/k8s/cutover/kustomization.yaml",
+        "deploy/k8s/migration/kustomization.yaml",
+    ):
         path = ROOT / relative_path
         if not path.is_file():
             continue
@@ -183,6 +243,18 @@ if yaml is not None:
             resource_path = path.parent / resource
             if not resource_path.exists():
                 ERRORS.append(f"{relative_path}: Ressource fehlt: {resource}")
+
+scale_operations = load("docs/scale-operations.md")
+runtime_config_step = "kubectl apply -f deploy/k8s/runtime-config.yaml"
+kubernetes_cutover_step = "kubectl apply -k deploy/k8s/cutover"
+if (
+    runtime_config_step in scale_operations
+    and kubernetes_cutover_step in scale_operations
+    and scale_operations.rindex(runtime_config_step) > scale_operations.index(kubernetes_cutover_step)
+):
+    ERRORS.append(
+        "docs/scale-operations.md: neue Runtime-Konfiguration muss vor dem Kubernetes-Cutover angewandt werden"
+    )
 
 if ERRORS:
     for error in sorted(set(ERRORS)):

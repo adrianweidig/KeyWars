@@ -65,8 +65,22 @@ public sealed class LiveProgressBroadcaster(
         TimeSpan? delay = null;
         lock (room.Gate)
         {
+            if (delta.RoomVersion < room.CurrentRoomVersion)
+            {
+                Interlocked.Increment(ref droppedProgressMessages);
+                return;
+            }
+
+            if (delta.RoomVersion > room.CurrentRoomVersion)
+            {
+                room.CurrentRoomVersion = delta.RoomVersion;
+                room.Pending.Clear();
+                room.Latest.Clear();
+            }
+
             if (room.Latest.TryGetValue(delta.ParticipantId, out var latest) &&
-                delta.ParticipantSequence <= latest.ParticipantSequence)
+                (delta.RoomVersion < latest.RoomVersion ||
+                    delta.RoomVersion == latest.RoomVersion && delta.ParticipantSequence <= latest.ParticipantSequence))
             {
                 Interlocked.Increment(ref droppedProgressMessages);
                 return;
@@ -195,8 +209,17 @@ public sealed class LiveProgressBroadcaster(
         await room.SendGate.WaitAsync(CancellationToken.None);
         try
         {
+            int currentRoomVersion;
+            lock (room.Gate)
+            {
+                currentRoomVersion = room.CurrentRoomVersion;
+            }
+
             var current = deltas
-                .Where(delta => !room.LastSentSequences.TryGetValue(delta.ParticipantId, out var sequence) || delta.ParticipantSequence > sequence)
+                .Where(delta => delta.RoomVersion == currentRoomVersion)
+                .Where(delta => !room.LastSentWatermarks.TryGetValue(delta.ParticipantId, out var sent) ||
+                    delta.RoomVersion > sent.RoomVersion ||
+                    delta.RoomVersion == sent.RoomVersion && delta.ParticipantSequence > sent.ParticipantSequence)
                 .OrderBy(delta => delta.RankHint)
                 .ThenBy(delta => delta.ParticipantId)
                 .ToArray();
@@ -209,7 +232,9 @@ public sealed class LiveProgressBroadcaster(
             await sender.SendAsync(roomId, batch, CancellationToken.None);
             foreach (var delta in current)
             {
-                room.LastSentSequences[delta.ParticipantId] = delta.ParticipantSequence;
+                room.LastSentWatermarks[delta.ParticipantId] = new ProgressWatermark(
+                    delta.RoomVersion,
+                    delta.ParticipantSequence);
             }
 
             Interlocked.Increment(ref broadcastCount);
@@ -225,9 +250,12 @@ public sealed class LiveProgressBroadcaster(
         public object Gate { get; } = new();
         public Dictionary<Guid, LiveProgressDelta> Pending { get; } = [];
         public Dictionary<Guid, LiveProgressDelta> Latest { get; } = [];
-        public Dictionary<Guid, int> LastSentSequences { get; } = [];
+        public Dictionary<Guid, ProgressWatermark> LastSentWatermarks { get; } = [];
         public SemaphoreSlim SendGate { get; } = new(1, 1);
         public DateTimeOffset LastBroadcastAt { get; set; }
         public bool FlushScheduled { get; set; }
+        public int CurrentRoomVersion { get; set; }
     }
+
+    private readonly record struct ProgressWatermark(int RoomVersion, int ParticipantSequence);
 }

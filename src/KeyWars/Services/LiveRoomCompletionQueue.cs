@@ -106,6 +106,11 @@ public sealed class LiveRoomCompletionQueue : BackgroundService,
     public int FailedRecordCount => Volatile.Read(ref failedRecords);
     public long FailedAttempts => Volatile.Read(ref failedCompletions);
     public long RetryAttempts => Volatile.Read(ref retryAttempts);
+    public TimeSpan OldestPendingAge => trackedRecords.Values
+        .Where(tracker => tracker.State == CompletionState.Pending)
+        .Select(tracker => tracker.Age)
+        .DefaultIfEmpty(TimeSpan.Zero)
+        .Max();
 
     public CompletionReceipt Enqueue(CompletedRoomRecord record)
     {
@@ -519,6 +524,7 @@ public sealed class LiveRoomCompletionQueue : BackgroundService,
 
     private sealed class CompletionTracker(CompletedRoomRecord record, CompletionState initialState)
     {
+        private readonly long enqueuedAt = Stopwatch.GetTimestamp();
         private readonly TaskCompletionSource completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly Guid[] profileIds = record.Participants
             .Select(participant => participant.UserProfileId)
@@ -531,6 +537,7 @@ public sealed class LiveRoomCompletionQueue : BackgroundService,
         public CompletionState State => (CompletionState)Volatile.Read(ref state);
         public CompletionReceipt Receipt => receipt with { State = State };
         public Task Completion => completion.Task;
+        public TimeSpan Age => Stopwatch.GetElapsedTime(enqueuedAt);
 
         private readonly CompletionReceipt receipt = new(record.Id, record.IdempotencyKey, initialState);
 
@@ -567,24 +574,14 @@ public sealed class RelationalLiveRoomCompletionWriter(IServiceScopeFactory scop
         var db = scope.ServiceProvider.GetRequiredService<KeyWarsDbContext>();
         var motivation = scope.ServiceProvider.GetRequiredService<MotivationService>();
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        if (db.Database.IsNpgsql())
-        {
-            foreach (var profileId in record.Participants.Select(item => item.UserProfileId).Distinct().Order())
-            {
-                var advisoryKey = BitConverter.ToInt64(profileId.ToByteArray(), 0);
-                await db.Database.ExecuteSqlInterpolatedAsync(
-                    $"SELECT pg_advisory_xact_lock({advisoryKey});",
-                    cancellationToken);
-            }
-        }
-
+        var participantIds = record.Participants.Select(item => item.UserProfileId).Distinct().ToArray();
+        await ProfileWriteFence.AcquireAsync(db, participantIds, cancellationToken);
         if (await db.LiveRoomSummaries.AnyAsync(item => item.Id == record.Id || item.IdempotencyKey == record.IdempotencyKey, cancellationToken))
         {
             await transaction.CommitAsync(cancellationToken);
             return;
         }
 
-        var participantIds = record.Participants.Select(item => item.UserProfileId).Distinct().ToArray();
         var profiles = await db.UserProfiles
             .Where(item => participantIds.Contains(item.Id) && !item.Deleted)
             .ToListAsync(cancellationToken);

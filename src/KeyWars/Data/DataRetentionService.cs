@@ -10,6 +10,7 @@ public sealed class DataRetentionService(
     KeyWarsDbContext db,
     BackupService backups,
     IAttemptSessionStateStore attemptSessions,
+    IChallengeLockProvider challengeLocks,
     IOptions<RetentionOptions> configuredOptions,
     TimeProvider timeProvider,
     ILogger<DataRetentionService> logger)
@@ -123,65 +124,12 @@ public sealed class DataRetentionService(
                 break;
             }
 
-            var lifecycleLocks = await AcquireLifecycleLocksAsync(ids, cancellationToken);
-            try
+            foreach (var attemptId in ids)
             {
-                var confirmedIds = (await db.TypingAttempts
-                        .AsNoTracking()
-                        .Where(attempt =>
-                            ids.Contains(attempt.Id) &&
-                            attempt.FinishedAt == null &&
-                            (attempt.Phase == AttemptPhase.Prepared || attempt.Phase == AttemptPhase.Started))
-                        .Select(attempt => new
-                        {
-                            attempt.Id,
-                            attempt.Phase,
-                            attempt.PreparedAt,
-                            attempt.StartedAt
-                        })
-                        .ToListAsync(cancellationToken))
-                    .Where(attempt =>
-                        (attempt.Phase == AttemptPhase.Prepared ? attempt.PreparedAt : attempt.StartedAt) < cutoff)
-                    .Select(attempt => attempt.Id)
-                    .ToArray();
-
-                if (confirmedIds.Length > 0)
+                if (await ExpireAttemptUnderFenceAsync(attemptId, now, cutoff, cancellationToken))
                 {
-                    var update = db.TypingAttempts.Where(attempt =>
-                        confirmedIds.Contains(attempt.Id) &&
-                        attempt.FinishedAt == null &&
-                        (attempt.Phase == AttemptPhase.Prepared || attempt.Phase == AttemptPhase.Started));
-                    if (provider == RetentionDatabaseProvider.PostgreSql)
-                    {
-                        update = update.Where(attempt =>
-                            (attempt.Phase == AttemptPhase.Prepared && attempt.PreparedAt < cutoff) ||
-                            (attempt.Phase == AttemptPhase.Started && attempt.StartedAt < cutoff));
-                    }
-
-                    affected += await update.ExecuteUpdateAsync(
-                        setters => setters.SetProperty(attempt => attempt.Phase, AttemptPhase.Expired),
-                        cancellationToken);
-
-                    var expiredIds = await db.TypingAttempts
-                        .AsNoTracking()
-                        .Where(attempt =>
-                            confirmedIds.Contains(attempt.Id) &&
-                            attempt.Phase == AttemptPhase.Expired)
-                        .Select(attempt => attempt.Id)
-                        .ToArrayAsync(cancellationToken);
-                    foreach (var id in expiredIds)
-                    {
-                        await attemptSessions.TryRemoveExpiredAsync(
-                            id,
-                            now,
-                            TimeSpan.FromHours(options.StaleAttemptHours),
-                            cancellationToken);
-                    }
+                    affected++;
                 }
-            }
-            finally
-            {
-                await DisposeLifecycleLocksAsync(lifecycleLocks);
             }
 
             batches++;
@@ -197,6 +145,64 @@ public sealed class DataRetentionService(
             affected,
             remaining,
             batches >= options.MaxBatchesPerRun && remaining > 0);
+    }
+
+    private async Task<bool> ExpireAttemptUnderFenceAsync(
+        Guid attemptId,
+        DateTimeOffset now,
+        DateTimeOffset cutoff,
+        CancellationToken cancellationToken)
+    {
+        await using var lifecycleLock = await attemptSessions.AcquireLifecycleLockAsync(
+            attemptId,
+            cancellationToken);
+        using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken,
+            lifecycleLock.LeaseLost);
+        var operationToken = operationCancellation.Token;
+        lifecycleLock.ThrowIfLost();
+
+        await using var transaction = await db.Database.BeginTransactionAsync(operationToken);
+        try
+        {
+            await AttemptWriteFence.AcquireAsync(db, attemptId, operationToken);
+            var attempt = await db.TypingAttempts.SingleOrDefaultAsync(
+                item => item.Id == attemptId,
+                operationToken);
+            if (attempt is null ||
+                attempt.FinishedAt is not null ||
+                attempt.Phase is not (AttemptPhase.Prepared or AttemptPhase.Started) ||
+                (attempt.Phase == AttemptPhase.Prepared ? attempt.PreparedAt : attempt.StartedAt) >= cutoff)
+            {
+                await transaction.CommitAsync(operationToken);
+                return false;
+            }
+
+            attempt.Phase = AttemptPhase.Expired;
+            await db.SaveChangesAsync(operationToken);
+            lifecycleLock.ThrowIfLost();
+            await transaction.CommitAsync(operationToken);
+            await attemptSessions.TryRemoveExpiredAsync(
+                attemptId,
+                now,
+                TimeSpan.FromHours(options.StaleAttemptHours),
+                operationToken);
+            return true;
+        }
+        catch
+        {
+            try
+            {
+                await transaction.RollbackAsync(CancellationToken.None);
+            }
+            catch
+            {
+                // Preserve the original retention failure.
+            }
+
+            db.ChangeTracker.Clear();
+            throw;
+        }
     }
 
     private async Task<RetentionStepResult> ExpireChallengesAsync(
@@ -217,52 +223,27 @@ public sealed class DataRetentionService(
         var batches = 0;
         while (batches < options.MaxBatchesPerRun)
         {
-            int changed;
-            if (provider == RetentionDatabaseProvider.Sqlite)
-            {
-                var cutoffValue = FormatSqliteDateTimeOffset(now);
-                changed = await db.Database.ExecuteSqlInterpolatedAsync($"""
-                    UPDATE Challenges
-                    SET Status = {ChallengeStatus.Expired.ToString()},
-                        FinishedAt = COALESCE(FinishedAt, {now})
-                    WHERE Id IN (
-                        SELECT Id
-                        FROM Challenges
-                        WHERE Status IN ({ChallengeStatus.Open.ToString()}, {ChallengeStatus.Running.ToString()})
-                          AND substr(ExpiresAt, 1, 19) < {cutoffValue}
-                        ORDER BY substr(ExpiresAt, 1, 19), Id
-                        LIMIT {options.BatchSize}
-                    )
-                      AND Status IN ({ChallengeStatus.Open.ToString()}, {ChallengeStatus.Running.ToString()})
-                      AND substr(ExpiresAt, 1, 19) < {cutoffValue};
-                    """, cancellationToken);
-            }
-            else
-            {
-                var ids = await PostgreSqlExpiredChallenges(now)
+            var ids = provider == RetentionDatabaseProvider.Sqlite
+                ? await SelectSqliteExpiredChallengeIdsAsync(now, cancellationToken)
+                : await PostgreSqlExpiredChallenges(now)
                     .OrderBy(challenge => challenge.ExpiresAt)
                     .ThenBy(challenge => challenge.Id)
                     .Select(challenge => challenge.Id)
                     .Take(options.BatchSize)
                     .ToListAsync(cancellationToken);
-                if (ids.Count == 0)
-                {
-                    break;
-                }
-
-                changed = await db.Challenges
-                    .Where(challenge =>
-                        ids.Contains(challenge.Id) &&
-                        (challenge.Status == ChallengeStatus.Open || challenge.Status == ChallengeStatus.Running) &&
-                        challenge.ExpiresAt <= now)
-                    .ExecuteUpdateAsync(
-                        setters => setters
-                            .SetProperty(challenge => challenge.Status, ChallengeStatus.Expired)
-                            .SetProperty(challenge => challenge.FinishedAt, challenge => challenge.FinishedAt ?? now),
-                        cancellationToken);
+            if (ids.Count == 0)
+            {
+                break;
             }
 
-            affected += changed;
+            foreach (var challengeId in ids)
+            {
+                if (await ExpireChallengeUnderFenceAsync(challengeId, now, cancellationToken))
+                {
+                    affected++;
+                }
+            }
+
             batches++;
         }
 
@@ -276,6 +257,61 @@ public sealed class DataRetentionService(
             affected,
             remaining,
             batches >= options.MaxBatchesPerRun && remaining > 0);
+    }
+
+    private async Task<bool> ExpireChallengeUnderFenceAsync(
+        Guid challengeId,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        await using var challengeLock = await challengeLocks.AcquireAsync(challengeId, cancellationToken);
+        using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken,
+            challengeLock.LeaseLost);
+        var operationToken = operationCancellation.Token;
+        challengeLock.ThrowIfLost();
+
+        await using var challengeTransaction = new ChallengeTransactionContext(
+            new ChallengeAttemptTerminalizer(db, attemptSessions));
+        await using var transaction = await db.Database.BeginTransactionAsync(operationToken);
+        try
+        {
+            await ChallengeWriteFence.AcquireAsync(db, challengeId, operationToken);
+            var challenge = await db.Challenges.SingleOrDefaultAsync(
+                item => item.Id == challengeId,
+                operationToken);
+            if (challenge is null ||
+                challenge.Status is not (ChallengeStatus.Open or ChallengeStatus.Running) ||
+                challenge.ExpiresAt > now)
+            {
+                await transaction.CommitAsync(operationToken);
+                return false;
+            }
+
+            challenge.Status = ChallengeStatus.Expired;
+            challenge.FinishedAt ??= now;
+            await challengeTransaction.AbortBoundAttemptsAsync(challengeId, challenge.FinishedAt.Value, operationToken);
+            await db.SaveChangesAsync(operationToken);
+            challengeLock.ThrowIfLost();
+            challengeTransaction.ThrowIfLost();
+            await transaction.CommitAsync(operationToken);
+            await challengeTransaction.CompleteAsync();
+            return true;
+        }
+        catch
+        {
+            try
+            {
+                await transaction.RollbackAsync(CancellationToken.None);
+            }
+            catch
+            {
+                // Preserve the original retention failure.
+            }
+
+            db.ChangeTracker.Clear();
+            throw;
+        }
     }
 
     private async Task<RetentionStepResult> DeleteAbandonedAttemptsAsync(
@@ -517,6 +553,22 @@ public sealed class DataRetentionService(
             WHERE Status IN ({ChallengeStatus.Open.ToString()}, {ChallengeStatus.Running.ToString()})
               AND substr(ExpiresAt, 1, 19) < {cutoffValue}
             """, cancellationToken);
+    }
+
+    private async Task<List<Guid>> SelectSqliteExpiredChallengeIdsAsync(
+        DateTimeOffset cutoff,
+        CancellationToken cancellationToken)
+    {
+        var cutoffValue = FormatSqliteDateTimeOffset(cutoff);
+        return await db.Database.SqlQuery<Guid>($"""
+                SELECT Id AS "Value"
+                FROM Challenges
+                WHERE Status IN ({ChallengeStatus.Open.ToString()}, {ChallengeStatus.Running.ToString()})
+                  AND substr(ExpiresAt, 1, 19) < {cutoffValue}
+                ORDER BY substr(ExpiresAt, 1, 19), Id
+                LIMIT {options.BatchSize}
+                """)
+            .ToListAsync(cancellationToken);
     }
 
     private Task<long> CountSqliteAbandonedAttemptsAsync(

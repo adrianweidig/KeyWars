@@ -10,7 +10,7 @@ Statusmatrix; Prüfskripte und Workflows bleiben die maßgebliche Evidenz.
 | KW-000 | teilweise | Vollständige Audit-ID-Matrix wird durch `scripts/check_implementation_status.py` geprüft; Projektsteuerung bleibt extern. |
 | KW-001 | teilweise | Repository-Hygiene wird automatisiert geprüft; Rotation historischer Betriebsartefakte bleibt Betreiberaufgabe. |
 | KW-002 | erledigt | Konfigurationsbindung, Startvalidierung und Referenzdokumentation sind vorhanden. |
-| KW-003 | teilweise | Einzelinstanz und Scale-Modus besitzen explizite Datenbank-, Rollen- und Wartungsverträge; ein CI-Smoke prüft zwei Web- und zwei Arena-Replikate samt Arena-Ausfall, lange Cluster- und Partitionstests bleiben offen. |
+| KW-003 | teilweise | Einzelinstanz und Scale-Modus besitzen explizite Datenbank-, Rollen- und Wartungsverträge; ein CI-Smoke prüft zwei Web- und zwei Arena-Replikate samt Arena-Ausfall. Redis-Cluster-Bucket-Sharding sowie lange Cluster- und Partitionstests bleiben offen. |
 | KW-010 | teilweise | Arena-Zustandsübergänge und idempotenter Start sind concurrency-getestet; Rollen- und Fuzzmatrix bleibt offen. |
 | KW-011 | teilweise | SignalR-Client, Zwei-Browser-Fluss, Reconnect und Persistenzstatus sind getestet; Langzeitfehler bleiben offen. |
 | KW-012 | teilweise | Presence, Limits, Raumwechsel, Hosttransfer und gebroadcasteter Grace-Sweep sind concurrency- und browsergetestet; Mehrtab-Matrix bleibt offen. |
@@ -36,7 +36,7 @@ Statusmatrix; Prüfskripte und Workflows bleiben die maßgebliche Evidenz.
 | KW-040 | teilweise | Gebundene Challenge-Versuche, Best-of, Abbruch und idempotente Revanche sind integrations- und browsergetestet; lange Fehler- und Mehrgeräteabnahmen bleiben offen. |
 | KW-041 | teilweise | UTF-8, NFC, Graphem-/Payload-Limits, Manipulationsschutz, Ownership, Kopie, Filter und Paging sind getestet; Browser-CRUD bleibt offen. |
 | KW-042 | teilweise | de-DE, Enum-Anzeigenamen, Einstellungen und Mojibake-Hygiene sind getestet; UX- und Pluralmatrix bleibt offen. |
-| KW-043 | teilweise | Profil-Gate, Drain, Tombstone und Re-Provisionierung sind getestet; produktive Zwei-Browser-Abnahme bleibt offen. |
+| KW-043 | teilweise | Profil-Gate, Drain, Tombstone und Re-Provisionierung sind getestet; produktive Zwei-Browser-Abnahme und ein Profil-zu-Raum-Reverse-Index für sehr große Verzeichnisse bleiben offen. |
 | KW-050 | erledigt | Real-LDAPS deckt Fehlerkonten, zwei echte Logins und einen Arena-Fluss ab; Netzdetails bleiben privat. |
 | KW-051 | teilweise | Playwright sowie ein aktiver FlaUI-/UIA3-/OpenCV-Lauf decken Kernflüsse, Breakpoints, Reflow, Axe und Tastatur ab; Geräte- und Screenreader-Matrix bleibt offen. |
 | KW-052 | teilweise | In-Process-Lasttest bis 100, ein strikter SignalR-Lauf mit zwei Räumen und je drei Profilen sowie der Mehr-Replica-CI-Smoke sind reproduzierbar; Soak und belastbare Ressourcenprofile bleiben offen. |

@@ -1,26 +1,33 @@
+using KeyWars.Services;
+
 namespace KeyWars.Data;
 
 public interface IMaintenanceLease
 {
-    ValueTask<IAsyncDisposable?> TryAcquireAsync(
+    ValueTask<IOperationLease?> TryAcquireAsync(
         string operation,
         CancellationToken cancellationToken = default);
 }
 
 public sealed class SingleNodeMaintenanceLease : IMaintenanceLease
 {
-    public ValueTask<IAsyncDisposable?> TryAcquireAsync(
+    public ValueTask<IOperationLease?> TryAcquireAsync(
         string operation,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(operation);
         cancellationToken.ThrowIfCancellationRequested();
-        return ValueTask.FromResult<IAsyncDisposable?>(NoopLease.Instance);
+        return ValueTask.FromResult<IOperationLease?>(NoopLease.Instance);
     }
 
-    private sealed class NoopLease : IAsyncDisposable
+    private sealed class NoopLease : IOperationLease
     {
         public static NoopLease Instance { get; } = new();
+        public CancellationToken LeaseLost => CancellationToken.None;
+        public void ThrowIfLost()
+        {
+        }
+
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }

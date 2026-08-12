@@ -7,10 +7,10 @@ public sealed class RedisChallengeLockProvider(IConnectionMultiplexer redis) : I
 {
     private readonly IDatabase database = redis.GetDatabase();
 
-    public ValueTask<IAsyncDisposable> AcquireAsync(
+    public async ValueTask<IOperationLease> AcquireAsync(
         Guid challengeId,
         CancellationToken cancellationToken = default) =>
-        RedisDistributedLease.AcquireAsync(
+        await RedisDistributedLease.AcquireAsync(
             database,
             $"keywars:challenge:lock:{challengeId:N}",
             cancellationToken);

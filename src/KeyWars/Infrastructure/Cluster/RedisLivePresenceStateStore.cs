@@ -12,7 +12,7 @@ public sealed class RedisLivePresenceStateStore(
     IOptions<LiveOptions> options,
     TimeProvider timeProvider) : ILivePresenceStateStore
 {
-    private const string Prefix = "keywars:presence";
+    private const string Prefix = "keywars:{presence}";
     private static readonly TimeSpan ConnectionLifetime = TimeSpan.FromHours(6);
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
     private readonly IDatabase database = redis.GetDatabase();
@@ -23,6 +23,8 @@ public sealed class RedisLivePresenceStateStore(
         CancellationToken cancellationToken = default)
     {
         await using var presenceLock = await AcquireProfileLockAsync(profileId, cancellationToken);
+        using var operationCancellation = LinkToLease(cancellationToken, presenceLock);
+        cancellationToken = operationCancellation.Token;
         var connection = await ReadConnectionAsync(connectionId);
         if (connection is not null)
         {
@@ -31,6 +33,7 @@ public sealed class RedisLivePresenceStateStore(
                 throw new InvalidOperationException("Diese Arena-Verbindung gehört zu einer anderen Sitzung.");
             }
 
+            presenceLock.ThrowIfLost();
             return;
         }
 
@@ -40,6 +43,8 @@ public sealed class RedisLivePresenceStateStore(
         {
             throw new InvalidOperationException($"Es sind maximal {limit} aktive Arena-Verbindungen pro Person erlaubt.");
         }
+
+        presenceLock.ThrowIfLost();
     }
 
     public async ValueTask<LivePresenceSwitch> EnterRoomAsync(
@@ -49,6 +54,8 @@ public sealed class RedisLivePresenceStateStore(
         CancellationToken cancellationToken = default)
     {
         await using var presenceLock = await AcquireProfileLockAsync(profileId, cancellationToken);
+        using var operationCancellation = LinkToLease(cancellationToken, presenceLock);
+        cancellationToken = operationCancellation.Token;
         var existing = await ReadConnectionAsync(connectionId);
         if (existing is not null && existing.ProfileId != profileId)
         {
@@ -68,6 +75,7 @@ public sealed class RedisLivePresenceStateStore(
         var current = new PresenceConnection(connectionId, profileId, roomId, timeProvider.GetUtcNow());
         await database.StringSetAsync(ConnectionKey(connectionId), Serialize(current), ConnectionLifetime);
         await database.SetAddAsync(ProfileKey(profileId), ConnectionKey(connectionId).ToString());
+        presenceLock.ThrowIfLost();
         return new LivePresenceSwitch(changed ? existing?.RoomId : null, previousRoomLostLastConnection)
         {
             Changed = changed
@@ -87,6 +95,8 @@ public sealed class RedisLivePresenceStateStore(
         }
 
         await using var presenceLock = await AcquireProfileLockAsync(profileId, cancellationToken);
+        using var operationCancellation = LinkToLease(cancellationToken, presenceLock);
+        cancellationToken = operationCancellation.Token;
         var current = await ReadConnectionAsync(connectionId);
         if (current is null || current.ProfileId != profileId || current.RoomId != roomId)
         {
@@ -97,10 +107,12 @@ public sealed class RedisLivePresenceStateStore(
         {
             var restored = current with { RoomId = previousRoomId, LastSeenAt = timeProvider.GetUtcNow() };
             await database.StringSetAsync(ConnectionKey(connectionId), Serialize(restored), ConnectionLifetime);
+            presenceLock.ThrowIfLost();
             return;
         }
 
         await DeleteConnectionAsync(current);
+        presenceLock.ThrowIfLost();
     }
 
     public async ValueTask<LivePresenceLeave?> LeaveRoomAsync(
@@ -110,6 +122,8 @@ public sealed class RedisLivePresenceStateStore(
         CancellationToken cancellationToken = default)
     {
         await using var presenceLock = await AcquireProfileLockAsync(profileId, cancellationToken);
+        using var operationCancellation = LinkToLease(cancellationToken, presenceLock);
+        cancellationToken = operationCancellation.Token;
         var current = await ReadConnectionAsync(connectionId);
         if (current is null || current.ProfileId != profileId || current.RoomId != roomId)
         {
@@ -118,6 +132,7 @@ public sealed class RedisLivePresenceStateStore(
 
         await DeleteConnectionAsync(current);
         var active = await ReadActiveConnectionsAsync(profileId);
+        presenceLock.ThrowIfLost();
         return new LivePresenceLeave(roomId, profileId, active.All(item => item.RoomId != roomId));
     }
 
@@ -132,6 +147,8 @@ public sealed class RedisLivePresenceStateStore(
         }
 
         await using var presenceLock = await AcquireProfileLockAsync(observed.ProfileId, cancellationToken);
+        using var operationCancellation = LinkToLease(cancellationToken, presenceLock);
+        cancellationToken = operationCancellation.Token;
         var current = await ReadConnectionAsync(connectionId);
         if (current is null)
         {
@@ -140,6 +157,7 @@ public sealed class RedisLivePresenceStateStore(
 
         await DeleteConnectionAsync(current);
         var active = await ReadActiveConnectionsAsync(current.ProfileId);
+        presenceLock.ThrowIfLost();
         return new LivePresenceLeave(
             current.RoomId,
             current.ProfileId,
@@ -152,7 +170,10 @@ public sealed class RedisLivePresenceStateStore(
         CancellationToken cancellationToken = default)
     {
         await using var presenceLock = await AcquireProfileLockAsync(profileId, cancellationToken);
+        using var operationCancellation = LinkToLease(cancellationToken, presenceLock);
+        cancellationToken = operationCancellation.Token;
         var active = await ReadActiveConnectionsAsync(profileId);
+        presenceLock.ThrowIfLost();
         return active.Count(item => item.RoomId == roomId);
     }
 
@@ -162,6 +183,8 @@ public sealed class RedisLivePresenceStateStore(
         CancellationToken cancellationToken = default)
     {
         await using var presenceLock = await AcquireProfileLockAsync(profileId, cancellationToken);
+        using var operationCancellation = LinkToLease(cancellationToken, presenceLock);
+        cancellationToken = operationCancellation.Token;
         var active = await ReadActiveConnectionsAsync(profileId);
         var removed = active.Where(item => item.RoomId == roomId).ToArray();
         foreach (var connection in removed)
@@ -169,11 +192,18 @@ public sealed class RedisLivePresenceStateStore(
             await DeleteConnectionAsync(connection);
         }
 
+        presenceLock.ThrowIfLost();
+
         return removed.Select(item => item.ConnectionId).ToArray();
     }
 
-    private ValueTask<IAsyncDisposable> AcquireProfileLockAsync(Guid profileId, CancellationToken cancellationToken) =>
-        RedisDistributedLease.AcquireAsync(database, $"{Prefix}:lock:{profileId:N}", cancellationToken);
+    private async ValueTask<IOperationLease> AcquireProfileLockAsync(Guid profileId, CancellationToken cancellationToken) =>
+        await RedisDistributedLease.AcquireAsync(database, $"{Prefix}:lock:{profileId:N}", cancellationToken);
+
+    private static CancellationTokenSource LinkToLease(
+        CancellationToken cancellationToken,
+        IOperationLease lease) =>
+        CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, lease.LeaseLost);
 
     private async Task<List<PresenceConnection>> ReadActiveConnectionsAsync(Guid profileId)
     {

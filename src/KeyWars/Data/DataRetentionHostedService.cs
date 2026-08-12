@@ -34,9 +34,13 @@ public sealed class DataRetentionHostedService(
                 }
 
                 await using var scope = scopeFactory.CreateAsyncScope();
+                using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+                    stoppingToken,
+                    lease.LeaseLost);
                 await scope.ServiceProvider
                     .GetRequiredService<DataRetentionService>()
-                    .RunAsync(options.DryRun, stoppingToken);
+                    .RunAsync(options.DryRun, operationCancellation.Token);
+                lease.ThrowIfLost();
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

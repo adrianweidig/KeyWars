@@ -67,6 +67,21 @@ namespace KeyWars.Data.Migrations
                 columns: new[] { "Department", "LeaderboardVisible", "Deleted" });
 
             migrationBuilder.CreateIndex(
+                name: "IX_TypingAttempts_Completed_Phase_PreparedAt_Id",
+                table: "TypingAttempts",
+                columns: new[] { "Completed", "Phase", "PreparedAt", "Id" });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_TypingAttempts_Phase_FinishedAt_PreparedAt_Id",
+                table: "TypingAttempts",
+                columns: new[] { "Phase", "FinishedAt", "PreparedAt", "Id" });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_TypingAttempts_Phase_FinishedAt_StartedAt_Id",
+                table: "TypingAttempts",
+                columns: new[] { "Phase", "FinishedAt", "StartedAt", "Id" });
+
+            migrationBuilder.CreateIndex(
                 name: "IX_TypingAttempts_UserProfileId_Phase_Completed_CreatedAt_Id",
                 table: "TypingAttempts",
                 columns: new[] { "UserProfileId", "Phase", "Completed", "CreatedAt", "Id" });
@@ -75,6 +90,11 @@ namespace KeyWars.Data.Migrations
                 name: "IX_RewardLedgerEntries_UserProfileId_AwardedAt",
                 table: "RewardLedgerEntries",
                 columns: new[] { "UserProfileId", "AwardedAt" });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_GamificationEvents_SeenAt_CreatedAt_Id",
+                table: "GamificationEvents",
+                columns: new[] { "SeenAt", "CreatedAt", "Id" });
 
             migrationBuilder.CreateIndex(
                 name: "IX_GamificationEvents_UserProfileId_CreatedAt_Id",
@@ -116,23 +136,11 @@ namespace KeyWars.Data.Migrations
                 name: "IX_ContentModerationAuditEntries_TargetType_TargetId_CreatedAt",
                 table: "ContentModerationAuditEntries",
                 columns: new[] { "TargetType", "TargetId", "CreatedAt" });
-
-            migrationBuilder.AddForeignKey(
-                name: "FK_Challenges_Challenges_RematchOfChallengeId",
-                table: "Challenges",
-                column: "RematchOfChallengeId",
-                principalTable: "Challenges",
-                principalColumn: "Id",
-                onDelete: ReferentialAction.Restrict);
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.DropForeignKey(
-                name: "FK_Challenges_Challenges_RematchOfChallengeId",
-                table: "Challenges");
-
             migrationBuilder.DropTable(
                 name: "ContentModerationAuditEntries");
 
@@ -141,12 +149,28 @@ namespace KeyWars.Data.Migrations
                 table: "UserProfiles");
 
             migrationBuilder.DropIndex(
+                name: "IX_TypingAttempts_Completed_Phase_PreparedAt_Id",
+                table: "TypingAttempts");
+
+            migrationBuilder.DropIndex(
+                name: "IX_TypingAttempts_Phase_FinishedAt_PreparedAt_Id",
+                table: "TypingAttempts");
+
+            migrationBuilder.DropIndex(
+                name: "IX_TypingAttempts_Phase_FinishedAt_StartedAt_Id",
+                table: "TypingAttempts");
+
+            migrationBuilder.DropIndex(
                 name: "IX_TypingAttempts_UserProfileId_Phase_Completed_CreatedAt_Id",
                 table: "TypingAttempts");
 
             migrationBuilder.DropIndex(
                 name: "IX_RewardLedgerEntries_UserProfileId_AwardedAt",
                 table: "RewardLedgerEntries");
+
+            migrationBuilder.DropIndex(
+                name: "IX_GamificationEvents_SeenAt_CreatedAt_Id",
+                table: "GamificationEvents");
 
             migrationBuilder.DropIndex(
                 name: "IX_GamificationEvents_UserProfileId_CreatedAt_Id",

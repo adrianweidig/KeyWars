@@ -17,14 +17,52 @@ public sealed class RedisLiveRoomCompletionQueue(
     ILiveRoomCompletionDrain,
     ILiveRoomCompletionMonitor
 {
-    private const string Prefix = "keywars:completion";
+    private const string Prefix = "keywars:{completion}";
     private const int MaxAttempts = 5;
     private static readonly RedisKey PendingKey = $"{Prefix}:pending";
     private static readonly RedisKey FailedKey = $"{Prefix}:failed";
+    private static readonly RedisKey EnqueuedKey = $"{Prefix}:enqueued";
     private static readonly LuaScript EnqueueScript = LuaScript.Prepare(
         "if redis.call('exists', @recordKey) == 1 then return 0 end; " +
         "redis.call('set', @recordKey, @payload); redis.call('set', @statusKey, @status); " +
-        "redis.call('zadd', @pendingKey, @dueAt, @roomId); return 1");
+        "redis.call('zadd', @pendingKey, @dueAt, @roomId); " +
+        "redis.call('zadd', @enqueuedKey, @enqueuedAt, @roomId); return 1");
+    private static readonly LuaScript ActivateRedriveScript = LuaScript.Prepare(
+        "if redis.call('get', @lockKey) ~= @lockToken then return 0 end; " +
+        "if redis.call('zscore', @failedKey, @roomId) then " +
+        "redis.call('zrem', @failedKey, @roomId); " +
+        "redis.call('zadd', @pendingKey, @now, @roomId); " +
+        "redis.call('zadd', @enqueuedKey, 'NX', @now, @roomId); " +
+        "redis.call('del', @attemptsKey); redis.call('set', @statusKey, @status) end; return 1");
+    private static readonly LuaScript FailureScript = LuaScript.Prepare(
+        "if redis.call('get', @lockKey) ~= @lockToken then return -1 end; " +
+        "local attempts = redis.call('incr', @attemptsKey); " +
+        "if attempts < tonumber(@maxAttempts) then " +
+        "local retryDelay = math.min(10000, 200 * (2 ^ (attempts - 1))); " +
+        "redis.call('zrem', @failedKey, @roomId); " +
+        "redis.call('zadd', @pendingKey, tonumber(@now) + retryDelay, @roomId); " +
+        "redis.call('set', @statusKey, @status); return attempts end; " +
+        "local redrive = redis.call('incr', @redriveKey); " +
+        "local exponent = math.min(redrive - 1, 8); " +
+        "local redriveDelay = math.min(900000, 30000 * (2 ^ exponent)); " +
+        "redis.call('zrem', @pendingKey, @roomId); " +
+        "redis.call('zadd', @failedKey, tonumber(@now) + redriveDelay, @roomId); " +
+        "redis.call('del', @attemptsKey); " +
+        "redis.call('set', @statusKey, @status); return tonumber(@maxAttempts) + redrive");
+    private static readonly LuaScript CompleteScript = LuaScript.Prepare(
+        "if redis.call('get', @lockKey) ~= @lockToken then return 0 end; " +
+        "redis.call('del', @recordKey, @attemptsKey, @redriveKey); " +
+        "redis.call('zrem', @pendingKey, @roomId); " +
+        "redis.call('zrem', @failedKey, @roomId); " +
+        "redis.call('zrem', @enqueuedKey, @roomId); " +
+        "redis.call('set', @statusKey, @status, 'PX', @statusTtlMilliseconds); return 1");
+    private static readonly LuaScript CleanupMissingScript = LuaScript.Prepare(
+        "if redis.call('get', @lockKey) ~= @lockToken then return 0 end; " +
+        "if redis.call('exists', @recordKey) == 1 then return 2 end; " +
+        "redis.call('del', @attemptsKey, @redriveKey); " +
+        "redis.call('zrem', @pendingKey, @roomId); " +
+        "redis.call('zrem', @failedKey, @roomId); " +
+        "redis.call('zrem', @enqueuedKey, @roomId); return 1");
     private readonly IDatabase database = redis.GetDatabase();
     private readonly TimeSpan drainTimeout = TimeSpan.FromSeconds(options.Value.CompletionDrainTimeoutSeconds);
     private long persisted;
@@ -37,6 +75,20 @@ public sealed class RedisLiveRoomCompletionQueue(
     public int PendingCount => checked((int)database.SortedSetLength(PendingKey));
     public int FailedRecordCount => checked((int)database.SortedSetLength(FailedKey));
     public long FailedAttempts => Volatile.Read(ref failed);
+    public TimeSpan OldestPendingAge
+    {
+        get
+        {
+            var oldest = database.SortedSetRangeByRankWithScores(EnqueuedKey, 0, 0);
+            if (oldest.Length == 0)
+            {
+                return TimeSpan.Zero;
+            }
+
+            var age = timeProvider.GetUtcNow() - DateTimeOffset.FromUnixTimeMilliseconds((long)oldest[0].Score);
+            return age > TimeSpan.Zero ? age : TimeSpan.Zero;
+        }
+    }
 
     public CompletionReceipt Enqueue(CompletedRoomRecord record)
     {
@@ -57,9 +109,19 @@ public sealed class RedisLiveRoomCompletionQueue(
             return new CompletionReceipt(record.Id, record.IdempotencyKey, GetStatus(record.Id).State);
         }
 
-        if (!CanAcceptNewRoom(0))
+        var statusValue = database.StringGet(StatusKey(record.Id));
+        if (!statusValue.IsNull)
         {
-            return new CompletionReceipt(record.Id, record.IdempotencyKey, CompletionState.Failed);
+            var currentStatus = DeserializeStatus(statusValue!);
+            if (currentStatus.State == CompletionState.Persisted)
+            {
+                if (!StringComparer.Ordinal.Equals(currentStatus.IdempotencyKey, record.IdempotencyKey))
+                {
+                    throw new InvalidOperationException("Für diesen Arena-Raum wurde bereits ein anderer Persistenzauftrag abgeschlossen.");
+                }
+
+                return new CompletionReceipt(record.Id, record.IdempotencyKey, CompletionState.Persisted);
+            }
         }
 
         var status = new CompletionStatusRecord(record.IdempotencyKey, CompletionState.Pending);
@@ -70,14 +132,28 @@ public sealed class RedisLiveRoomCompletionQueue(
                 recordKey = RecordKey(record.Id),
                 statusKey = StatusKey(record.Id),
                 pendingKey = PendingKey,
+                enqueuedKey = EnqueuedKey,
                 roomId = record.Id.ToString("N"),
                 payload = JsonSerializer.Serialize(record),
                 status = JsonSerializer.Serialize(status),
-                dueAt = timeProvider.GetUtcNow().ToUnixTimeMilliseconds()
+                dueAt = timeProvider.GetUtcNow().ToUnixTimeMilliseconds(),
+                enqueuedAt = timeProvider.GetUtcNow().ToUnixTimeMilliseconds()
             });
         if (enqueued == 0)
         {
-            return new CompletionReceipt(record.Id, record.IdempotencyKey, GetStatus(record.Id).State);
+            var storedValue = database.StringGet(RecordKey(record.Id));
+            if (storedValue.IsNull)
+            {
+                throw new InvalidOperationException("Der Arena-Persistenzauftrag wurde parallel verändert.");
+            }
+
+            var stored = DeserializeRecord(storedValue!);
+            if (!StringComparer.Ordinal.Equals(stored.IdempotencyKey, record.IdempotencyKey))
+            {
+                throw new InvalidOperationException("Für diesen Arena-Raum existiert bereits ein anderer Persistenzauftrag.");
+            }
+
+            return new CompletionReceipt(record.Id, stored.IdempotencyKey, GetStatus(record.Id).State);
         }
 
         return new CompletionReceipt(record.Id, record.IdempotencyKey, CompletionState.Pending);
@@ -147,15 +223,44 @@ public sealed class RedisLiveRoomCompletionQueue(
         {
             try
             {
-                var due = await database.SortedSetRangeByScoreAsync(
+                var now = timeProvider.GetUtcNow().ToUnixTimeMilliseconds();
+                var pendingDue = await database.SortedSetRangeByScoreWithScoresAsync(
                     PendingKey,
-                    stop: timeProvider.GetUtcNow().ToUnixTimeMilliseconds(),
+                    stop: now,
                     take: 16);
-                foreach (var value in due)
+                var failedDue = await database.SortedSetRangeByScoreWithScoresAsync(
+                    FailedKey,
+                    stop: now,
+                    take: 16);
+                var due = pendingDue
+                    .Concat(failedDue)
+                    .GroupBy(item => item.Element)
+                    .Select(group => group.OrderBy(item => item.Score).First())
+                    .OrderBy(item => item.Score)
+                    .Take(16);
+                foreach (var entry in due)
                 {
-                    if (Guid.TryParseExact(value.ToString(), "N", out var roomId))
+                    if (Guid.TryParseExact(entry.Element.ToString(), "N", out var roomId))
                     {
-                        await TryPersistAsync(roomId, stoppingToken);
+                        try
+                        {
+                            await TryPersistAsync(roomId, stoppingToken);
+                        }
+                        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                        {
+                            throw;
+                        }
+                        catch (Exception exception)
+                        {
+                            logger.LogError(exception, "Arena-Ergebnis {RoomId} konnte in diesem Durchlauf nicht verarbeitet werden.", roomId);
+                        }
+                    }
+                    else
+                    {
+                        await database.SortedSetRemoveAsync(PendingKey, entry.Element);
+                        await database.SortedSetRemoveAsync(FailedKey, entry.Element);
+                        await database.SortedSetRemoveAsync(EnqueuedKey, entry.Element);
+                        logger.LogError("Ungültige Arena-Ergebnis-ID {RoomId} wurde aus den Redis-Indizes entfernt.", entry.Element);
                     }
                 }
             }
@@ -182,51 +287,185 @@ public sealed class RedisLiveRoomCompletionQueue(
 
         await using (lease)
         {
+            using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+                cancellationToken,
+                lease.LeaseLost);
+            var operationToken = operationCancellation.Token;
             var value = await database.StringGetAsync(RecordKey(roomId));
             if (value.IsNull)
             {
-                await database.SortedSetRemoveAsync(PendingKey, roomId.ToString("N"));
+                var cleaned = (int)await database.ScriptEvaluateAsync(
+                    CleanupMissingScript,
+                    new
+                    {
+                        lockKey = lease.Key,
+                        lockToken = lease.Token,
+                        recordKey = RecordKey(roomId),
+                        attemptsKey = AttemptsKey(roomId),
+                        redriveKey = RedriveKey(roomId),
+                        pendingKey = PendingKey,
+                        failedKey = FailedKey,
+                        enqueuedKey = EnqueuedKey,
+                        roomId = roomId.ToString("N")
+                    });
+                if (cleaned == 0)
+                {
+                    lease.ThrowFenceLost("fehlenden Abschlussauftrag bereinigen");
+                }
+
+                if (cleaned is not (1 or 2))
+                {
+                    throw new InvalidOperationException(
+                        $"Redis lieferte beim Bereinigen eines fehlenden Abschlussauftrags das unbekannte Ergebnis {cleaned}.");
+                }
                 return;
             }
 
-            var record = DeserializeRecord(value!);
+            CompletedRoomRecord record;
+            try
+            {
+                record = DeserializeRecord(value!);
+            }
+            catch (Exception exception)
+            {
+                logger.LogError(exception, "Arena-Ergebnis {RoomId} ist beschädigt und bleibt für die manuelle Diagnose erhalten.", roomId);
+                await ParkCorruptRecordAsync(roomId, lease);
+                return;
+            }
+            var activated = (int)await database.ScriptEvaluateAsync(
+                ActivateRedriveScript,
+                new
+                {
+                    lockKey = lease.Key,
+                    lockToken = lease.Token,
+                    pendingKey = PendingKey,
+                    failedKey = FailedKey,
+                    enqueuedKey = EnqueuedKey,
+                    statusKey = StatusKey(roomId),
+                    attemptsKey = AttemptsKey(roomId),
+                    roomId = roomId.ToString("N"),
+                    now = timeProvider.GetUtcNow().ToUnixTimeMilliseconds(),
+                    status = JsonSerializer.Serialize(new CompletionStatusRecord(
+                        record.IdempotencyKey,
+                        CompletionState.Pending))
+                });
+            if (activated == 0)
+            {
+                lease.ThrowFenceLost("Abschlussauftrag reaktivieren");
+            }
+
             var stopwatch = Stopwatch.StartNew();
             try
             {
-                await writer.PersistAsync(record, cancellationToken);
-                await database.KeyDeleteAsync(RecordKey(roomId));
-                await database.KeyDeleteAsync(AttemptsKey(roomId));
-                await database.SortedSetRemoveAsync(PendingKey, roomId.ToString("N"));
-                await SetStatusAsync(roomId, record.IdempotencyKey, CompletionState.Persisted);
-                Interlocked.Increment(ref persisted);
-                Interlocked.Increment(ref durationCount);
-                Interlocked.Add(ref durationTicks, stopwatch.ElapsedTicks);
+                await writer.PersistAsync(record, operationToken);
+                lease.ThrowIfLost();
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw;
             }
+            catch (OperationCanceledException) when (lease.LeaseLost.IsCancellationRequested)
+            {
+                lease.ThrowIfLost();
+                throw;
+            }
             catch (Exception exception)
             {
-                var attempts = await database.StringIncrementAsync(AttemptsKey(roomId));
-                if (attempts < MaxAttempts)
+                var outcome = (long)await database.ScriptEvaluateAsync(
+                    FailureScript,
+                    new
+                    {
+                        lockKey = lease.Key,
+                        lockToken = lease.Token,
+                        pendingKey = PendingKey,
+                        failedKey = FailedKey,
+                        statusKey = StatusKey(roomId),
+                        attemptsKey = AttemptsKey(roomId),
+                        redriveKey = RedriveKey(roomId),
+                        roomId = roomId.ToString("N"),
+                        now = timeProvider.GetUtcNow().ToUnixTimeMilliseconds(),
+                        maxAttempts = MaxAttempts,
+                        status = JsonSerializer.Serialize(new CompletionStatusRecord(
+                            record.IdempotencyKey,
+                            CompletionState.Pending))
+                    });
+                if (outcome == -1)
                 {
+                    lease.ThrowFenceLost("fehlgeschlagenen Abschlussauftrag planen");
+                }
+
+                if (outcome < MaxAttempts)
+                {
+                    var attempts = outcome;
                     Interlocked.Increment(ref retries);
                     var delay = TimeSpan.FromMilliseconds(Math.Min(10_000, 200 * Math.Pow(2, attempts - 1)));
-                    await database.SortedSetAddAsync(
-                        PendingKey,
-                        roomId.ToString("N"),
-                        timeProvider.GetUtcNow().Add(delay).ToUnixTimeMilliseconds());
                     logger.LogWarning(exception, "Arena-Ergebnis {RoomId} wird erneut persistiert (Versuch {Attempt}).", roomId, attempts + 1);
                     return;
                 }
 
-                await database.SortedSetRemoveAsync(PendingKey, roomId.ToString("N"));
-                await database.SortedSetAddAsync(FailedKey, roomId.ToString("N"), timeProvider.GetUtcNow().ToUnixTimeMilliseconds());
-                await SetStatusAsync(roomId, record.IdempotencyKey, CompletionState.Failed);
+                var redriveCycle = outcome - MaxAttempts;
+                var redriveDelay = CalculateRedriveDelay(redriveCycle);
                 Interlocked.Increment(ref failed);
-                logger.LogError(exception, "Arena-Ergebnis {RoomId} ist nach {AttemptCount} Versuchen fehlgeschlagen.", roomId, attempts);
+                logger.LogError(
+                    exception,
+                    "Arena-Ergebnis {RoomId} wird nach {AttemptCount} Versuchen in {Delay} erneut aktiviert (Redrive {RedriveCycle}).",
+                    roomId,
+                    MaxAttempts,
+                    redriveDelay,
+                    redriveCycle);
+                return;
             }
+
+            var completed = (int)await database.ScriptEvaluateAsync(
+                CompleteScript,
+                new
+                {
+                    lockKey = lease.Key,
+                    lockToken = lease.Token,
+                    recordKey = RecordKey(roomId),
+                    statusKey = StatusKey(roomId),
+                    attemptsKey = AttemptsKey(roomId),
+                    redriveKey = RedriveKey(roomId),
+                    pendingKey = PendingKey,
+                    failedKey = FailedKey,
+                    enqueuedKey = EnqueuedKey,
+                    roomId = roomId.ToString("N"),
+                    status = JsonSerializer.Serialize(new CompletionStatusRecord(
+                        record.IdempotencyKey,
+                        CompletionState.Persisted)),
+                    statusTtlMilliseconds = (long)TimeSpan.FromDays(7).TotalMilliseconds
+                });
+            if (completed == 0)
+            {
+                lease.ThrowFenceLost("Abschlussauftrag bestätigen");
+            }
+            Interlocked.Increment(ref persisted);
+            Interlocked.Increment(ref durationCount);
+            Interlocked.Add(ref durationTicks, stopwatch.ElapsedTicks);
+        }
+    }
+
+    private async Task ParkCorruptRecordAsync(Guid roomId, RedisDistributedLease lease)
+    {
+        var parked = (long)await database.ScriptEvaluateAsync(
+            FailureScript,
+            new
+            {
+                lockKey = lease.Key,
+                lockToken = lease.Token,
+                pendingKey = PendingKey,
+                failedKey = FailedKey,
+                statusKey = StatusKey(roomId),
+                attemptsKey = AttemptsKey(roomId),
+                redriveKey = RedriveKey(roomId),
+                roomId = roomId.ToString("N"),
+                now = timeProvider.GetUtcNow().ToUnixTimeMilliseconds(),
+                maxAttempts = 1,
+                status = JsonSerializer.Serialize(new CompletionStatusRecord("corrupt", CompletionState.Failed))
+            });
+        if (parked == -1)
+        {
+            lease.ThrowFenceLost("beschädigten Abschlussauftrag isolieren");
         }
     }
 
@@ -258,14 +497,6 @@ public sealed class RedisLiveRoomCompletionQueue(
         return related;
     }
 
-    private async Task SetStatusAsync(Guid roomId, string idempotencyKey, CompletionState state)
-    {
-        await database.StringSetAsync(
-            StatusKey(roomId),
-            JsonSerializer.Serialize(new CompletionStatusRecord(idempotencyKey, state)),
-            TimeSpan.FromDays(7));
-    }
-
     private static CompletedRoomRecord DeserializeRecord(RedisValue value) =>
         JsonSerializer.Deserialize<CompletedRoomRecord>(value.ToString())
         ?? throw new InvalidOperationException("Ein Arena-Ergebnisauftrag in Redis ist ungültig.");
@@ -277,10 +508,17 @@ public sealed class RedisLiveRoomCompletionQueue(
     private static RedisKey RecordKey(Guid roomId) => $"{Prefix}:record:{roomId:N}";
     private static RedisKey StatusKey(Guid roomId) => $"{Prefix}:status:{roomId:N}";
     private static RedisKey AttemptsKey(Guid roomId) => $"{Prefix}:attempts:{roomId:N}";
+    private static RedisKey RedriveKey(Guid roomId) => $"{Prefix}:redrive:{roomId:N}";
     private static RedisKey LockKey(Guid roomId) => $"{Prefix}:lock:{roomId:N}";
 
     private sealed record CompletionStatusRecord(string IdempotencyKey, CompletionState State);
     private sealed record CompletionRecordState(Guid RoomId, CompletionState State);
+
+    private static TimeSpan CalculateRedriveDelay(long cycle)
+    {
+        var exponent = (int)Math.Clamp(cycle - 1, 0, 8);
+        return TimeSpan.FromSeconds(Math.Min(15 * 60, 30 * Math.Pow(2, exponent)));
+    }
 }
 
 public sealed class ClusterLiveRoomCompletionSink(RedisLiveRoomCompletionQueue durable) : ILiveRoomCompletionSink

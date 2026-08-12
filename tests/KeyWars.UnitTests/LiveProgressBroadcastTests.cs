@@ -38,8 +38,8 @@ public sealed class LiveProgressBroadcastTests
         var sender = new RecordingProgressSender();
         var broadcaster = new LiveProgressBroadcaster(
             sender,
-            Options.Create(new LiveOptions { ProgressBroadcastHz = 10, RoomCommandQueueCapacity = 1 }),
-            TimeProvider.System,
+            Options.Create(new LiveOptions { ProgressBroadcastHz = 1, RoomCommandQueueCapacity = 1 }),
+            new FixedTimeProvider(DateTimeOffset.Parse("2026-08-12T12:00:00Z")),
             NullLogger<LiveProgressBroadcaster>.Instance);
         var roomId = Guid.CreateVersion7();
         await broadcaster.PublishAsync(CreateDelta(roomId, Guid.CreateVersion7(), correctCharacters: 1), CancellationToken.None);
@@ -91,9 +91,52 @@ public sealed class LiveProgressBroadcastTests
         Assert.Equal(2, final.BroadcastCount);
     }
 
-    private static LiveProgressDelta CreateDelta(Guid roomId, Guid participantId, int correctCharacters) => new(
+    [Fact]
+    public async Task ProgressBroadcasterNeverMixesOrReplaysRoomVersions()
+    {
+        var sender = new RecordingProgressSender();
+        var time = new FixedTimeProvider(DateTimeOffset.Parse("2026-08-12T12:00:00Z"));
+        var broadcaster = new LiveProgressBroadcaster(
+            sender,
+            Options.Create(new LiveOptions { ProgressBroadcastHz = 1, RoomCommandQueueCapacity = 8 }),
+            time,
+            NullLogger<LiveProgressBroadcaster>.Instance);
+        var roomId = Guid.CreateVersion7();
+        var first = Guid.CreateVersion7();
+        var second = Guid.CreateVersion7();
+
+        await broadcaster.PublishAsync(CreateDelta(roomId, first, 10, roomVersion: 2), CancellationToken.None);
+        await broadcaster.PublishAsync(CreateDelta(roomId, first, 11, roomVersion: 2), CancellationToken.None);
+        await broadcaster.PublishAsync(CreateDelta(roomId, second, 1, roomVersion: 4), CancellationToken.None);
+        await broadcaster.PublishAsync(CreateDelta(roomId, first, 12, roomVersion: 2), CancellationToken.None);
+        await broadcaster.FlushAsync(roomId, CancellationToken.None);
+
+        Assert.Equal(2, sender.Batches.Count);
+        Assert.All(sender.Batches[1].Deltas, delta => Assert.Equal(4, delta.RoomVersion));
+        Assert.Equal(second, Assert.Single(sender.Batches[1].Deltas).ParticipantId);
+        Assert.True(broadcaster.Snapshot().DroppedProgressMessages >= 1);
+    }
+
+    [Fact]
+    public void RedisProgressRelaySelectsOnlyTheNewestPendingRoomVersion()
+    {
+        var roomId = Guid.CreateVersion7();
+        var oldDelta = CreateDelta(roomId, Guid.CreateVersion7(), 10, roomVersion: 2);
+        var currentDelta = CreateDelta(roomId, Guid.CreateVersion7(), 1, roomVersion: 4);
+
+        var selected = KeyWars.Infrastructure.Cluster.RedisLiveProgressRelay.SelectNewestRoomVersion(
+            [oldDelta, currentDelta]);
+
+        Assert.Equal(currentDelta, Assert.Single(selected));
+    }
+
+    private static LiveProgressDelta CreateDelta(
+        Guid roomId,
+        Guid participantId,
+        int correctCharacters,
+        int roomVersion = 2) => new(
         roomId,
-        2,
+        roomVersion,
         correctCharacters + 1L,
         participantId,
         correctCharacters,

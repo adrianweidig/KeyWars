@@ -7,20 +7,40 @@ namespace KeyWars.Infrastructure.Cluster;
 
 public sealed class RedisAttemptSessionStateStore(IConnectionMultiplexer redis) : IAttemptSessionStateStore
 {
-    private const string Prefix = "keywars:attempt";
+    private const string Prefix = "keywars:{attempt}";
     private static readonly TimeSpan ExpiryGrace = TimeSpan.FromMinutes(5);
     private static readonly JsonSerializerOptions SerializerOptions = CreateSerializerOptions();
     private static readonly LuaScript AddScript = LuaScript.Prepare(
         "redis.call('set', @sessionKey, @value, 'PX', @ttlMilliseconds); " +
         "redis.call('sadd', @profileKey, @id); " +
-        "redis.call('zadd', @expiryKey, @expiresAt, @id); return 1");
+        "redis.call('zadd', @expiryKey, @expiresAt, @id); " +
+        "local profileTtl = redis.call('pttl', @profileKey); " +
+        "if profileTtl < tonumber(@indexTtlMilliseconds) then " +
+        "redis.call('pexpire', @profileKey, @indexTtlMilliseconds) end; " +
+        "local expiryTtl = redis.call('pttl', @expiryKey); " +
+        "if expiryTtl < tonumber(@indexTtlMilliseconds) then " +
+        "redis.call('pexpire', @expiryKey, @indexTtlMilliseconds) end; return 1");
     private static readonly LuaScript CompareExchangeScript = LuaScript.Prepare(
         "if redis.call('get', @sessionKey) ~= @current then return 0 end; " +
         "redis.call('set', @sessionKey, @updated, 'PX', @ttlMilliseconds); " +
-        "redis.call('zadd', @expiryKey, @expiresAt, @id); return 1");
+        "redis.call('sadd', @profileKey, @id); " +
+        "redis.call('zadd', @expiryKey, @expiresAt, @id); " +
+        "local profileTtl = redis.call('pttl', @profileKey); " +
+        "if profileTtl < tonumber(@indexTtlMilliseconds) then " +
+        "redis.call('pexpire', @profileKey, @indexTtlMilliseconds) end; " +
+        "local expiryTtl = redis.call('pttl', @expiryKey); " +
+        "if expiryTtl < tonumber(@indexTtlMilliseconds) then " +
+        "redis.call('pexpire', @expiryKey, @indexTtlMilliseconds) end; return 1");
     private static readonly LuaScript RemoveScript = LuaScript.Prepare(
         "if redis.call('get', @sessionKey) ~= @current then return 0 end; " +
         "redis.call('del', @sessionKey); redis.call('srem', @profileKey, @id); " +
+        "redis.call('zrem', @expiryKey, @id); return 1");
+    private static readonly LuaScript RemoveProfileIndexEntryScript = LuaScript.Prepare(
+        "if redis.call('exists', @sessionKey) == 1 then return 0 end; " +
+        "redis.call('srem', @profileKey, @id); " +
+        "redis.call('zrem', @expiryKey, @id); return 1");
+    private static readonly LuaScript RemoveExpiryIndexEntryScript = LuaScript.Prepare(
+        "if redis.call('exists', @sessionKey) == 1 then return 0 end; " +
         "redis.call('zrem', @expiryKey, @id); return 1");
     private readonly IDatabase database = redis.GetDatabase();
 
@@ -31,6 +51,7 @@ public sealed class RedisAttemptSessionStateStore(IConnectionMultiplexer redis) 
     {
         cancellationToken.ThrowIfCancellationRequested();
         var expiresAt = GetExpiresAt(session, lifetime);
+        var ttlMilliseconds = GetTtlMilliseconds(expiresAt);
         await database.ScriptEvaluateAsync(
             AddScript,
             new
@@ -41,7 +62,8 @@ public sealed class RedisAttemptSessionStateStore(IConnectionMultiplexer redis) 
                 value = Serialize(session),
                 id = session.Id.ToString("N"),
                 expiresAt = expiresAt.ToUnixTimeMilliseconds(),
-                ttlMilliseconds = GetTtlMilliseconds(expiresAt)
+                ttlMilliseconds,
+                indexTtlMilliseconds = GetIndexTtlMilliseconds(ttlMilliseconds)
             });
     }
 
@@ -60,17 +82,20 @@ public sealed class RedisAttemptSessionStateStore(IConnectionMultiplexer redis) 
     {
         cancellationToken.ThrowIfCancellationRequested();
         var expiresAt = GetExpiresAt(updated, lifetime);
+        var ttlMilliseconds = GetTtlMilliseconds(expiresAt);
         var result = await database.ScriptEvaluateAsync(
             CompareExchangeScript,
             new
             {
                 sessionKey = SessionKey(current.Id),
+                profileKey = ProfileKey(current.UserProfileId),
                 expiryKey = ExpiryKey,
                 current = Serialize(current),
                 updated = Serialize(updated),
                 id = current.Id.ToString("N"),
                 expiresAt = expiresAt.ToUnixTimeMilliseconds(),
-                ttlMilliseconds = GetTtlMilliseconds(expiresAt)
+                ttlMilliseconds,
+                indexTtlMilliseconds = GetIndexTtlMilliseconds(ttlMilliseconds)
             });
         return (int)result == 1;
     }
@@ -103,10 +128,11 @@ public sealed class RedisAttemptSessionStateStore(IConnectionMultiplexer redis) 
         CancellationToken cancellationToken = default)
     {
         var removed = new List<AttemptSession>();
+        var profileKey = ProfileKey(profileId);
         for (var pass = 0; pass < 3; pass++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var ids = await database.SetMembersAsync(ProfileKey(profileId));
+            var ids = await database.SetMembersAsync(profileKey);
             if (ids.Length == 0)
             {
                 break;
@@ -114,21 +140,38 @@ public sealed class RedisAttemptSessionStateStore(IConnectionMultiplexer redis) 
 
             foreach (var value in ids)
             {
-                if (Guid.TryParseExact(value.ToString(), "N", out var id) &&
-                    await RemoveAsync(id, cancellationToken) is { } session)
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!Guid.TryParseExact(value.ToString(), "N", out var id))
+                {
+                    await database.SetRemoveAsync(profileKey, value);
+                    continue;
+                }
+
+                if (await RemoveAsync(id, cancellationToken) is { } session)
                 {
                     removed.Add(session);
+                    continue;
                 }
+
+                await database.ScriptEvaluateAsync(
+                    RemoveProfileIndexEntryScript,
+                    new
+                    {
+                        sessionKey = SessionKey(id),
+                        profileKey,
+                        expiryKey = ExpiryKey,
+                        id = id.ToString("N")
+                    });
             }
         }
 
         return removed;
     }
 
-    public ValueTask<IAsyncDisposable> AcquireLifecycleLockAsync(
+    public async ValueTask<IOperationLease> AcquireLifecycleLockAsync(
         Guid id,
         CancellationToken cancellationToken = default) =>
-        RedisDistributedLease.AcquireAsync(database, LockKey(id), cancellationToken);
+        await RedisDistributedLease.AcquireAsync(database, LockKey(id), cancellationToken);
 
     public async ValueTask<IReadOnlyList<Guid>> GetExpiredIdsAsync(
         DateTimeOffset now,
@@ -139,7 +182,8 @@ public sealed class RedisAttemptSessionStateStore(IConnectionMultiplexer redis) 
         var values = await database.SortedSetRangeByScoreAsync(
             ExpiryKey,
             stop: now.ToUnixTimeMilliseconds(),
-            order: Order.Ascending);
+            order: Order.Ascending,
+            take: 100);
         return values
             .Select(value => Guid.TryParseExact(value.ToString(), "N", out var id) ? id : Guid.Empty)
             .Where(id => id != Guid.Empty)
@@ -155,7 +199,14 @@ public sealed class RedisAttemptSessionStateStore(IConnectionMultiplexer redis) 
         var session = await GetAsync(id, cancellationToken);
         if (session is null)
         {
-            await database.SortedSetRemoveAsync(ExpiryKey, id.ToString("N"));
+            await database.ScriptEvaluateAsync(
+                RemoveExpiryIndexEntryScript,
+                new
+                {
+                    sessionKey = SessionKey(id),
+                    expiryKey = ExpiryKey,
+                    id = id.ToString("N")
+                });
             return null;
         }
 
@@ -180,6 +231,9 @@ public sealed class RedisAttemptSessionStateStore(IConnectionMultiplexer redis) 
         var ttl = expiresAt - DateTimeOffset.UtcNow + ExpiryGrace;
         return (long)Math.Max(ExpiryGrace.TotalMilliseconds, ttl.TotalMilliseconds);
     }
+
+    private static long GetIndexTtlMilliseconds(long sessionTtlMilliseconds) =>
+        sessionTtlMilliseconds + (long)ExpiryGrace.TotalMilliseconds;
 
     private static string Serialize(AttemptSession session) =>
         JsonSerializer.Serialize(session, SerializerOptions);

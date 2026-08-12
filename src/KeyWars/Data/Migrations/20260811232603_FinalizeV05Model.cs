@@ -10,45 +10,21 @@ namespace KeyWars.Data.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.CreateIndex(
-                name: "IX_TypingAttempts_Completed_Phase_PreparedAt_Id",
-                table: "TypingAttempts",
-                columns: new[] { "Completed", "Phase", "PreparedAt", "Id" });
-
-            migrationBuilder.CreateIndex(
-                name: "IX_TypingAttempts_Phase_FinishedAt_PreparedAt_Id",
-                table: "TypingAttempts",
-                columns: new[] { "Phase", "FinishedAt", "PreparedAt", "Id" });
-
-            migrationBuilder.CreateIndex(
-                name: "IX_TypingAttempts_Phase_FinishedAt_StartedAt_Id",
-                table: "TypingAttempts",
-                columns: new[] { "Phase", "FinishedAt", "StartedAt", "Id" });
-
-            migrationBuilder.CreateIndex(
-                name: "IX_GamificationEvents_SeenAt_CreatedAt_Id",
-                table: "GamificationEvents",
-                columns: new[] { "SeenAt", "CreatedAt", "Id" });
+            migrationBuilder.AddForeignKey(
+                name: "FK_Challenges_Challenges_RematchOfChallengeId",
+                table: "Challenges",
+                column: "RematchOfChallengeId",
+                principalTable: "Challenges",
+                principalColumn: "Id",
+                onDelete: ReferentialAction.Restrict);
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.DropIndex(
-                name: "IX_TypingAttempts_Completed_Phase_PreparedAt_Id",
-                table: "TypingAttempts");
-
-            migrationBuilder.DropIndex(
-                name: "IX_TypingAttempts_Phase_FinishedAt_PreparedAt_Id",
-                table: "TypingAttempts");
-
-            migrationBuilder.DropIndex(
-                name: "IX_TypingAttempts_Phase_FinishedAt_StartedAt_Id",
-                table: "TypingAttempts");
-
-            migrationBuilder.DropIndex(
-                name: "IX_GamificationEvents_SeenAt_CreatedAt_Id",
-                table: "GamificationEvents");
+            migrationBuilder.DropForeignKey(
+                name: "FK_Challenges_Challenges_RematchOfChallengeId",
+                table: "Challenges");
         }
     }
 }

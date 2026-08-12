@@ -189,6 +189,46 @@ public sealed partial class WebSmokeTests : IClassFixture<KeyWarsWebFactory>
     }
 
     [Fact]
+    public async Task ManipulatedAttemptStartRejectsOwnedQuarantinedText()
+    {
+        using var isolatedFactory = new KeyWarsWebFactory();
+        var client = isolatedFactory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        await LoginAsync(client);
+
+        Guid textId;
+        await using (var scope = isolatedFactory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<KeyWarsDbContext>();
+            var profile = await db.UserProfiles.SingleAsync(item => item.SamAccountName == "max.mustermann");
+            var text = new TrainingText
+            {
+                OwnerProfileId = profile.Id,
+                Title = "Quarantänisierter Eigentext",
+                Body = "Dieser Text darf trotz manipulierter Auswahl nicht gestartet werden.",
+                Visibility = TrainingTextVisibility.Private,
+                IsQuarantined = true
+            };
+            db.TrainingTexts.Add(text);
+            await db.SaveChangesAsync();
+            textId = text.Id;
+        }
+
+        var response = await client.PostAsJsonAsync("/api/spielen/start", new
+        {
+            mode = "Text",
+            trainingTextId = textId
+        });
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+        Assert.Equal(AttemptErrorCodes.InvalidRequest, problem.RootElement.GetProperty("code").GetString());
+        await using var verificationScope = isolatedFactory.Services.CreateAsyncScope();
+        var verificationDb = verificationScope.ServiceProvider.GetRequiredService<KeyWarsDbContext>();
+        Assert.False(await verificationDb.TypingAttempts.AnyAsync(item => item.TrainingTextId == textId));
+    }
+
+    [Fact]
     public async Task ChallengeConflictReturnsTypedProblemDetails()
     {
         using var isolatedFactory = new KeyWarsWebFactory();
