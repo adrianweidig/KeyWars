@@ -23,6 +23,18 @@ public sealed class BackupServiceTests : IAsyncLifetime
         $"keywars-backup;Mode=ReadOnly-{Guid.NewGuid():N}");
 
     [Fact]
+    public async Task BackupRetentionDryRunDoesNotCreateADataDirectory()
+    {
+        var service = CreateService(dataDirectory);
+
+        var result = await service.ApplyRetentionAsync(DateTimeOffset.UtcNow, 1, dryRun: true);
+
+        Assert.True(result.Applicable);
+        Assert.Equal(0, result.ValidPairs);
+        Assert.False(Directory.Exists(Path.Combine(dataDirectory, "backups")));
+    }
+
+    [Fact]
     public async Task BackupAndRestoreHandlePathsWithConnectionStringSeparators()
     {
         await InitializeDatabaseAsync(dataDirectory, "before");
@@ -50,6 +62,77 @@ public sealed class BackupServiceTests : IAsyncLifetime
         Assert.Equal("after", await ReadSampleValueAsync(preRestoreBackup));
         Assert.True(File.Exists(BackupService.GetManifestPath(preRestoreBackup)));
         Assert.Empty(Directory.GetFiles(dataDirectory, ".keywars.db.restore-*.db"));
+    }
+
+    [Fact]
+    public async Task BackupRetentionIsDryRunFirstAndKeepsCompleteMinimumPairs()
+    {
+        await InitializeDatabaseAsync(dataDirectory, "retention");
+        var service = CreateService(dataDirectory);
+        var now = new DateTimeOffset(2026, 8, 11, 12, 0, 0, TimeSpan.Zero);
+        var backupPaths = new List<string>();
+        for (var index = 0; index < 5; index++)
+        {
+            var backupPath = await service.CreateBackupAsync();
+            var manifest = await ReadManifestAsync(backupPath);
+            await WriteManifestAsync(
+                backupPath,
+                manifest with { CreatedAtUtc = now.AddDays(-90 + index) });
+            backupPaths.Add(backupPath);
+        }
+
+        var dryRun = await service.ApplyRetentionAsync(now.AddDays(-30), 2, dryRun: true);
+
+        Assert.Equal(5, dryRun.ValidPairs);
+        Assert.Equal(3, dryRun.CandidatePairs);
+        Assert.Equal(0, dryRun.DeletedPairs);
+        Assert.All(backupPaths, backupPath =>
+        {
+            Assert.True(File.Exists(backupPath));
+            Assert.True(File.Exists(BackupService.GetManifestPath(backupPath)));
+        });
+
+        var applied = await service.ApplyRetentionAsync(now.AddDays(-30), 2, dryRun: false);
+
+        Assert.Equal(3, applied.DeletedPairs);
+        Assert.Equal(0, applied.FailedPairs);
+        Assert.Equal(2, Directory.GetFiles(Path.Combine(dataDirectory, "backups"), "keywars-*.db").Length);
+        Assert.Equal(2, Directory.GetFiles(Path.Combine(dataDirectory, "backups"), "keywars-*.db.manifest.json").Length);
+    }
+
+    [Fact]
+    public async Task BackupRetentionPreservesInvalidPairsAndExcludesThemFromTheMinimum()
+    {
+        await InitializeDatabaseAsync(dataDirectory, "retention-invalid");
+        var service = CreateService(dataDirectory);
+        var now = new DateTimeOffset(2026, 8, 11, 12, 0, 0, TimeSpan.Zero);
+        var backupPaths = new List<string>();
+        for (var index = 0; index < 3; index++)
+        {
+            var backupPath = await service.CreateBackupAsync();
+            var manifest = await ReadManifestAsync(backupPath);
+            await WriteManifestAsync(
+                backupPath,
+                manifest with { CreatedAtUtc = now.AddDays(-90 + index) });
+            backupPaths.Add(backupPath);
+        }
+
+        await File.AppendAllTextAsync(backupPaths[0], "beschädigt");
+
+        var dryRun = await service.ApplyRetentionAsync(now.AddDays(-30), 1, dryRun: true);
+
+        Assert.Equal(2, dryRun.ValidPairs);
+        Assert.Equal(1, dryRun.CandidatePairs);
+        Assert.Equal(1, dryRun.IgnoredEntries);
+        Assert.True(File.Exists(backupPaths[0]));
+        Assert.True(File.Exists(BackupService.GetManifestPath(backupPaths[0])));
+
+        var applied = await service.ApplyRetentionAsync(now.AddDays(-30), 1, dryRun: false);
+
+        Assert.Equal(1, applied.DeletedPairs);
+        Assert.Equal(1, applied.IgnoredEntries);
+        Assert.True(File.Exists(backupPaths[0]));
+        Assert.True(File.Exists(BackupService.GetManifestPath(backupPaths[0])));
     }
 
     [Fact]

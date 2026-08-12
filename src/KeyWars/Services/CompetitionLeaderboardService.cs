@@ -1,6 +1,7 @@
 using KeyWars.Data;
 using KeyWars.Domain;
 using Microsoft.EntityFrameworkCore;
+using System.Globalization;
 
 namespace KeyWars.Services;
 
@@ -8,7 +9,8 @@ public sealed record LeaderboardQuery(
     CompetitionBoardKind Board,
     CompetitionPeriod Period,
     TrainingMode Mode,
-    Guid? TextId);
+    Guid? TextId,
+    bool OwnDepartmentOnly = false);
 
 public sealed record CompetitionTextOption(Guid Id, string Title, int CharacterCount);
 
@@ -66,7 +68,7 @@ public sealed class CompetitionLeaderboardService(KeyWarsDbContext db, TimeProvi
     public async Task<CompetitionOverview> GetAsync(UserProfile currentProfile, LeaderboardQuery query, CancellationToken cancellationToken = default)
     {
         var textOptions = await ReadTextOptionsAsync(cancellationToken);
-        var normalized = Normalize(query, textOptions);
+        var normalized = Normalize(query, textOptions, currentProfile);
         var board = normalized.Board switch
         {
             CompetitionBoardKind.Sprint => await BuildAttemptBoardAsync(currentProfile, normalized, textOptions, false, cancellationToken),
@@ -79,7 +81,7 @@ public sealed class CompetitionLeaderboardService(KeyWarsDbContext db, TimeProvi
         return new CompetitionOverview(
             normalized,
             currentProfile.LeaderboardVisible && !currentProfile.Deleted,
-            BuildDivision(currentProfile.ArenaRating),
+            ArenaDivision.NameFor(currentProfile.ArenaRating),
             await ReadPersonalBestAsync(currentProfile.Id, cancellationToken),
             textOptions,
             board);
@@ -101,7 +103,12 @@ public sealed class CompetitionLeaderboardService(KeyWarsDbContext db, TimeProvi
 
     private async Task<LeaderboardBoard> BuildArenaBoardAsync(UserProfile currentProfile, LeaderboardQuery query, CancellationToken cancellationToken)
     {
-        var profiles = await VisibleProfiles().ToListAsync(cancellationToken);
+        var profiles = await VisibleProfiles(currentProfile, query)
+            .OrderByDescending(profile => profile.ArenaRating)
+            .ThenBy(profile => profile.DisplayName)
+            .ThenBy(profile => profile.Id)
+            .Take(PublicLimit)
+            .ToListAsync(cancellationToken);
         var profileIds = profiles.Select(profile => profile.Id).ToHashSet();
         var stats = await ReadArenaStatsAsync(profileIds, query.Period, cancellationToken);
         var ranked = RankEntries(profiles.Select(profile =>
@@ -113,7 +120,7 @@ public sealed class CompetitionLeaderboardService(KeyWarsDbContext db, TimeProvi
                 DisplayName = profile.DisplayName,
                 Initials = BuildInitials(profile.DisplayName),
                 PrimaryValue = profile.ArenaRating.ToString("N0"),
-                Context = $"{BuildDivision(profile.ArenaRating)} · {profile.RatedMatchCount:N0} gewertete Rennen",
+                Context = $"{ArenaDivision.NameFor(profile.ArenaRating)} · {profile.RatedMatchCount:N0} gewertete Rennen",
                 Detail = stat is null ? "Noch keine Rennen im Zeitraum" : $"{stat.Attempts:N0} Rennen · {stat.Wins:N0} Siege · Ø {stat.AverageWpm:0.0} WPM",
                 Score = profile.ArenaRating,
                 Wpm = stat?.AverageWpm ?? 0,
@@ -147,14 +154,13 @@ public sealed class CompetitionLeaderboardService(KeyWarsDbContext db, TimeProvi
         bool textBoard,
         CancellationToken cancellationToken)
     {
-        var candidates = await ReadAttemptCandidatesAsync(query, textBoard, includeHiddenCurrentProfileId: null, cancellationToken);
-        var best = BestAttemptPerProfile(candidates);
-        var ranked = RankEntries(best.Select(candidate => ToAttemptEntry(candidate, currentProfile.Id, false)));
+        var candidates = await ReadAttemptCandidatesAsync(query, textBoard, currentProfile, privateProfileId: null, cancellationToken);
+        var ranked = RankEntries(candidates.Select(candidate => ToAttemptEntry(candidate, currentProfile.Id, false)));
         LeaderboardEntry? privateEntry = null;
         if (!currentProfile.LeaderboardVisible)
         {
-            var privateCandidates = await ReadAttemptCandidatesAsync(query, textBoard, currentProfile.Id, cancellationToken);
-            privateEntry = BestAttemptPerProfile(privateCandidates)
+            var privateCandidates = await ReadAttemptCandidatesAsync(query, textBoard, currentProfile, currentProfile.Id, cancellationToken);
+            privateEntry = privateCandidates
                 .Select(candidate => ToAttemptEntry(candidate, currentProfile.Id, true))
                 .FirstOrDefault();
         }
@@ -176,13 +182,13 @@ public sealed class CompetitionLeaderboardService(KeyWarsDbContext db, TimeProvi
 
     private async Task<LeaderboardBoard> BuildChallengeBoardAsync(UserProfile currentProfile, LeaderboardQuery query, CancellationToken cancellationToken)
     {
-        var candidates = await ReadChallengeCandidatesAsync(query, includeHiddenCurrentProfileId: null, cancellationToken);
-        var ranked = RankEntries(BestChallengePerProfile(candidates).Select(candidate => ToChallengeEntry(candidate, currentProfile.Id, false)));
+        var candidates = await ReadChallengeCandidatesAsync(query, currentProfile, privateProfileId: null, cancellationToken);
+        var ranked = RankEntries(candidates.Select(candidate => ToChallengeEntry(candidate, currentProfile.Id, false)));
         LeaderboardEntry? privateEntry = null;
         if (!currentProfile.LeaderboardVisible)
         {
-            var privateCandidates = await ReadChallengeCandidatesAsync(query, currentProfile.Id, cancellationToken);
-            privateEntry = BestChallengePerProfile(privateCandidates)
+            var privateCandidates = await ReadChallengeCandidatesAsync(query, currentProfile, currentProfile.Id, cancellationToken);
+            privateEntry = privateCandidates
                 .Select(candidate => ToChallengeEntry(candidate, currentProfile.Id, true))
                 .FirstOrDefault();
         }
@@ -201,7 +207,12 @@ public sealed class CompetitionLeaderboardService(KeyWarsDbContext db, TimeProvi
 
     private async Task<LeaderboardBoard> BuildXpBoardAsync(UserProfile currentProfile, LeaderboardQuery query, CancellationToken cancellationToken)
     {
-        var profiles = await VisibleProfiles().ToListAsync(cancellationToken);
+        var profiles = await VisibleProfiles(currentProfile, query)
+            .OrderByDescending(profile => profile.ExperiencePoints)
+            .ThenBy(profile => profile.DisplayName)
+            .ThenBy(profile => profile.Id)
+            .Take(PublicLimit)
+            .ToListAsync(cancellationToken);
         var profileIds = profiles.Select(profile => profile.Id).ToHashSet();
         var missionCounts = await db.Missions
             .AsNoTracking()
@@ -296,7 +307,7 @@ public sealed class CompetitionLeaderboardService(KeyWarsDbContext db, TimeProvi
             .ToListAsync(cancellationToken);
     }
 
-    private LeaderboardQuery Normalize(LeaderboardQuery query, IReadOnlyList<CompetitionTextOption> textOptions)
+    private LeaderboardQuery Normalize(LeaderboardQuery query, IReadOnlyList<CompetitionTextOption> textOptions, UserProfile currentProfile)
     {
         var board = Enum.IsDefined(query.Board) ? query.Board : CompetitionBoardKind.ArenaRating;
         var period = Enum.IsDefined(query.Period) ? query.Period : CompetitionPeriod.Day;
@@ -307,11 +318,17 @@ public sealed class CompetitionLeaderboardService(KeyWarsDbContext db, TimeProvi
             textId = textOptions.FirstOrDefault()?.Id;
         }
 
-        return new LeaderboardQuery(board, period, mode, textId);
+        var ownDepartmentOnly = query.OwnDepartmentOnly && !string.IsNullOrWhiteSpace(currentProfile.Department);
+        return new LeaderboardQuery(board, period, mode, textId, ownDepartmentOnly);
     }
 
-    private IQueryable<UserProfile> VisibleProfiles() =>
-        db.UserProfiles.AsNoTracking().Where(profile => profile.LeaderboardVisible && !profile.Deleted);
+    private IQueryable<UserProfile> VisibleProfiles(UserProfile currentProfile, LeaderboardQuery query)
+    {
+        var profiles = db.UserProfiles.AsNoTracking().Where(profile => profile.LeaderboardVisible && !profile.Deleted);
+        return query.OwnDepartmentOnly
+            ? profiles.Where(profile => profile.Department == currentProfile.Department)
+            : profiles;
+    }
 
     private async Task<IReadOnlyDictionary<Guid, ArenaStat>> ReadArenaStatsAsync(HashSet<Guid> profileIds, CompetitionPeriod period, CancellationToken cancellationToken)
     {
@@ -320,10 +337,23 @@ public sealed class CompetitionLeaderboardService(KeyWarsDbContext db, TimeProvi
             return new Dictionary<Guid, ArenaStat>();
         }
 
+        var rooms = db.LiveRoomSummaries.AsNoTracking().AsQueryable();
         var start = PeriodStart(period);
+        if (start is { } startValue)
+        {
+            rooms = db.Database.IsSqlite()
+                ? db.LiveRoomSummaries.FromSqlInterpolated($"""
+                    SELECT *
+                    FROM LiveRoomSummaries
+                    WHERE FinishedAt IS NOT NULL
+                      AND substr(FinishedAt, 1, 19) >= {FormatSqliteDateTimeOffset(startValue)}
+                    """).AsNoTracking()
+                : rooms.Where(room => room.FinishedAt >= startValue);
+        }
+
         var query =
             from participant in db.LiveRoomParticipantSummaries.AsNoTracking()
-            join room in db.LiveRoomSummaries.AsNoTracking() on participant.LiveRoomSummaryId equals room.Id
+            join room in rooms on participant.LiveRoomSummaryId equals room.Id
             where profileIds.Contains(participant.UserProfileId)
                 && participant.Status == ParticipantStatus.Finished
                 && room.FinishedAt != null
@@ -335,34 +365,31 @@ public sealed class CompetitionLeaderboardService(KeyWarsDbContext db, TimeProvi
                 participant.Wpm,
                 participant.Accuracy,
                 participant.RatingBefore,
-                participant.RatingAfter,
-                room.FinishedAt
+                participant.RatingAfter
             };
         var rows = await query
-            .Select(row => new ArenaResultRow(
-                row.UserProfileId,
-                row.Placement,
-                row.Wpm,
-                row.Accuracy,
-                row.RatingAfter - row.RatingBefore,
-                row.FinishedAt!.Value))
-            .ToListAsync(cancellationToken);
-        if (start is { } startValue)
-        {
-            rows = rows.Where(row => row.FinishedAt >= startValue).ToList();
-        }
-
-        return rows
             .GroupBy(row => row.UserProfileId)
-            .ToDictionary(
-                group => group.Key,
-                group => new ArenaStat(
-                    group.Count(),
-                    group.Count(row => row.Placement == 1),
-                    group.Count(row => row.Placement is > 0 and <= 3),
-                    group.Average(row => row.Wpm),
-                    group.Average(row => row.Accuracy),
-                    (int)Math.Round(group.Sum(row => row.RatingDelta))));
+            .Select(group => new
+            {
+                UserProfileId = group.Key,
+                Attempts = group.Count(),
+                Wins = group.Count(row => row.Placement == 1),
+                Podiums = group.Count(row => row.Placement != null && row.Placement > 0 && row.Placement <= 3),
+                AverageWpm = group.Average(row => row.Wpm),
+                AverageAccuracy = group.Average(row => row.Accuracy),
+                RatingDelta = group.Sum(row => row.RatingAfter - row.RatingBefore)
+            })
+            .ToListAsync(cancellationToken);
+
+        return rows.ToDictionary(
+            row => row.UserProfileId,
+            row => new ArenaStat(
+                row.Attempts,
+                row.Wins,
+                row.Podiums,
+                row.AverageWpm,
+                row.AverageAccuracy,
+                row.RatingDelta));
     }
 
     private async Task<LeaderboardEntry?> BuildPrivateArenaEntryAsync(UserProfile profile, CompetitionPeriod period, CancellationToken cancellationToken)
@@ -375,7 +402,7 @@ public sealed class CompetitionLeaderboardService(KeyWarsDbContext db, TimeProvi
             DisplayName = profile.DisplayName,
             Initials = BuildInitials(profile.DisplayName),
             PrimaryValue = profile.ArenaRating.ToString("N0"),
-            Context = $"{BuildDivision(profile.ArenaRating)} · privat ausgeblendet",
+            Context = $"{ArenaDivision.NameFor(profile.ArenaRating)} · privat ausgeblendet",
             Detail = stat is null ? "Noch keine Rennen im Zeitraum" : $"{stat.Attempts:N0} Rennen · {stat.Wins:N0} Siege · Ø {stat.AverageWpm:0.0} WPM",
             Score = profile.ArenaRating,
             Wpm = stat?.AverageWpm ?? 0,
@@ -392,13 +419,39 @@ public sealed class CompetitionLeaderboardService(KeyWarsDbContext db, TimeProvi
     private async Task<IReadOnlyList<AttemptCandidate>> ReadAttemptCandidatesAsync(
         LeaderboardQuery query,
         bool textBoard,
-        Guid? includeHiddenCurrentProfileId,
+        UserProfile currentProfile,
+        Guid? privateProfileId,
         CancellationToken cancellationToken)
     {
+        IQueryable<TypingAttempt> attemptSource = db.TypingAttempts.AsNoTracking();
         var start = PeriodStart(query.Period);
-        var visibleProfiles = db.UserProfiles.AsNoTracking().Where(profile => !profile.Deleted && (profile.LeaderboardVisible || profile.Id == includeHiddenCurrentProfileId));
+        if (start is { } startValue)
+        {
+            attemptSource = db.Database.IsSqlite()
+                ? db.TypingAttempts.FromSqlInterpolated($"""
+                    SELECT *
+                    FROM TypingAttempts
+                    WHERE substr(COALESCE(FinishedAt, CreatedAt), 1, 19) >= {FormatSqliteDateTimeOffset(startValue)}
+                    """).AsNoTracking()
+                : attemptSource.Where(attempt => (attempt.FinishedAt ?? attempt.CreatedAt) >= startValue);
+        }
+
+        var visibleProfiles = db.UserProfiles.AsNoTracking().Where(profile => !profile.Deleted);
+        if (privateProfileId is { } hiddenProfileId)
+        {
+            visibleProfiles = visibleProfiles.Where(profile => profile.Id == hiddenProfileId);
+        }
+        else
+        {
+            visibleProfiles = visibleProfiles.Where(profile => profile.LeaderboardVisible);
+            if (query.OwnDepartmentOnly)
+            {
+                visibleProfiles = visibleProfiles.Where(profile => profile.Department == currentProfile.Department);
+            }
+        }
+
         var attempts =
-            from attempt in db.TypingAttempts.AsNoTracking()
+            from attempt in attemptSource
             join profile in visibleProfiles on attempt.UserProfileId equals profile.Id
             join text in db.TrainingTexts.AsNoTracking() on attempt.TrainingTextId equals text.Id into textJoin
             from text in textJoin.DefaultIfEmpty()
@@ -408,44 +461,58 @@ public sealed class CompetitionLeaderboardService(KeyWarsDbContext db, TimeProvi
                 && attempt.Phase == AttemptPhase.Finished
                 && attempt.Accuracy >= CompetitionEligibility.MinimumAccuracy
                 && !profile.Deleted
-            select new { attempt, profile, text };
+            select new
+            {
+                UserProfileId = profile.Id,
+                profile.DisplayName,
+                AttemptId = attempt.Id,
+                attempt.Mode,
+                attempt.TrainingTextId,
+                TextTitle = text == null ? null : text.Title,
+                TextRatingEligible = text != null && text.RatingEligible,
+                attempt.Wpm,
+                attempt.Accuracy,
+                attempt.Consistency,
+                attempt.DurationMilliseconds,
+                FinishedAt = attempt.FinishedAt ?? attempt.CreatedAt,
+                attempt.CorrectCharacters
+            };
         attempts = textBoard
-            ? attempts.Where(row => row.attempt.Mode == TrainingMode.Text && row.text != null && row.text.RatingEligible && row.attempt.TrainingTextId == query.TextId)
-            : attempts.Where(row => row.attempt.Mode == query.Mode);
+            ? attempts.Where(row => row.Mode == TrainingMode.Text && row.TextRatingEligible && row.TrainingTextId == query.TextId)
+            : attempts.Where(row => row.Mode == query.Mode);
 
-        var rows = await attempts.ToListAsync(cancellationToken);
-        if (start is { } startValue)
-        {
-            rows = rows.Where(row => (row.attempt.FinishedAt ?? row.attempt.CreatedAt) >= startValue).ToList();
-        }
-
-        return rows.Select(row => new AttemptCandidate(
-                row.profile.Id,
-                row.profile.DisplayName,
-                row.attempt.Id,
-                row.attempt.Mode,
-                row.attempt.TrainingTextId,
-                row.text?.Title ?? DisplayNames.For(row.attempt.Mode),
-                row.attempt.Wpm,
-                row.attempt.Accuracy,
-                row.attempt.Consistency,
-                row.attempt.DurationMilliseconds,
-                row.attempt.FinishedAt ?? row.attempt.CreatedAt,
-                row.attempt.CorrectCharacters))
-            .ToList();
-    }
-
-    private static IReadOnlyList<AttemptCandidate> BestAttemptPerProfile(IEnumerable<AttemptCandidate> candidates) =>
-        candidates
-            .GroupBy(candidate => candidate.UserProfileId)
-            .Select(group => group
+        var rows = await attempts
+            .Where(row => row.AttemptId == attempts
+                .Where(candidate => candidate.UserProfileId == row.UserProfileId)
                 .OrderByDescending(candidate => candidate.Wpm)
                 .ThenByDescending(candidate => candidate.Accuracy)
                 .ThenByDescending(candidate => candidate.Consistency)
-                .ThenBy(candidate => candidate.FinishedAt)
-                .ThenBy(candidate => candidate.DisplayName)
+                .ThenBy(candidate => candidate.AttemptId)
+                .Select(candidate => candidate.AttemptId)
                 .First())
+            .OrderByDescending(row => row.Wpm)
+            .ThenByDescending(row => row.Accuracy)
+            .ThenByDescending(row => row.Consistency)
+            .ThenBy(row => row.DisplayName)
+            .ThenBy(row => row.UserProfileId)
+            .Take(privateProfileId is null ? PublicLimit : 1)
+            .ToListAsync(cancellationToken);
+
+        return rows.Select(row => new AttemptCandidate(
+                row.UserProfileId,
+                row.DisplayName,
+                row.AttemptId,
+                row.Mode,
+                row.TrainingTextId,
+                row.TextTitle ?? DisplayNames.For(row.Mode),
+                row.Wpm,
+                row.Accuracy,
+                row.Consistency,
+                row.DurationMilliseconds,
+                row.FinishedAt,
+                row.CorrectCharacters))
             .ToList();
+    }
 
     private static LeaderboardEntry ToAttemptEntry(AttemptCandidate candidate, Guid currentProfileId, bool privatePreview) => new()
     {
@@ -469,50 +536,86 @@ public sealed class CompetitionLeaderboardService(KeyWarsDbContext db, TimeProvi
 
     private async Task<IReadOnlyList<ChallengeCandidate>> ReadChallengeCandidatesAsync(
         LeaderboardQuery query,
-        Guid? includeHiddenCurrentProfileId,
+        UserProfile currentProfile,
+        Guid? privateProfileId,
         CancellationToken cancellationToken)
     {
+        IQueryable<ChallengeRoundResult> resultSource = db.ChallengeRoundResults.AsNoTracking();
         var start = PeriodStart(query.Period);
-        var visibleProfiles = db.UserProfiles.AsNoTracking().Where(profile => !profile.Deleted && (profile.LeaderboardVisible || profile.Id == includeHiddenCurrentProfileId));
+        if (start is { } startValue)
+        {
+            resultSource = db.Database.IsSqlite()
+                ? db.ChallengeRoundResults.FromSqlInterpolated($"""
+                    SELECT *
+                    FROM ChallengeRoundResults
+                    WHERE FinishedAt IS NOT NULL
+                      AND substr(FinishedAt, 1, 19) >= {FormatSqliteDateTimeOffset(startValue)}
+                    """).AsNoTracking()
+                : resultSource.Where(result => result.FinishedAt >= startValue);
+        }
+
+        var visibleProfiles = db.UserProfiles.AsNoTracking().Where(profile => !profile.Deleted);
+        if (privateProfileId is { } hiddenProfileId)
+        {
+            visibleProfiles = visibleProfiles.Where(profile => profile.Id == hiddenProfileId);
+        }
+        else
+        {
+            visibleProfiles = visibleProfiles.Where(profile => profile.LeaderboardVisible);
+            if (query.OwnDepartmentOnly)
+            {
+                visibleProfiles = visibleProfiles.Where(profile => profile.Department == currentProfile.Department);
+            }
+        }
+
         var queryRows =
-            from result in db.ChallengeRoundResults.AsNoTracking()
+            from result in resultSource
             join round in db.ChallengeRounds.AsNoTracking() on result.ChallengeRoundId equals round.Id
             join challenge in db.Challenges.AsNoTracking() on round.ChallengeId equals challenge.Id
             join profile in visibleProfiles on result.UserProfileId equals profile.Id
             where result.Status == ParticipantStatus.Finished
                 && result.FinishedAt != null
                 && result.Accuracy >= CompetitionEligibility.MinimumAccuracy
-            select new { result, challenge, profile };
+            select new
+            {
+                UserProfileId = profile.Id,
+                profile.DisplayName,
+                ChallengeTitle = challenge.Title,
+                ResultId = result.Id,
+                result.Wpm,
+                result.Accuracy,
+                result.Consistency,
+                result.Placement,
+                FinishedAt = result.FinishedAt!.Value
+            };
         var rows = await queryRows
-            .Select(row => new ChallengeCandidate(
-                row.profile.Id,
-                row.profile.DisplayName,
-                row.challenge.Title,
-                row.result.Wpm,
-                row.result.Accuracy,
-                row.result.Consistency,
-                row.result.Placement,
-                row.result.FinishedAt!.Value))
-            .ToListAsync(cancellationToken);
-        if (start is { } startValue)
-        {
-            rows = rows.Where(row => row.FinishedAt >= startValue).ToList();
-        }
-
-        return rows;
-    }
-
-    private static IReadOnlyList<ChallengeCandidate> BestChallengePerProfile(IEnumerable<ChallengeCandidate> candidates) =>
-        candidates
-            .GroupBy(candidate => candidate.UserProfileId)
-            .Select(group => group
+            .Where(row => row.ResultId == queryRows
+                .Where(candidate => candidate.UserProfileId == row.UserProfileId)
                 .OrderByDescending(candidate => candidate.Wpm)
                 .ThenByDescending(candidate => candidate.Accuracy)
                 .ThenByDescending(candidate => candidate.Consistency)
-                .ThenBy(candidate => candidate.FinishedAt)
-                .ThenBy(candidate => candidate.DisplayName)
+                .ThenBy(candidate => candidate.ResultId)
+                .Select(candidate => candidate.ResultId)
                 .First())
+            .OrderByDescending(row => row.Wpm)
+            .ThenByDescending(row => row.Accuracy)
+            .ThenByDescending(row => row.Consistency)
+            .ThenBy(row => row.DisplayName)
+            .ThenBy(row => row.UserProfileId)
+            .Take(privateProfileId is null ? PublicLimit : 1)
+            .ToListAsync(cancellationToken);
+
+        return rows.Select(row => new ChallengeCandidate(
+                row.UserProfileId,
+                row.DisplayName,
+                row.ChallengeTitle,
+                row.Wpm,
+                row.Accuracy,
+                row.Consistency,
+                row.Placement,
+                row.FinishedAt))
             .ToList();
+    }
 
     private static LeaderboardEntry ToChallengeEntry(ChallengeCandidate candidate, Guid currentProfileId, bool privatePreview) => new()
     {
@@ -541,19 +644,24 @@ public sealed class CompetitionLeaderboardService(KeyWarsDbContext db, TimeProvi
             return new Dictionary<Guid, int>();
         }
 
+        IQueryable<RewardLedgerEntry> entries = db.RewardLedgerEntries.AsNoTracking();
         var start = PeriodStart(period);
-        var rows = await db.RewardLedgerEntries
-            .AsNoTracking()
-            .Where(entry => profileIds.Contains(entry.UserProfileId))
-            .ToListAsync(cancellationToken);
         if (start is { } startValue)
         {
-            rows = rows.Where(entry => entry.AwardedAt >= startValue).ToList();
+            entries = db.Database.IsSqlite()
+                ? db.RewardLedgerEntries.FromSqlInterpolated($"""
+                    SELECT *
+                    FROM RewardLedgerEntries
+                    WHERE substr(AwardedAt, 1, 19) >= {FormatSqliteDateTimeOffset(startValue)}
+                    """).AsNoTracking()
+                : entries.Where(entry => entry.AwardedAt >= startValue);
         }
 
-        return rows
+        return await entries
+            .Where(entry => profileIds.Contains(entry.UserProfileId))
             .GroupBy(entry => entry.UserProfileId)
-            .ToDictionary(group => group.Key, group => group.Sum(entry => entry.Xp));
+            .Select(group => new { UserProfileId = group.Key, Xp = group.Sum(entry => entry.Xp) })
+            .ToDictionaryAsync(item => item.UserProfileId, item => item.Xp, cancellationToken);
     }
 
     private async Task<string> ReadPersonalBestAsync(Guid profileId, CancellationToken cancellationToken)
@@ -587,22 +695,14 @@ public sealed class CompetitionLeaderboardService(KeyWarsDbContext db, TimeProvi
         };
     }
 
+    private static string FormatSqliteDateTimeOffset(DateTimeOffset value) =>
+        value.ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+
     private static string BuildInitials(string displayName)
     {
         var parts = displayName.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         return parts.Length == 0 ? "KW" : string.Concat(parts.Take(2).Select(part => char.ToUpperInvariant(part[0])));
     }
-
-    private static string BuildDivision(int rating) => rating switch
-    {
-        >= 1300 => "Diamant",
-        >= 1200 => "Platin",
-        >= 1100 => "Gold",
-        >= 1050 => "Silber",
-        _ => "Bronze"
-    };
-
-    private sealed record ArenaResultRow(Guid UserProfileId, int? Placement, double Wpm, double Accuracy, double RatingDelta, DateTimeOffset FinishedAt);
 
     private sealed record ArenaStat(int Attempts, int Wins, int Podiums, double AverageWpm, double AverageAccuracy, int RatingDelta);
 

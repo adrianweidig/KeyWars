@@ -8,57 +8,99 @@ namespace KeyWars.Hubs;
 [Authorize]
 public sealed class ArenaHub(
     CurrentUser currentUser,
-    LiveRoomManager rooms,
-    LivePresenceTracker presence,
+    ILiveRoomDispatcher rooms,
+    ILivePresenceStateStore presence,
     LiveProgressBroadcaster progress,
     LiveReactionService reactions,
-    ProfileAccessGate accessGate) : Hub
+    IProfileAccessGate accessGate,
+    ISharedRateLimiter rateLimiter,
+    ILiveRoomUpdateSender updates) : Hub
 {
     public async Task<LiveRoomSnapshot?> JoinRoom(Guid roomId)
     {
         var profile = await currentUser.RequireProfileAsync(Context.User!, Context.ConnectionAborted);
-        presence.EnsureCanConnect(profile.Id, Context.ConnectionId);
+        var roomSwitch = await presence.EnterRoomAsync(
+            profile.Id,
+            Context.ConnectionId,
+            roomId,
+            Context.ConnectionAborted);
         LiveRoomSnapshot snapshot;
         try
         {
-            snapshot = rooms.Join(roomId, profile.Id, profile.DisplayName);
+            snapshot = await rooms.JoinAsync(roomId, profile.Id, profile.DisplayName, Context.ConnectionAborted);
         }
         catch (InvalidOperationException ex) when (IsRoomNotFound(ex))
         {
+            await presence.RollbackEnterRoomAsync(
+                profile.Id,
+                Context.ConnectionId,
+                roomId,
+                roomSwitch,
+                CancellationToken.None);
             await NotifyRoomUnavailableAsync(ex.Message);
             return null;
         }
+        catch
+        {
+            await presence.RollbackEnterRoomAsync(
+                profile.Id,
+                Context.ConnectionId,
+                roomId,
+                roomSwitch,
+                CancellationToken.None);
+            throw;
+        }
 
-        await ApplyRoomSwitchAsync(profile.Id, presence.EnterRoom(profile.Id, Context.ConnectionId, roomId));
         await Groups.AddToGroupAsync(Context.ConnectionId, roomId.ToString("N"), Context.ConnectionAborted);
-        await Clients.Group(roomId.ToString("N")).SendAsync("roomChanged", snapshot, Context.ConnectionAborted);
+        await ApplyRoomSwitchAsync(profile.Id, roomSwitch);
+        await updates.SendAsync(snapshot, CancellationToken.None);
         return snapshot;
     }
 
     public async Task<LiveRoomSnapshot> JoinRoomByCode(string code)
     {
         var profile = await currentUser.RequireProfileAsync(Context.User!, Context.ConnectionAborted);
-        presence.EnsureCanConnect(profile.Id, Context.ConnectionId);
-        var snapshot = rooms.JoinByCode(code, profile.Id, profile.DisplayName);
-        await ApplyRoomSwitchAsync(profile.Id, presence.EnterRoom(profile.Id, Context.ConnectionId, snapshot.RoomId));
+        var roomId = await rooms.ResolveRoomIdByCodeAsync(code, Context.ConnectionAborted);
+        var roomSwitch = await presence.EnterRoomAsync(
+            profile.Id,
+            Context.ConnectionId,
+            roomId,
+            Context.ConnectionAborted);
+        LiveRoomSnapshot snapshot;
+        try
+        {
+            snapshot = await rooms.JoinByCodeAsync(code, profile.Id, profile.DisplayName, Context.ConnectionAborted);
+        }
+        catch
+        {
+            await presence.RollbackEnterRoomAsync(
+                profile.Id,
+                Context.ConnectionId,
+                roomId,
+                roomSwitch,
+                CancellationToken.None);
+            throw;
+        }
+
         await Groups.AddToGroupAsync(Context.ConnectionId, snapshot.RoomId.ToString("N"), Context.ConnectionAborted);
-        await Clients.Group(snapshot.RoomId.ToString("N")).SendAsync("roomChanged", snapshot, Context.ConnectionAborted);
+        await ApplyRoomSwitchAsync(profile.Id, roomSwitch);
+        await updates.SendAsync(snapshot, CancellationToken.None);
         return snapshot;
     }
 
     public async Task<LiveRoomSnapshot> SetReady(Guid roomId, bool ready)
     {
         var profile = await currentUser.RequireProfileAsync(Context.User!, Context.ConnectionAborted);
-        var snapshot = rooms.SetReady(roomId, profile.Id, ready);
-        await Clients.Group(roomId.ToString("N")).SendAsync("roomChanged", snapshot, Context.ConnectionAborted);
+        var snapshot = await rooms.SetReadyAsync(roomId, profile.Id, ready, Context.ConnectionAborted);
+        await updates.SendAsync(snapshot, CancellationToken.None);
         return snapshot;
     }
 
     public async Task<LiveRoomSnapshot> Start(Guid roomId)
     {
         var profile = await currentUser.RequireProfileAsync(Context.User!, Context.ConnectionAborted);
-        var snapshot = rooms.Start(roomId, profile.Id);
-        await Clients.Group(roomId.ToString("N")).SendAsync("roomChanged", snapshot, Context.ConnectionAborted);
+        var snapshot = await rooms.StartAsync(roomId, profile.Id, Context.ConnectionAborted);
+        await updates.SendAsync(snapshot, CancellationToken.None);
         return snapshot;
     }
 
@@ -66,10 +108,10 @@ public sealed class ArenaHub(
     {
         var profileId = currentUser.GetProfileId(Context.User!)
             ?? throw new InvalidOperationException("Die aktuelle Sitzung besitzt kein gültiges KeyWars-Profil.");
-        var result = rooms.SubmitProgressDelta(roomId, profileId, sequence, input);
+        var result = await rooms.SubmitProgressDeltaAsync(roomId, profileId, sequence, input, Context.ConnectionAborted);
         if (result.Snapshot is { } snapshot)
         {
-            await Clients.Group(roomId.ToString("N")).SendAsync("roomChanged", snapshot, Context.ConnectionAborted);
+            await updates.SendAsync(snapshot, CancellationToken.None);
         }
 
         if (result.Delta is { } delta)
@@ -81,17 +123,82 @@ public sealed class ArenaHub(
     public async Task<LiveRoomSnapshot> Finish(Guid roomId, string input, int backspaces, int focusLosses)
     {
         var profile = await currentUser.RequireProfileAsync(Context.User!, Context.ConnectionAborted);
-        var snapshot = rooms.Finish(roomId, profile.Id, input, backspaces, focusLosses);
-        await Clients.Group(roomId.ToString("N")).SendAsync("roomChanged", snapshot, Context.ConnectionAborted);
+        var snapshot = await rooms.FinishAsync(
+            roomId,
+            profile.Id,
+            input,
+            backspaces,
+            focusLosses,
+            Context.ConnectionAborted);
+        await updates.SendAsync(snapshot, CancellationToken.None);
         return snapshot;
     }
 
     public async Task<LiveRoomSnapshot> GiveUp(Guid roomId)
     {
         var profile = await currentUser.RequireProfileAsync(Context.User!, Context.ConnectionAborted);
-        var snapshot = rooms.GiveUp(roomId, profile.Id);
-        await Clients.Group(roomId.ToString("N")).SendAsync("roomChanged", snapshot, Context.ConnectionAborted);
+        var snapshot = await rooms.GiveUpAsync(roomId, profile.Id, Context.ConnectionAborted);
+        await updates.SendAsync(snapshot, CancellationToken.None);
         return snapshot;
+    }
+
+    public async Task<LiveRoomSnapshot> SetLobbyLocked(Guid roomId, bool locked)
+    {
+        var profile = await currentUser.RequireProfileAsync(Context.User!, Context.ConnectionAborted);
+        var snapshot = await rooms.SetLobbyLockedAsync(roomId, profile.Id, locked, Context.ConnectionAborted);
+        await updates.SendAsync(snapshot, CancellationToken.None);
+        return snapshot;
+    }
+
+    public async Task<LiveRoomSnapshot> TransferHost(Guid roomId, Guid nextHostProfileId)
+    {
+        var profile = await currentUser.RequireProfileAsync(Context.User!, Context.ConnectionAborted);
+        var snapshot = await rooms.TransferHostAsync(
+            roomId,
+            profile.Id,
+            nextHostProfileId,
+            Context.ConnectionAborted);
+        await updates.SendAsync(snapshot, CancellationToken.None);
+        return snapshot;
+    }
+
+    public async Task<LiveRoomSnapshot> Kick(Guid roomId, Guid targetProfileId)
+    {
+        var profile = await currentUser.RequireProfileAsync(Context.User!, Context.ConnectionAborted);
+        var snapshot = await rooms.KickAsync(roomId, profile.Id, targetProfileId, Context.ConnectionAborted);
+        await updates.SendAsync(snapshot, CancellationToken.None);
+        var removedConnections = await presence.RemoveProfileFromRoomAsync(
+            targetProfileId,
+            roomId,
+            CancellationToken.None);
+        foreach (var connectionId in removedConnections)
+        {
+            await Clients.Client(connectionId).SendAsync(
+                "roomUnavailable",
+                "Du wurdest durch die Raumleitung aus diesem Raum entfernt.",
+                CancellationToken.None);
+            await Groups.RemoveFromGroupAsync(connectionId, roomId.ToString("N"), CancellationToken.None);
+        }
+
+        return snapshot;
+    }
+
+    public async Task<LiveRoomSnapshot> Close(Guid roomId)
+    {
+        var profile = await currentUser.RequireProfileAsync(Context.User!, Context.ConnectionAborted);
+        var snapshot = await rooms.CloseAsync(roomId, profile.Id, Context.ConnectionAborted);
+        await updates.SendAsync(snapshot, CancellationToken.None);
+        await Clients.Group(roomId.ToString("N")).SendAsync(
+            "roomUnavailable",
+            snapshot.CloseReason ?? "Der Raum wurde geschlossen.",
+            CancellationToken.None);
+        return snapshot;
+    }
+
+    public async Task<LiveRoomLobbyPage> GetLobbyPage(int offset = 0, int limit = 20)
+    {
+        var profile = await currentUser.RequireProfileAsync(Context.User!, Context.ConnectionAborted);
+        return await rooms.ListLobbySummariesAsync(profile.Id, offset, limit, Context.ConnectionAborted);
     }
 
     public async Task SendReaction(Guid roomId, string key)
@@ -102,7 +209,17 @@ public sealed class ArenaHub(
             return;
         }
 
-        var snapshot = rooms.Snapshot(roomId);
+        if (!await rateLimiter.TryAcquireAsync(
+                "reaction",
+                profile.Id.ToString("N"),
+                12,
+                TimeSpan.FromMinutes(1),
+                Context.ConnectionAborted))
+        {
+            return;
+        }
+
+        var snapshot = await rooms.SnapshotAsync(roomId, Context.ConnectionAborted);
         if (!snapshot.Participants.Any(participant => participant.ProfileId == profile.Id))
         {
             throw new InvalidOperationException("Nur aktive Teilnehmende können Arena-Reaktionen senden.");
@@ -122,13 +239,13 @@ public sealed class ArenaHub(
         try
         {
             var profile = await currentUser.RequireProfileAsync(Context.User!, Context.ConnectionAborted);
-            var leave = presence.LeaveRoom(profile.Id, Context.ConnectionId, roomId);
+            var leave = await presence.LeaveRoomAsync(profile.Id, Context.ConnectionId, roomId, Context.ConnectionAborted);
             await Groups.RemoveFromGroupAsync(Context.ConnectionId, roomId.ToString("N"), Context.ConnectionAborted);
             if (leave is null || !leave.RoomLostLastConnection)
             {
                 try
                 {
-                    return rooms.Snapshot(roomId);
+                    return await rooms.SnapshotAsync(roomId, Context.ConnectionAborted);
                 }
                 catch (InvalidOperationException ex) when (IsRoomNotFound(ex))
                 {
@@ -137,8 +254,11 @@ public sealed class ArenaHub(
                 }
             }
 
-            var snapshot = rooms.Disconnect(leave.RoomId, leave.ProfileId);
-            await Clients.Group(leave.RoomId.ToString("N")).SendAsync("roomChanged", snapshot, Context.ConnectionAborted);
+            var snapshot = await rooms.DisconnectAsync(
+                leave.RoomId,
+                leave.ProfileId,
+                Context.ConnectionAborted);
+            await updates.SendAsync(snapshot, CancellationToken.None);
             return snapshot;
         }
         catch (OperationCanceledException) when (Context.ConnectionAborted.IsCancellationRequested)
@@ -149,24 +269,35 @@ public sealed class ArenaHub(
 
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
-        IDisposable? accessLease = null;
+        IOperationLease? accessLease = null;
         var profileIdValue = Context.User?.FindFirst(KeyWarsClaims.ProfileId)?.Value;
-        if (Guid.TryParse(profileIdValue, out var profileId) && !accessGate.TryAcquire(profileId, out accessLease))
+        if (Guid.TryParse(profileIdValue, out var profileId))
         {
-            presence.RemoveConnection(Context.ConnectionId);
-            await base.OnDisconnectedAsync(exception);
-            return;
+            try
+            {
+                accessLease = await accessGate.AcquireAsync(profileId, CancellationToken.None);
+            }
+            catch (ProfileOperationException)
+            {
+                await presence.RemoveConnectionAsync(Context.ConnectionId, CancellationToken.None);
+                await base.OnDisconnectedAsync(exception);
+                return;
+            }
         }
 
-        using (accessLease)
+        await using (accessLease)
         {
-            var leave = presence.RemoveConnection(Context.ConnectionId);
+            var operationToken = accessLease?.LeaseLost ?? CancellationToken.None;
+            var leave = await presence.RemoveConnectionAsync(Context.ConnectionId, operationToken);
             if (leave is not null && leave.RoomLostLastConnection)
             {
                 try
                 {
-                    var snapshot = rooms.Disconnect(leave.RoomId, leave.ProfileId);
-                    await Clients.Group(leave.RoomId.ToString("N")).SendAsync("roomChanged", snapshot);
+                    var snapshot = await rooms.DisconnectAsync(
+                        leave.RoomId,
+                        leave.ProfileId,
+                        operationToken);
+                    await updates.SendAsync(snapshot, operationToken);
                 }
                 catch (InvalidOperationException ex) when (IsRoomNotFound(ex))
                 {
@@ -179,7 +310,7 @@ public sealed class ArenaHub(
 
     private async Task ApplyRoomSwitchAsync(Guid profileId, LivePresenceSwitch roomSwitch)
     {
-        if (roomSwitch.PreviousRoomId is not { } previousRoomId)
+        if (!roomSwitch.Changed || roomSwitch.PreviousRoomId is not { } previousRoomId)
         {
             return;
         }
@@ -192,8 +323,11 @@ public sealed class ArenaHub(
 
         try
         {
-            var snapshot = rooms.Disconnect(previousRoomId, profileId);
-            await Clients.Group(previousRoomId.ToString("N")).SendAsync("roomChanged", snapshot, Context.ConnectionAborted);
+            var snapshot = await rooms.DisconnectAsync(
+                previousRoomId,
+                profileId,
+                CancellationToken.None);
+            await updates.SendAsync(snapshot, CancellationToken.None);
         }
         catch (InvalidOperationException ex) when (IsRoomNotFound(ex))
         {

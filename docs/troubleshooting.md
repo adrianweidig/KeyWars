@@ -17,9 +17,10 @@ curl --fail http://127.0.0.1:8080/health/ready
 | Proxy liefert 502/504 | lokales `/health/ready` und Proxy-Upstream | Proxy auf `127.0.0.1:8080` richten oder Netzführung gezielt korrigieren |
 | Arena verbindet nicht oder trennt sich | Browser-Netzwerk und `/hubs/arena` | HTTP/1.1-Upgrade, `Upgrade`/`Connection`, Pufferung und Idle-Timeout am Proxy prüfen |
 | Falsches Schema, Redirects oder Cookies | `X-Forwarded-Proto` und Proxy-Vertrauen | exakte Proxy-IP oder enges CIDR-Netz konfigurieren |
-| SQLite-/Schreibfehler | Volume-Berechtigungen und freier Speicher | `/data` für Containerbenutzer schreibbar machen; vor Eingriff Backup exportieren |
+| Datenbank-/Schreibfehler | Einzelinstanz: Volume und Speicher; Scale-Modus: PostgreSQL-Verbindung und Pool | vor Eingriff Backup prüfen; betroffene Abhängigkeit beheben |
 | Arena verliert Progress-Deltas | `/health/arena-progress` | Teilnehmerzahl und Broadcast-Rate messen; Kapazitäten nur schrittweise erhöhen |
-| Arena-Abschlüsse bleiben offen | `/health/arena-persistence` | Queue-Fehler und SQLite-Latenz prüfen; Abschlussqueue muss mindestens der Raumzahl entsprechen |
+| Arena-Abschlüsse bleiben offen | `/health/arena-persistence` | Queue-Fehler und Datenbanklatenz prüfen; Abschlussqueue muss mindestens der Raumzahl entsprechen |
+| Scale-Rolle startet nicht | Rolle, PostgreSQL und Redis | `docker compose -f compose.scale.yaml config` prüfen; fehlende Abhängigkeit nicht umgehen |
 | Offline-Start meldet „image not found“ | `docker image ls` und `RELEASE_MANIFEST.json` | Archiv erneut laden und exakt den ausgelieferten Image-Tag in `.env` verwenden |
 
 Bei Supportanfragen Version, Commit/Release, bereinigte Compose-Konfiguration,

@@ -17,6 +17,7 @@ public sealed class CompetitionLeaderboardServiceTests
         var hidden = context.AddProfile("hidden", "Hidden Hero", visible: false);
         context.AddAttempt(alice.Id, TrainingMode.Sprint60, 72, 97, context.Now.AddMinutes(-20));
         context.AddAttempt(alice.Id, TrainingMode.Sprint60, 82, 96, context.Now.AddMinutes(-10));
+        context.AddAttempt(alice.Id, TrainingMode.Sprint60, 140, 99, context.Now.AddDays(-2));
         context.AddAttempt(bob.Id, TrainingMode.Sprint60, 90, 89, context.Now.AddMinutes(-9));
         context.AddAttempt(bob.Id, TrainingMode.Sprint60, 79, 98, context.Now.AddMinutes(-8));
         context.AddAttempt(hidden.Id, TrainingMode.Sprint60, 120, 99, context.Now.AddMinutes(-7));
@@ -28,6 +29,52 @@ public sealed class CompetitionLeaderboardServiceTests
         Assert.Equal(82, result.Board.Entries[0].Wpm);
         Assert.Equal(1, result.Board.OwnEntry?.Rank);
         Assert.DoesNotContain(result.Board.Entries, entry => entry.UserProfileId == hidden.Id);
+    }
+
+    [Fact]
+    public async Task SprintBoardLimitsPublicRowsAfterSelectingEachProfilesBestAttempt()
+    {
+        await using var context = await CompetitionTestContext.CreateAsync();
+        var profiles = Enumerable.Range(0, 105)
+            .Select(index => context.AddProfile($"user-{index:000}", $"Person {index:000}"))
+            .ToList();
+        foreach (var (profile, index) in profiles.Select((profile, index) => (profile, index)))
+        {
+            context.AddAttempt(profile.Id, TrainingMode.Sprint60, 50 + index, 99, context.Now.AddMinutes(-index - 1));
+            context.AddAttempt(profile.Id, TrainingMode.Sprint60, 40 + index, 99, context.Now.AddMinutes(-index - 2));
+        }
+
+        await context.Db.SaveChangesAsync();
+
+        var result = await context.Service.GetAsync(profiles[0], new LeaderboardQuery(CompetitionBoardKind.Sprint, CompetitionPeriod.Day, TrainingMode.Sprint60, null));
+
+        Assert.Equal(100, result.Board.Entries.Count);
+        Assert.Equal(profiles[^1].Id, result.Board.Entries[0].UserProfileId);
+        Assert.Equal(154, result.Board.Entries[0].Wpm);
+    }
+
+    [Fact]
+    public async Task DepartmentScopeFiltersVisibleProfilesOnTheServer()
+    {
+        await using var context = await CompetitionTestContext.CreateAsync();
+        var alice = context.AddProfile("alice", "Alice Alpha", department: "Entwicklung");
+        var bob = context.AddProfile("bob", "Bob Beta", department: "Entwicklung");
+        var outside = context.AddProfile("outside", "Olivia Ops", department: "Betrieb");
+        context.AddAttempt(alice.Id, TrainingMode.Sprint60, 70, 99, context.Now.AddMinutes(-3));
+        context.AddAttempt(bob.Id, TrainingMode.Sprint60, 80, 99, context.Now.AddMinutes(-2));
+        context.AddAttempt(outside.Id, TrainingMode.Sprint60, 120, 99, context.Now.AddMinutes(-1));
+        await context.Db.SaveChangesAsync();
+
+        var result = await context.Service.GetAsync(alice, new LeaderboardQuery(
+            CompetitionBoardKind.Sprint,
+            CompetitionPeriod.Day,
+            TrainingMode.Sprint60,
+            null,
+            OwnDepartmentOnly: true));
+
+        Assert.True(result.Query.OwnDepartmentOnly);
+        Assert.Equal([bob.Id, alice.Id], result.Board.Entries.Select(entry => entry.UserProfileId).ToArray());
+        Assert.DoesNotContain(result.Board.Entries, entry => entry.UserProfileId == outside.Id);
     }
 
     [Fact]
@@ -170,7 +217,7 @@ public sealed class CompetitionLeaderboardServiceTests
             return new CompetitionTestContext(connection, db, new ManualTimeProvider(DateTimeOffset.Parse("2026-06-27T12:00:00Z")));
         }
 
-        public UserProfile AddProfile(string account, string displayName, bool visible = true, int arenaRating = 1000)
+        public UserProfile AddProfile(string account, string displayName, bool visible = true, int arenaRating = 1000, string? department = null)
         {
             var profile = new UserProfile
             {
@@ -178,6 +225,7 @@ public sealed class CompetitionLeaderboardServiceTests
                 SamAccountName = account,
                 DirectoryObjectGuid = Guid.CreateVersion7().ToString(),
                 DirectorySid = $"S-1-5-21-{Guid.CreateVersion7():N}",
+                Department = department,
                 LeaderboardVisible = visible,
                 ArenaRating = arenaRating,
                 ExperiencePoints = arenaRating - 900,

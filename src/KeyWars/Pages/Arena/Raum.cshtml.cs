@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.Mvc.RazorPages;
 
 namespace KeyWars.Pages.Arena;
 
-public sealed class RaumModel(CurrentUser currentUser, LiveRoomManager rooms) : PageModel
+public sealed class RaumModel(CurrentUser currentUser, ILiveRoomDispatcher rooms) : PageModel
 {
     public LiveRoomSnapshot Snapshot { get; private set; } = new(
         Guid.Empty,
@@ -49,7 +49,7 @@ public sealed class RaumModel(CurrentUser currentUser, LiveRoomManager rooms) : 
         ApplyProfile(profile);
         try
         {
-            Snapshot = rooms.Join(id, profile.Id, profile.DisplayName);
+            Snapshot = await rooms.JoinAsync(id, profile.Id, profile.DisplayName, cancellationToken);
         }
         catch (InvalidOperationException ex)
         {
@@ -65,9 +65,9 @@ public sealed class RaumModel(CurrentUser currentUser, LiveRoomManager rooms) : 
         ApplyProfile(profile);
         try
         {
-            var snapshot = rooms.Snapshot(id);
+            var snapshot = await rooms.SnapshotAsync(id, cancellationToken);
             var participant = snapshot.Participants.FirstOrDefault(item => item.ProfileId == profile.Id);
-            rooms.SetReady(id, profile.Id, participant?.Ready != true);
+            await rooms.SetReadyAsync(id, profile.Id, participant?.Ready != true, cancellationToken);
             return RedirectToPage(new { id });
         }
         catch (InvalidOperationException ex)
@@ -82,12 +82,12 @@ public sealed class RaumModel(CurrentUser currentUser, LiveRoomManager rooms) : 
         ApplyProfile(profile);
         try
         {
-            rooms.Start(id, profile.Id);
+            await rooms.StartAsync(id, profile.Id, cancellationToken);
         }
         catch (InvalidOperationException ex)
         {
             ModelState.AddModelError(string.Empty, ex.Message);
-            Snapshot = rooms.Snapshot(id);
+            Snapshot = await rooms.SnapshotAsync(id, cancellationToken);
             return Page();
         }
 

@@ -58,4 +58,19 @@ public sealed class ProfileAccessGateTests
         Assert.True(gate.IsBlocked(profileId));
         Assert.False(gate.TryBeginOperation(profileId));
     }
+
+    [Fact]
+    public async Task AsyncExclusiveLeaseReleasesOperationExactlyOnce()
+    {
+        var gate = new ProfileAccessGate();
+        var profileId = Guid.CreateVersion7();
+
+        var operation = await gate.TryBeginOperationAsync(profileId);
+
+        Assert.NotNull(operation);
+        Assert.Equal(ProfileAccessState.OperationInProgress, gate.GetState(profileId));
+        await operation.DisposeAsync();
+        await operation.DisposeAsync();
+        Assert.Equal(ProfileAccessState.Available, gate.GetState(profileId));
+    }
 }

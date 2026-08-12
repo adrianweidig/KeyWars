@@ -29,10 +29,13 @@ internal sealed class LiveRoomState(
     public object Gate { get; } = new();
     public Dictionary<Guid, LiveParticipantState> Participants { get; } = [];
     public HashSet<Guid> ExcludedProfileIds { get; } = [];
+    public HashSet<Guid> InvitedProfileIds { get; } = [];
     public Dictionary<int, int> TeamRoundWins { get; } = [];
     public LiveRoomPhase Phase { get; set; } = LiveRoomPhase.Lobby;
     public int CurrentRound { get; set; } = 1;
     public int RoundVersion { get; set; } = 1;
+    public long StateVersion { get; set; } = 1;
+    public bool LobbyLocked { get; set; }
     public DateTimeOffset PhaseChangedAt { get; set; } = createdAt;
     public DateTimeOffset? CountdownStartsAt { get; set; }
     public DateTimeOffset? RaceStartsAt { get; set; }

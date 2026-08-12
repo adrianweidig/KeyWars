@@ -13,7 +13,7 @@
 
 <section class="card">
     <form method="post" class="form-grid" data-submit-guard data-submit-busy-text="Beitritt läuft...">
-        <div asp-validation-summary="ModelOnly"></div>
+        <div asp-validation-summary="ModelOnly" role="alert" aria-live="assertive" aria-atomic="true" tabindex="-1"></div>
         <label>
             Raumcode
             <input asp-for="Code" class="room-code-input" data-room-code-input maxlength="6" minlength="6" pattern="[A-HJ-NP-Z2-9a-hj-np-z]{6}" autocomplete="off" autocapitalize="characters" spellcheck="false" />

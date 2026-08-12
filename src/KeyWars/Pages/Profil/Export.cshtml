@@ -1,16 +1,61 @@
 @page "/profil/export"
+@using System.Globalization
 @model KeyWars.Pages.Profil.ExportModel
 @{
-    ViewData["Title"] = "Selbstexport";
+    ViewData["Title"] = "Profildaten exportieren";
+    var culture = CultureInfo.GetCultureInfo("de-DE");
 }
 
 <section class="page-header">
     <div>
-        <h1>Selbstexport</h1>
-        <p class="lead">Der Export enthält dein lokales Profil, Versuche, Missionen und Erfolge.</p>
+        <span class="eyebrow">Datenschutz</span>
+        <h1>Profildaten exportieren</h1>
+        <p class="lead">Lade dein vollständiges Profil als JSON-Datei herunter. Die Seite zeigt keine personenbezogenen Rohdaten an.</p>
     </div>
 </section>
 
 <section class="card">
-    <pre class="preformatted" tabindex="0" role="region" aria-label="Exportierte Profildaten">@Model.Json</pre>
+    <h2>Zeitraum</h2>
+    <p class="muted">Ohne Zeitraum enthält der Export alle Daten. Ein Zeitraum begrenzt zeitbezogene Aktivitäten auf UTC-Kalendertage; Profil und eigene Texte bleiben vollständig enthalten.</p>
+    @if (Model.StatusMessage is not null)
+    {
+        <p role="alert">@Model.StatusMessage</p>
+    }
+    <div asp-validation-summary="All" role="alert"></div>
+    <form method="get" class="form-grid">
+        <label asp-for="Von">Von (optional)</label>
+        <input asp-for="Von" type="date" />
+
+        <label asp-for="Bis">Bis einschließlich (optional)</label>
+        <input asp-for="Bis" type="date" />
+
+        <div class="page-actions">
+            <button class="button secondary" type="submit">Vorschau aktualisieren</button>
+            <a class="button secondary" asp-page="/Profil/Export">Zeitraum löschen</a>
+        </div>
+    </form>
 </section>
+
+@if (Model.Preview is { } preview)
+{
+    <section class="card stack-spaced" aria-labelledby="exportPreviewTitle">
+        <div class="section-title-row">
+            <div>
+                <h2 id="exportPreviewTitle">Exportvorschau</h2>
+                <p class="muted">Schema v@preview.SchemaVersion · @(preview.From is null && preview.To is null ? "vollständiger Zeitraum" : $"{preview.From?.ToString("d", culture) ?? "Anfang"} bis {preview.To?.ToString("d", culture) ?? "heute"}")</p>
+            </div>
+            <a class="button primary"
+               asp-page="/Profil/Export"
+               asp-page-handler="Download"
+               asp-route-von="@Model.VonRoute"
+               asp-route-bis="@Model.BisRoute">JSON herunterladen</a>
+        </div>
+        <div class="metric-row" aria-label="Datensätze im Export">
+            <div class="metric"><span>Versuche</span><strong>@preview.Attempts.ToString("N0", culture)</strong></div>
+            <div class="metric"><span>Aktivitäten</span><strong>@preview.ActivityRecords.ToString("N0", culture)</strong></div>
+            <div class="metric"><span>Eigene Inhalte</span><strong>@preview.OwnedContentRecords.ToString("N0", culture)</strong></div>
+            <div class="metric"><span>Wettbewerbe</span><strong>@((preview.ChallengeRecords + preview.ArenaRecords).ToString("N0", culture))</strong></div>
+        </div>
+        <p class="muted">Insgesamt @preview.TotalRecords.ToString("N0", culture) Datensätze. Der Download wird fortlaufend erzeugt und nicht als vollständiger JSON-Block in diese Seite geladen.</p>
+    </section>
+}

@@ -1,0 +1,50 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keywars-runtime-config
+  labels:
+    app.kubernetes.io/name: keywars
+data:
+  ASPNETCORE_ENVIRONMENT: Production
+  ASPNETCORE_HTTP_PORTS: "8080"
+  KEYWARS__DATABASE__PROVIDER: postgresql
+  KEYWARS__CLUSTER__PROTOCOL_VERSION: "1"
+  KEYWARS__DATAPROTECTION__APPLICATION_NAME: KeyWars
+  KEYWARS__RETENTION__ENABLED: "false"
+  KEYWARS__RETENTION__DRY_RUN: "true"
+  KEYWARS__RETENTION__INTERVAL_HOURS: "24"
+  KEYWARS__RETENTION__BATCH_SIZE: "250"
+  KEYWARS__RETENTION__MAX_BATCHES_PER_RUN: "20"
+  KEYWARS__RETENTION__STALE_ATTEMPT_HOURS: "2"
+  KEYWARS__RETENTION__ABANDONED_ATTEMPT_RETENTION_DAYS: "90"
+  KEYWARS__RETENTION__SEEN_GAMIFICATION_EVENT_RETENTION_DAYS: "180"
+  TZ: Europe/Berlin
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keywars-edge-config
+  labels:
+    app.kubernetes.io/name: keywars
+    app.kubernetes.io/component: edge
+data:
+  Caddyfile: |
+    :8080 {
+        @edge_health path /health/edge
+        respond @edge_health "ok" 200
+
+        @metrics path /metrics
+        respond @metrics "not found" 404
+
+        @arena path /arena* /hubs/arena* /api/arena* /profil/loeschen* /profil/statistik-zuruecksetzen*
+        reverse_proxy @arena keywars-arena:8080 {
+            header_up X-Forwarded-Proto https
+            stream_close_delay 5m
+        }
+
+        reverse_proxy keywars-web:8080 {
+            header_up X-Forwarded-Proto https
+            stream_close_delay 5m
+        }
+    }

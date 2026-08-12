@@ -17,7 +17,7 @@
 
 <section class="arena-create-layout">
     <form method="post" class="card form-grid arena-create-form" data-arena-create-form data-submit-guard data-submit-busy-text="Raum wird erstellt...">
-        <div asp-validation-summary="ModelOnly"></div>
+        <div asp-validation-summary="ModelOnly" role="alert" aria-live="assertive" aria-atomic="true" tabindex="-1"></div>
         <label>
             Titel
             <input asp-for="Input.Title" maxlength="160" placeholder="Zum Beispiel: Mittagspause Sprint" />
@@ -96,11 +96,63 @@
         </div>
         <label>
             Sichtbarkeit
-            <select asp-for="Input.Visibility">
+            <select asp-for="Input.Visibility" data-arena-visibility>
                 <option value="Code">Nur mit Raumcode</option>
                 <option value="InternalOpen">Intern offen</option>
+                <option value="InvitationOnly">Nur eingeladene Personen</option>
             </select>
         </label>
+        <fieldset class="person-picker @(Model.Input.Visibility == LiveRoomVisibility.InvitationOnly ? "" : "is-hidden")"
+                  data-arena-invitations
+                  data-person-picker
+                  data-person-input-name="Input.InvitationProfileIds"
+                  data-person-purpose="arena"
+                  data-search-url="@Url.Content("~/api/personen/suche")">
+            <legend>Einladungen</legend>
+            <p class="muted">Nur ausgewählte, bereits angemeldete Profile können diesem Raum beitreten.</p>
+            @if (Model.Departments.Count > 0)
+            {
+                <label>
+                    LDAP-Abteilung/Team
+                    <select data-person-department>
+                        <option value="">Alle verfügbaren Personen</option>
+                        @foreach (var department in Model.Departments)
+                        {
+                            <option value="@department">@department</option>
+                        }
+                    </select>
+                </label>
+            }
+            <label>
+                Person suchen
+                <input type="search" data-person-query autocomplete="off" placeholder="Name oder Konto" />
+            </label>
+            <div class="person-picker-results" data-person-results role="listbox" aria-label="Suchergebnisse"></div>
+            <button type="button" class="secondary" data-person-more hidden>Weitere Personen laden</button>
+            <p class="muted" data-person-status role="status" aria-live="polite">Personen werden geladen …</p>
+            <div class="person-picker-selection">
+                <strong>Ausgewählt</strong>
+                <div class="person-picker-chips" data-person-selection>
+                    @foreach (var person in Model.SelectedInvitations)
+                    {
+                        <span class="person-picker-chip" data-person-id="@person.Id" data-person-label="@person.DisplayName" data-person-account="@person.SamAccountName">
+                            <span>@person.DisplayName <span class="muted">(@person.SamAccountName)</span></span>
+                            <button type="button" class="secondary" data-person-remove aria-label="@person.DisplayName entfernen">Entfernen</button>
+                            <input type="hidden" name="Input.InvitationProfileIds" value="@person.Id" />
+                        </span>
+                    }
+                </div>
+                @if (Model.SelectedInvitations.Count == 0)
+                {
+                    <p class="muted" data-person-empty>Noch niemand ausgewählt.</p>
+                }
+                else
+                {
+                    <p class="muted" data-person-empty hidden>Noch niemand ausgewählt.</p>
+                }
+                <span asp-validation-for="Input.InvitationProfileIds"></span>
+            </div>
+        </fieldset>
         <label>
             Maximale Teilnehmer
             <input asp-for="Input.MaxParticipants" type="number" min="2" max="@Model.MaxParticipantsLimit" />
@@ -139,3 +191,7 @@
         </div>
     </aside>
 </section>
+
+@section Scripts {
+    <script type="module" src="~/js/arena-create.js" asp-append-version="true"></script>
+}

@@ -1,0 +1,150 @@
+@page "/moderation"
+@using KeyWars.Domain
+@model KeyWars.Pages.Moderation.IndexModel
+@{
+    ViewData["Title"] = "Content-Moderation";
+}
+
+<section class="page-header">
+    <div>
+        <span class="eyebrow">LDAP-gruppenbasiert</span>
+        <h1>Content-Moderation</h1>
+        <p class="lead">Organisationsweite Texte und Sammlungen anderer Personen prüfen.</p>
+    </div>
+    <div class="page-actions">
+        <a class="button secondary" asp-page="/Moderation/Audit">Auditspur</a>
+    </div>
+</section>
+
+@if (!string.IsNullOrWhiteSpace(Model.StatusMessage))
+{
+    <div class="alert success" role="status">@Model.StatusMessage</div>
+}
+
+<div asp-validation-summary="ModelOnly" class="validation-summary" role="alert"></div>
+
+<section class="card filter-panel">
+    <form method="get" class="filter-form">
+        <label>
+            Suche
+            <input asp-for="Suche" autocomplete="off" />
+        </label>
+        <label>
+            Inhaltstyp
+            <select asp-for="Typ">
+                <option value="">Texte und Sammlungen</option>
+                <option value="TrainingText">Texte</option>
+                <option value="TextCollection">Sammlungen</option>
+            </select>
+        </label>
+        <div class="form-actions">
+            <button type="submit">Filtern</button>
+        </div>
+    </form>
+</section>
+
+<p class="muted" role="status">@Model.Queue.TotalCount Inhalte</p>
+
+<section class="card">
+    @if (Model.Queue.Items.Count == 0)
+    {
+        <div class="empty-state">
+            <h2>Keine Inhalte zur Prüfung</h2>
+            <p>Aktuell passen keine fremden organisationsweiten oder quarantänisierten Inhalte zum Filter.</p>
+        </div>
+    }
+    else
+    {
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Inhalt</th>
+                    <th>Eigentümer</th>
+                    <th>Status</th>
+                    <th>Moderieren</th>
+                </tr>
+            </thead>
+            <tbody>
+            @foreach (var item in Model.Queue.Items)
+            {
+                <tr>
+                    <td data-label="Inhalt">
+                        <strong>@item.Title</strong><br />
+                        <span class="muted">@(item.TargetType == ContentModerationTargetType.TrainingText ? "Text" : "Sammlung")</span>
+                    </td>
+                    <td data-label="Eigentümer">@item.OwnerDisplayName</td>
+                    <td data-label="Status">
+                        @if (item.IsQuarantined)
+                        {
+                            <span class="pill">Quarantäne</span>
+                        }
+                        else
+                        {
+                            <span class="pill">Organisationsweit</span>
+                        }
+                    </td>
+                    <td data-label="Moderieren">
+                        @if (!item.IsQuarantined)
+                        {
+                            <form method="post"
+                                  asp-page-handler="Moderate"
+                                  asp-route-Suche="@Model.Suche"
+                                  asp-route-Typ="@Model.Typ"
+                                  asp-route-Seite="@Model.Seite"
+                                  class="form-grid">
+                                <input type="hidden" name="Input.TargetId" value="@item.TargetId" />
+                                <input type="hidden" name="Input.TargetType" value="@item.TargetType" />
+                                <label>
+                                    Aktion
+                                    <select name="Input.Action">
+                                        <option value="Unpublish">Nicht mehr organisationsweit</option>
+                                        <option value="Quarantine">Quarantänisieren</option>
+                                    </select>
+                                </label>
+                                <label>
+                                    Begründung
+                                    <input name="Input.Reason" minlength="3" maxlength="500" required />
+                                </label>
+                                <button type="submit">Ausführen</button>
+                            </form>
+                        }
+                        else
+                        {
+                            <span class="muted">Keine weitere Aktion</span>
+                        }
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    }
+</section>
+
+@if (Model.Queue.TotalPages > 1)
+{
+    <nav class="pagination" aria-label="Moderationsseiten">
+        @if (Model.Queue.HasPreviousPage)
+        {
+            <a class="button secondary"
+               asp-route-Suche="@Model.Suche"
+               asp-route-Typ="@Model.Typ"
+               asp-route-Seite="@(Model.Queue.Page - 1)">Zurück</a>
+        }
+        else
+        {
+            <span class="button secondary" aria-disabled="true">Zurück</span>
+        }
+        <span aria-current="page">Seite @Model.Queue.Page von @Model.Queue.TotalPages</span>
+        @if (Model.Queue.HasNextPage)
+        {
+            <a class="button secondary"
+               asp-route-Suche="@Model.Suche"
+               asp-route-Typ="@Model.Typ"
+               asp-route-Seite="@(Model.Queue.Page + 1)">Weiter</a>
+        }
+        else
+        {
+            <span class="button secondary" aria-disabled="true">Weiter</span>
+        }
+    </nav>
+}

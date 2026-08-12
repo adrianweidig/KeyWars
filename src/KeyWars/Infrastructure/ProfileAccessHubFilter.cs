@@ -4,7 +4,9 @@ using Microsoft.AspNetCore.SignalR;
 
 namespace KeyWars.Infrastructure;
 
-public sealed class ProfileAccessHubFilter(ProfileAccessGate accessGate) : IHubFilter
+public sealed class ProfileAccessHubFilter(
+    IProfileAccessGate accessGate,
+    ISharedRateLimiter rateLimiter) : IHubFilter
 {
     public async ValueTask<object?> InvokeMethodAsync(
         HubInvocationContext invocationContext,
@@ -16,7 +18,24 @@ public sealed class ProfileAccessHubFilter(ProfileAccessGate accessGate) : IHubF
             return await next(invocationContext);
         }
 
-        using var lease = accessGate.Acquire(parsedProfileId);
-        return await next(invocationContext);
+        if (!await rateLimiter.TryAcquireAsync(
+                "hub",
+                parsedProfileId.ToString("N"),
+                900,
+                TimeSpan.FromMinutes(1),
+                invocationContext.Context.ConnectionAborted))
+        {
+            throw new HubException("Zu viele Arena-Aktionen. Bitte warte kurz.");
+        }
+
+        await using var lease = await accessGate.AcquireAsync(
+            parsedProfileId,
+            invocationContext.Context.ConnectionAborted);
+        using var leaseLostRegistration = lease.LeaseLost.Register(
+            invocationContext.Context.Abort);
+        lease.ThrowIfLost();
+        var result = await next(invocationContext);
+        lease.ThrowIfLost();
+        return result;
     }
 }

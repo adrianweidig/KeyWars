@@ -82,7 +82,7 @@ public sealed class ProfileInsightsService(KeyWarsDbContext db, TimeProvider tim
         var totals = await BuildTotalsAsync(attempts, cancellationToken);
         var trends = await BuildTrendsAsync(profile.Id, cancellationToken);
         var bestModes = await BuildBestModesAsync(attempts, cancellationToken);
-        var totalItems = await attempts.CountAsync(cancellationToken);
+        var totalItems = totals.CompletedAttempts;
         var totalPages = Math.Max(1, (int)Math.Ceiling(totalItems / (double)historyPageSize));
         historyPage = Math.Min(historyPage, totalPages);
         var history = await ReadHistoryPageAsync(profile.Id, historyPage, historyPageSize, cancellationToken);
@@ -98,20 +98,28 @@ public sealed class ProfileInsightsService(KeyWarsDbContext db, TimeProvider tim
             .ToListAsync(cancellationToken);
         var achievements = await ReadFeaturedAchievementsAsync(profile.Id, cancellationToken);
         var profileKey = FormatSqliteGuid(profile.Id);
-        var recentEvents = await db.GamificationEvents
-            .FromSqlInterpolated($"""
-                SELECT *
-                FROM GamificationEvents
-                WHERE UserProfileId = {profileKey}
-                ORDER BY substr(CreatedAt, 1, 19) DESC, Id DESC
-                LIMIT 8
-                """)
-            .AsNoTracking()
-            .ToListAsync(cancellationToken);
+        var recentEvents = db.Database.IsSqlite()
+            ? await db.GamificationEvents
+                .FromSqlInterpolated($"""
+                    SELECT *
+                    FROM GamificationEvents
+                    WHERE UserProfileId = {profileKey}
+                    ORDER BY CreatedAt DESC, Id DESC
+                    LIMIT 8
+                    """)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken)
+            : await db.GamificationEvents
+                .AsNoTracking()
+                .Where(item => item.UserProfileId == profile.Id)
+                .OrderByDescending(item => item.CreatedAt)
+                .ThenByDescending(item => item.Id)
+                .Take(8)
+                .ToListAsync(cancellationToken);
 
         return new ProfileInsights(
             BuildInitials(profile),
-            BuildDivision(profile.ArenaRating),
+            ArenaDivision.NameFor(profile.ArenaRating),
             totals,
             trends,
             activity,
@@ -162,51 +170,150 @@ public sealed class ProfileInsightsService(KeyWarsDbContext db, TimeProvider tim
     private async Task<IReadOnlyList<ProfileTrendWindow>> BuildTrendsAsync(Guid profileId, CancellationToken cancellationToken)
     {
         var now = timeProvider.GetUtcNow();
-        var result = new List<ProfileTrendWindow>(TrendWindows.Length);
-        foreach (var days in TrendWindows)
+        if (!db.Database.IsSqlite())
         {
-            var currentStart = now.AddDays(-days);
-            var previousStart = currentStart.AddDays(-days);
-            var current = await AggregateWindowAsync(profileId, currentStart, now, cancellationToken);
-            var previous = await AggregateWindowAsync(profileId, previousStart, currentStart, cancellationToken);
-            result.Add(new ProfileTrendWindow(
-                days,
-                current.SampleCount,
-                current.AverageWpm,
-                current.AverageAccuracy,
-                current.AverageConsistency,
-                current.SampleCount == 0 || previous.SampleCount == 0 ? 0 : Math.Round(current.AverageWpm - previous.AverageWpm, 2),
-                current.SampleCount == 0 || previous.SampleCount == 0 ? 0 : Math.Round(current.AverageAccuracy - previous.AverageAccuracy, 2),
-                current.SampleCount == 0 || previous.SampleCount == 0 ? 0 : Math.Round(current.AverageConsistency - previous.AverageConsistency, 2)));
+            return await BuildTrendsWithEfAsync(profileId, now, cancellationToken);
         }
 
-        return result;
+        var profileKey = FormatSqliteGuid(profileId);
+        var phase = AttemptPhase.Finished.ToString();
+        var nowValue = FormatSqliteDateTimeOffset(now);
+        var rows = await db.Database.SqlQuery<TrendAggregateRow>($"""
+                WITH windows(Days, CurrentStart, PreviousStart) AS (
+                    SELECT 7, {FormatSqliteDateTimeOffset(now.AddDays(-7))}, {FormatSqliteDateTimeOffset(now.AddDays(-14))}
+                    UNION ALL
+                    SELECT 30, {FormatSqliteDateTimeOffset(now.AddDays(-30))}, {FormatSqliteDateTimeOffset(now.AddDays(-60))}
+                    UNION ALL
+                    SELECT 90, {FormatSqliteDateTimeOffset(now.AddDays(-90))}, {FormatSqliteDateTimeOffset(now.AddDays(-180))}
+                ), eligible AS (
+                    SELECT Wpm, Accuracy, Consistency, substr(CreatedAt, 1, 19) AS ActivityAt
+                    FROM TypingAttempts
+                    WHERE UserProfileId = {profileKey}
+                      AND Phase = {phase}
+                      AND Completed = 1
+                      AND substr(CreatedAt, 1, 19) >= {FormatSqliteDateTimeOffset(now.AddDays(-180))}
+                      AND substr(CreatedAt, 1, 19) < {nowValue}
+                )
+                SELECT windows.Days,
+                       COUNT(CASE WHEN eligible.ActivityAt >= windows.CurrentStart THEN 1 END) AS CurrentSampleCount,
+                       COALESCE(AVG(CASE WHEN eligible.ActivityAt >= windows.CurrentStart THEN eligible.Wpm END), 0) AS CurrentAverageWpm,
+                       COALESCE(AVG(CASE WHEN eligible.ActivityAt >= windows.CurrentStart THEN eligible.Accuracy END), 0) AS CurrentAverageAccuracy,
+                       COALESCE(AVG(CASE WHEN eligible.ActivityAt >= windows.CurrentStart THEN eligible.Consistency END), 0) AS CurrentAverageConsistency,
+                       COUNT(CASE WHEN eligible.ActivityAt < windows.CurrentStart THEN 1 END) AS PreviousSampleCount,
+                       COALESCE(AVG(CASE WHEN eligible.ActivityAt < windows.CurrentStart THEN eligible.Wpm END), 0) AS PreviousAverageWpm,
+                       COALESCE(AVG(CASE WHEN eligible.ActivityAt < windows.CurrentStart THEN eligible.Accuracy END), 0) AS PreviousAverageAccuracy,
+                       COALESCE(AVG(CASE WHEN eligible.ActivityAt < windows.CurrentStart THEN eligible.Consistency END), 0) AS PreviousAverageConsistency
+                FROM windows
+                LEFT JOIN eligible
+                  ON eligible.ActivityAt >= windows.PreviousStart
+                 AND eligible.ActivityAt < {nowValue}
+                GROUP BY windows.Days
+                ORDER BY windows.Days
+                """).ToListAsync(cancellationToken);
+        var byDays = rows.ToDictionary(row => row.Days);
+
+        return TrendWindows.Select(days =>
+        {
+            var row = byDays[days];
+            var currentWpm = Math.Round(row.CurrentAverageWpm, 2);
+            var currentAccuracy = Math.Round(row.CurrentAverageAccuracy, 2);
+            var currentConsistency = Math.Round(row.CurrentAverageConsistency, 2);
+            return new ProfileTrendWindow(
+                days,
+                row.CurrentSampleCount,
+                currentWpm,
+                currentAccuracy,
+                currentConsistency,
+                row.CurrentSampleCount == 0 || row.PreviousSampleCount == 0 ? 0 : Math.Round(currentWpm - row.PreviousAverageWpm, 2),
+                row.CurrentSampleCount == 0 || row.PreviousSampleCount == 0 ? 0 : Math.Round(currentAccuracy - row.PreviousAverageAccuracy, 2),
+                row.CurrentSampleCount == 0 || row.PreviousSampleCount == 0 ? 0 : Math.Round(currentConsistency - row.PreviousAverageConsistency, 2));
+        }).ToList();
     }
 
-    private async Task<WindowAggregate> AggregateWindowAsync(
+    private async Task<IReadOnlyList<ProfileTrendWindow>> BuildTrendsWithEfAsync(
         Guid profileId,
-        DateTimeOffset start,
-        DateTimeOffset end,
+        DateTimeOffset now,
         CancellationToken cancellationToken)
     {
-        var aggregate = await CompletedAttemptsBetween(profileId, start, end)
+        var start7 = now.AddDays(-7);
+        var previous7 = now.AddDays(-14);
+        var start30 = now.AddDays(-30);
+        var previous30 = now.AddDays(-60);
+        var start90 = now.AddDays(-90);
+        var previous90 = now.AddDays(-180);
+        var aggregate = await CompletedAttempts(profileId)
+            .Where(attempt => attempt.CreatedAt >= previous90 && attempt.CreatedAt < now)
             .GroupBy(_ => 1)
             .Select(group => new
             {
-                Count = group.Count(),
-                Wpm = group.Average(attempt => attempt.Wpm),
-                Accuracy = group.Average(attempt => attempt.Accuracy),
-                Consistency = group.Average(attempt => attempt.Consistency)
+                Current7Count = group.Count(attempt => attempt.CreatedAt >= start7),
+                Current7Wpm = group.Where(attempt => attempt.CreatedAt >= start7).Sum(attempt => attempt.Wpm),
+                Current7Accuracy = group.Where(attempt => attempt.CreatedAt >= start7).Sum(attempt => attempt.Accuracy),
+                Current7Consistency = group.Where(attempt => attempt.CreatedAt >= start7).Sum(attempt => attempt.Consistency),
+                Previous7Count = group.Count(attempt => attempt.CreatedAt >= previous7 && attempt.CreatedAt < start7),
+                Previous7Wpm = group.Where(attempt => attempt.CreatedAt >= previous7 && attempt.CreatedAt < start7).Sum(attempt => attempt.Wpm),
+                Previous7Accuracy = group.Where(attempt => attempt.CreatedAt >= previous7 && attempt.CreatedAt < start7).Sum(attempt => attempt.Accuracy),
+                Previous7Consistency = group.Where(attempt => attempt.CreatedAt >= previous7 && attempt.CreatedAt < start7).Sum(attempt => attempt.Consistency),
+                Current30Count = group.Count(attempt => attempt.CreatedAt >= start30),
+                Current30Wpm = group.Where(attempt => attempt.CreatedAt >= start30).Sum(attempt => attempt.Wpm),
+                Current30Accuracy = group.Where(attempt => attempt.CreatedAt >= start30).Sum(attempt => attempt.Accuracy),
+                Current30Consistency = group.Where(attempt => attempt.CreatedAt >= start30).Sum(attempt => attempt.Consistency),
+                Previous30Count = group.Count(attempt => attempt.CreatedAt >= previous30 && attempt.CreatedAt < start30),
+                Previous30Wpm = group.Where(attempt => attempt.CreatedAt >= previous30 && attempt.CreatedAt < start30).Sum(attempt => attempt.Wpm),
+                Previous30Accuracy = group.Where(attempt => attempt.CreatedAt >= previous30 && attempt.CreatedAt < start30).Sum(attempt => attempt.Accuracy),
+                Previous30Consistency = group.Where(attempt => attempt.CreatedAt >= previous30 && attempt.CreatedAt < start30).Sum(attempt => attempt.Consistency),
+                Current90Count = group.Count(attempt => attempt.CreatedAt >= start90),
+                Current90Wpm = group.Where(attempt => attempt.CreatedAt >= start90).Sum(attempt => attempt.Wpm),
+                Current90Accuracy = group.Where(attempt => attempt.CreatedAt >= start90).Sum(attempt => attempt.Accuracy),
+                Current90Consistency = group.Where(attempt => attempt.CreatedAt >= start90).Sum(attempt => attempt.Consistency),
+                Previous90Count = group.Count(attempt => attempt.CreatedAt >= previous90 && attempt.CreatedAt < start90),
+                Previous90Wpm = group.Where(attempt => attempt.CreatedAt >= previous90 && attempt.CreatedAt < start90).Sum(attempt => attempt.Wpm),
+                Previous90Accuracy = group.Where(attempt => attempt.CreatedAt >= previous90 && attempt.CreatedAt < start90).Sum(attempt => attempt.Accuracy),
+                Previous90Consistency = group.Where(attempt => attempt.CreatedAt >= previous90 && attempt.CreatedAt < start90).Sum(attempt => attempt.Consistency)
             })
             .SingleOrDefaultAsync(cancellationToken);
+        if (aggregate is null)
+        {
+            return TrendWindows.Select(days => new ProfileTrendWindow(days, 0, 0, 0, 0, 0, 0, 0)).ToList();
+        }
 
-        return aggregate is null
-            ? new WindowAggregate(0, 0, 0, 0)
-            : new WindowAggregate(
-                aggregate.Count,
-                Math.Round(aggregate.Wpm, 2),
-                Math.Round(aggregate.Accuracy, 2),
-                Math.Round(aggregate.Consistency, 2));
+        return
+        [
+            BuildTrend(7, aggregate.Current7Count, aggregate.Current7Wpm, aggregate.Current7Accuracy, aggregate.Current7Consistency,
+                aggregate.Previous7Count, aggregate.Previous7Wpm, aggregate.Previous7Accuracy, aggregate.Previous7Consistency),
+            BuildTrend(30, aggregate.Current30Count, aggregate.Current30Wpm, aggregate.Current30Accuracy, aggregate.Current30Consistency,
+                aggregate.Previous30Count, aggregate.Previous30Wpm, aggregate.Previous30Accuracy, aggregate.Previous30Consistency),
+            BuildTrend(90, aggregate.Current90Count, aggregate.Current90Wpm, aggregate.Current90Accuracy, aggregate.Current90Consistency,
+                aggregate.Previous90Count, aggregate.Previous90Wpm, aggregate.Previous90Accuracy, aggregate.Previous90Consistency)
+        ];
+    }
+
+    private static ProfileTrendWindow BuildTrend(
+        int days,
+        int currentCount,
+        double currentWpmSum,
+        double currentAccuracySum,
+        double currentConsistencySum,
+        int previousCount,
+        double previousWpmSum,
+        double previousAccuracySum,
+        double previousConsistencySum)
+    {
+        var currentWpm = currentCount == 0 ? 0 : Math.Round(currentWpmSum / currentCount, 2);
+        var currentAccuracy = currentCount == 0 ? 0 : Math.Round(currentAccuracySum / currentCount, 2);
+        var currentConsistency = currentCount == 0 ? 0 : Math.Round(currentConsistencySum / currentCount, 2);
+        var previousWpm = previousCount == 0 ? 0 : Math.Round(previousWpmSum / previousCount, 2);
+        var previousAccuracy = previousCount == 0 ? 0 : Math.Round(previousAccuracySum / previousCount, 2);
+        var previousConsistency = previousCount == 0 ? 0 : Math.Round(previousConsistencySum / previousCount, 2);
+        return new ProfileTrendWindow(
+            days,
+            currentCount,
+            currentWpm,
+            currentAccuracy,
+            currentConsistency,
+            currentCount == 0 || previousCount == 0 ? 0 : Math.Round(currentWpm - previousWpm, 2),
+            currentCount == 0 || previousCount == 0 ? 0 : Math.Round(currentAccuracy - previousAccuracy, 2),
+            currentCount == 0 || previousCount == 0 ? 0 : Math.Round(currentConsistency - previousConsistency, 2));
     }
 
     private static async Task<IReadOnlyList<ProfileModeBest>> BuildBestModesAsync(IQueryable<TypingAttempt> attempts, CancellationToken cancellationToken)
@@ -270,6 +377,16 @@ public sealed class ProfileInsightsService(KeyWarsDbContext db, TimeProvider tim
         DateTimeOffset end,
         CancellationToken cancellationToken)
     {
+        if (!db.Database.IsSqlite())
+        {
+            var providerCounts = await CompletedAttempts(profileId)
+                .Where(attempt => attempt.CreatedAt >= start && attempt.CreatedAt < end)
+                .GroupBy(attempt => attempt.CreatedAt.Date)
+                .Select(group => new { Date = group.Key, Count = group.Count() })
+                .ToListAsync(cancellationToken);
+            return providerCounts.ToDictionary(item => DateOnly.FromDateTime(item.Date), item => item.Count);
+        }
+
         var profileKey = FormatSqliteGuid(profileId);
         var phase = AttemptPhase.Finished.ToString();
         var startValue = FormatSqliteDateTimeOffset(start);
@@ -298,6 +415,21 @@ public sealed class ProfileInsightsService(KeyWarsDbContext db, TimeProvider tim
         DateTimeOffset end,
         CancellationToken cancellationToken)
     {
+        if (!db.Database.IsSqlite())
+        {
+            var providerCounts = await (
+                    from participant in db.LiveRoomParticipantSummaries.AsNoTracking()
+                    join room in db.LiveRoomSummaries.AsNoTracking() on participant.LiveRoomSummaryId equals room.Id
+                    where participant.UserProfileId == profileId &&
+                        room.FinishedAt != null &&
+                        room.FinishedAt >= start &&
+                        room.FinishedAt < end
+                    group room by room.FinishedAt!.Value.Date into dayGroup
+                    select new { Date = dayGroup.Key, Count = dayGroup.Count() })
+                .ToListAsync(cancellationToken);
+            return providerCounts.ToDictionary(item => DateOnly.FromDateTime(item.Date), item => item.Count);
+        }
+
         var profileKey = FormatSqliteGuid(profileId);
         var startValue = FormatSqliteDateTimeOffset(start);
         var endValue = FormatSqliteDateTimeOffset(end);
@@ -331,6 +463,27 @@ public sealed class ProfileInsightsService(KeyWarsDbContext db, TimeProvider tim
         int historyPageSize,
         CancellationToken cancellationToken)
     {
+        if (!db.Database.IsSqlite())
+        {
+            return await CompletedAttempts(profileId)
+                .OrderByDescending(attempt => attempt.CreatedAt)
+                .ThenByDescending(attempt => attempt.Id)
+                .Skip((historyPage - 1) * historyPageSize)
+                .Take(historyPageSize)
+                .Select(attempt => new ProfileAttemptHistoryRow(
+                    attempt.Id,
+                    attempt.CreatedAt,
+                    attempt.Mode,
+                    attempt.Wpm,
+                    attempt.Accuracy,
+                    attempt.Consistency,
+                    attempt.ConsistencySampleCount,
+                    attempt.DurationMilliseconds,
+                    attempt.CorrectCharacters,
+                    attempt.IncorrectCharacters))
+                .ToListAsync(cancellationToken);
+        }
+
         var connection = db.Database.GetDbConnection();
         var shouldClose = connection.State == ConnectionState.Closed;
         if (shouldClose)
@@ -386,6 +539,16 @@ public sealed class ProfileInsightsService(KeyWarsDbContext db, TimeProvider tim
 
     private async Task<IReadOnlyList<Achievement>> ReadFeaturedAchievementsAsync(Guid profileId, CancellationToken cancellationToken)
     {
+        if (!db.Database.IsSqlite())
+        {
+            return await db.Achievements
+                .AsNoTracking()
+                .Where(item => item.UserProfileId == profileId)
+                .OrderByDescending(item => item.UnlockedAt)
+                .Take(5)
+                .ToListAsync(cancellationToken);
+        }
+
         var connection = db.Database.GetDbConnection();
         var shouldClose = connection.State == ConnectionState.Closed;
         if (shouldClose)
@@ -431,25 +594,6 @@ public sealed class ProfileInsightsService(KeyWarsDbContext db, TimeProvider tim
         }
     }
 
-    private IQueryable<TypingAttempt> CompletedAttemptsBetween(Guid profileId, DateTimeOffset start, DateTimeOffset end)
-    {
-        var profileKey = FormatSqliteGuid(profileId);
-        var phase = AttemptPhase.Finished.ToString();
-        var startValue = FormatSqliteDateTimeOffset(start);
-        var endValue = FormatSqliteDateTimeOffset(end);
-        return db.TypingAttempts
-            .FromSqlInterpolated($"""
-                SELECT *
-                FROM TypingAttempts
-                WHERE UserProfileId = {profileKey}
-                  AND Phase = {phase}
-                  AND Completed = 1
-                  AND substr(CreatedAt, 1, 19) >= {startValue}
-                  AND substr(CreatedAt, 1, 19) < {endValue}
-                """)
-            .AsNoTracking();
-    }
-
     private static void AddParameter(DbCommand command, string name, object value)
     {
         var parameter = command.CreateParameter();
@@ -481,14 +625,16 @@ public sealed class ProfileInsightsService(KeyWarsDbContext db, TimeProvider tim
             : fallback[..2].ToUpperInvariant();
     }
 
-    private static string BuildDivision(int rating) => rating switch
+    private sealed class TrendAggregateRow
     {
-        >= 1600 => "Meister",
-        >= 1400 => "Gold",
-        >= 1200 => "Silber",
-        >= 1000 => "Bronze",
-        _ => "Aufbau"
-    };
-
-    private sealed record WindowAggregate(int SampleCount, double AverageWpm, double AverageAccuracy, double AverageConsistency);
+        public int Days { get; set; }
+        public int CurrentSampleCount { get; set; }
+        public double CurrentAverageWpm { get; set; }
+        public double CurrentAverageAccuracy { get; set; }
+        public double CurrentAverageConsistency { get; set; }
+        public int PreviousSampleCount { get; set; }
+        public double PreviousAverageWpm { get; set; }
+        public double PreviousAverageAccuracy { get; set; }
+        public double PreviousAverageConsistency { get; set; }
+    }
 }

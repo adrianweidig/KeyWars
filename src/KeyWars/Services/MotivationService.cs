@@ -28,6 +28,13 @@ public sealed record MotivationOutcome(
     }
 }
 
+internal sealed record ArenaMotivationInput(
+    UserProfile Profile,
+    string SourceId,
+    double Wpm,
+    double Accuracy,
+    int DurationMilliseconds);
+
 public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProvider, GamificationEventWriter gamificationEvents)
 {
     private const string SourceAttempt = "attempt";
@@ -82,25 +89,107 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
             throw new InvalidOperationException("Die Arena-Quelle ist ungültig.");
         }
 
-        var totalCharacters = Math.Max(MinimumXpCharacters, (int)Math.Round(wpm * durationMilliseconds / 12_000d));
-        var performance = new MotivationPerformance(
-            profileId,
-            SourceArena,
-            sourceId.Length <= 80 ? sourceId : sourceId[..80],
-            null,
-            TrainingMode.Text,
-            wpm,
-            accuracy,
-            100,
-            durationMilliseconds,
-            totalCharacters,
-            totalCharacters,
-            true,
-            true,
-            null,
-            false,
-            []);
-        return await ApplyPerformanceAsync(performance, CalculateXp(performance, 0d, false), 0d, cancellationToken);
+        var profile = await db.UserProfiles.SingleAsync(item => item.Id == profileId, cancellationToken);
+        var outcomes = await ApplyArenaResultsAsync(
+            [new ArenaMotivationInput(profile, sourceId, wpm, accuracy, durationMilliseconds)],
+            cancellationToken);
+        return outcomes[profileId];
+    }
+
+    internal async Task<IReadOnlyDictionary<Guid, MotivationOutcome>> ApplyArenaResultsAsync(
+        IReadOnlyCollection<ArenaMotivationInput> inputs,
+        CancellationToken cancellationToken = default)
+    {
+        if (inputs.Count == 0)
+        {
+            return new Dictionary<Guid, MotivationOutcome>();
+        }
+
+        var items = inputs
+            .Select(input => new ArenaBatchItem(
+                input.Profile,
+                CreateArenaPerformance(input),
+                0))
+            .Select(item => item with { Xp = CalculateXp(item.Performance, 0d, false) })
+            .ToList();
+        if (items.Select(item => item.Profile.Id).Distinct().Count() != items.Count)
+        {
+            throw new InvalidOperationException("Ein Arena-Batch darf jedes Profil nur einmal enthalten.");
+        }
+
+        var positiveItems = items.Where(item => item.Xp > 0).ToList();
+        var knownLedgerEntries = await LoadArenaLedgerEntriesAsync(positiveItems, cancellationToken);
+        var activeItems = positiveItems
+            .Where(item => !knownLedgerEntries.Contains(new RewardLedgerIdentity(item.Profile.Id, SourceArena, item.Performance.SourceId)))
+            .ToList();
+        var outcomes = new Dictionary<Guid, MotivationOutcome>(items.Count);
+        foreach (var item in items.Except(activeItems))
+        {
+            var level = CalculateLevel(item.Profile.ExperiencePoints);
+            item.Profile.Level = level;
+            outcomes[item.Profile.Id] = BuildOutcome(item.Profile, level, 0, []);
+        }
+
+        if (activeItems.Count == 0)
+        {
+            return outcomes;
+        }
+
+        var now = timeProvider.GetUtcNow();
+        var today = DateOnly.FromDateTime(timeProvider.GetLocalNow().DateTime);
+        var activeProfileIds = activeItems.Select(item => item.Profile.Id).ToArray();
+        var missionLoad = await LoadOrCreateCurrentMissionsAsync(activeProfileIds, today, cancellationToken);
+        var missionsByProfile = missionLoad.MissionsByProfile;
+        var missionSourceIds = missionsByProfile.Values
+            .SelectMany(missions => missions)
+            .Select(mission => mission.Id.ToString("N"))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        await AddKnownMissionLedgerEntriesAsync(activeProfileIds, missionSourceIds, knownLedgerEntries, cancellationToken);
+        var achievementBaselines = await LoadArenaAchievementBaselinesAsync(activeProfileIds, cancellationToken);
+        var knownEvents = await LoadKnownArenaEventsAsync(
+            activeProfileIds,
+            activeItems
+                .Select(item => GamificationEventWriter.NormalizeSourceId(item.Performance.SourceId))
+                .Distinct(StringComparer.Ordinal)
+                .ToArray(),
+            missionSourceIds,
+            cancellationToken);
+
+        foreach (var item in activeItems)
+        {
+            var profile = item.Profile;
+            var performance = item.Performance;
+            var levelBefore = CalculateLevel(profile.ExperiencePoints);
+            profile.Level = levelBefore;
+            var awardedXp = AwardXpPrepared(profile, SourceArena, performance.SourceId, item.Xp, now, knownLedgerEntries);
+            profile.CurrentStreakDays = CalculateStreak(profile.LastActivityDate, today, profile.CurrentStreakDays);
+            profile.LastActivityDate = today;
+
+            var completedMissions = ApplyMissionProgress(profile, performance, missionsByProfile[profile.Id], now, knownLedgerEntries);
+            profile.Level = CalculateLevel(profile.ExperiencePoints);
+            var baseline = achievementBaselines.GetValueOrDefault(profile.Id) ?? ArenaAchievementBaseline.Empty;
+            var unlockedAchievements = UnlockAchievements(
+                profile,
+                performance,
+                0d,
+                now,
+                BuildArenaAchievementSnapshot(profile.Id, baseline));
+            var levelAfter = profile.Level;
+            var events = new List<GamificationEvent>();
+            foreach (var draft in BuildEventDrafts(performance, awardedXp, completedMissions, unlockedAchievements, levelBefore, levelAfter))
+            {
+                gamificationEvents.AddPrepared(events, profile, draft, now, knownEvents);
+            }
+
+            outcomes[profile.Id] = BuildOutcome(
+                profile,
+                levelBefore,
+                awardedXp + completedMissions.Sum(item => item.XpDelta),
+                events);
+        }
+
+        return outcomes;
     }
 
     public async Task EnsureDailyMissionsAsync(Guid profileId, DateOnly date, CancellationToken cancellationToken = default)
@@ -110,8 +199,11 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
 
     public async Task EnsureCurrentMissionsAsync(Guid profileId, DateOnly date, CancellationToken cancellationToken = default)
     {
-        await EnsureMissionsAsync(profileId, date, MissionCadence.Daily, cancellationToken);
-        await EnsureMissionsAsync(profileId, GetWeekStart(date), MissionCadence.Weekly, cancellationToken);
+        var result = await LoadOrCreateCurrentMissionsAsync([profileId], date, cancellationToken);
+        if (result.AddedCount > 0)
+        {
+            await db.SaveChangesAsync(cancellationToken);
+        }
     }
 
     public async Task<CoachRecommendation> RecommendAsync(Guid profileId, CancellationToken cancellationToken = default)
@@ -195,11 +287,8 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
             profile.SeasonPoints += Math.Max(1, (int)Math.Round(performance.Wpm / 10));
         }
 
-        await EnsureCurrentMissionsAsync(profile.Id, today, cancellationToken);
-        var activeMissionDates = new[] { today, GetWeekStart(today) }.Distinct().ToArray();
-        var missions = await db.Missions
-            .Where(item => item.UserProfileId == profile.Id && activeMissionDates.Contains(item.MissionDate))
-            .ToListAsync(cancellationToken);
+        var missionLoad = await LoadOrCreateCurrentMissionsAsync([profile.Id], today, cancellationToken);
+        var missions = missionLoad.MissionsByProfile[profile.Id];
         var completedMissions = new List<(Mission Mission, int XpDelta)>();
         foreach (var mission in missions)
         {
@@ -227,91 +316,16 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
         UpdateWeaknesses(performance, now);
         var levelAfter = profile.Level;
         var events = new List<GamificationEvent>();
-        await gamificationEvents.AddAsync(events, profile, new GamificationEventDraft(
-            GamificationEventType.XpAwarded,
-            "xp-awarded",
-            $"+{awardedXp} XP",
-            "Gültige Runde abgeschlossen.",
-            awardedXp,
-            levelBefore,
-            levelAfter,
-            GamificationRarity.Common,
-            performance.Source,
-            performance.SourceId), now, cancellationToken);
-
-        if (performance.Source == SourceArena)
+        foreach (var draft in BuildEventDrafts(
+                     performance,
+                     awardedXp,
+                     completedMissions,
+                     unlockedAchievements,
+                     levelBefore,
+                     levelAfter,
+                     previousBestWpm))
         {
-            await gamificationEvents.AddAsync(events, profile, new GamificationEventDraft(
-                GamificationEventType.ArenaResult,
-                "arena-result",
-                "Arena-Rennen gewertet",
-                $"{performance.Wpm:0.0} WPM bei {performance.Accuracy:0.0} % Genauigkeit.",
-                0,
-                levelBefore,
-                levelAfter,
-                performance.Accuracy >= 99.9 ? GamificationRarity.Rare : GamificationRarity.Common,
-                performance.Source,
-                performance.SourceId), now, cancellationToken);
-        }
-
-        if (previousBestWpm > 0 && performance.Wpm >= previousBestWpm + 2)
-        {
-            await gamificationEvents.AddAsync(events, profile, new GamificationEventDraft(
-                GamificationEventType.PersonalBest,
-                "personal-best",
-                "Neue Bestleistung",
-                $"{performance.Wpm:0.0} WPM verbessern deine bisherige Marke von {previousBestWpm:0.0} WPM.",
-                0,
-                levelBefore,
-                levelAfter,
-                GamificationRarity.Rare,
-                performance.Source,
-                performance.SourceId), now, cancellationToken);
-        }
-
-        foreach (var (mission, missionXp) in completedMissions)
-        {
-            await gamificationEvents.AddAsync(events, profile, new GamificationEventDraft(
-                GamificationEventType.MissionCompleted,
-                "mission-completed",
-                mission.Title,
-                mission.Description,
-                missionXp,
-                levelBefore,
-                levelAfter,
-                RarityForMission(mission),
-                SourceMission,
-                mission.Id.ToString("N")), now, cancellationToken);
-        }
-
-        foreach (var achievement in unlockedAchievements)
-        {
-            await gamificationEvents.AddAsync(events, profile, new GamificationEventDraft(
-                GamificationEventType.AchievementUnlocked,
-                "achievement-unlocked",
-                achievement.Title,
-                achievement.Description,
-                0,
-                levelBefore,
-                levelAfter,
-                RarityForAchievement(achievement),
-                SourceAchievement,
-                achievement.Key), now, cancellationToken);
-        }
-
-        if (levelAfter > levelBefore)
-        {
-            await gamificationEvents.AddAsync(events, profile, new GamificationEventDraft(
-                GamificationEventType.LevelUp,
-                $"level-up-{levelAfter}",
-                $"Level {levelAfter} erreicht",
-                $"Du bist von Level {levelBefore} auf Level {levelAfter} gestiegen.",
-                0,
-                levelBefore,
-                levelAfter,
-                RarityForLevel(levelAfter),
-                performance.Source,
-                performance.SourceId), now, cancellationToken);
+            await gamificationEvents.AddAsync(events, profile, draft, now, cancellationToken);
         }
 
         return BuildOutcome(profile, levelBefore, awardedXp + completedMissions.Sum(item => item.XpDelta), events);
@@ -329,6 +343,99 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
         return new MotivationOutcome(xpDelta, levelBefore, progress.Level, progress.ProgressPercent, events);
     }
 
+    private static IReadOnlyList<GamificationEventDraft> BuildEventDrafts(
+        MotivationPerformance performance,
+        int awardedXp,
+        IReadOnlyList<(Mission Mission, int XpDelta)> completedMissions,
+        IReadOnlyList<AchievementDefinition> unlockedAchievements,
+        int levelBefore,
+        int levelAfter,
+        double previousBestWpm = 0d)
+    {
+        var drafts = new List<GamificationEventDraft>
+        {
+            new(
+                GamificationEventType.XpAwarded,
+                "xp-awarded",
+                $"+{awardedXp} XP",
+                "Gültige Runde abgeschlossen.",
+                awardedXp,
+                levelBefore,
+                levelAfter,
+                GamificationRarity.Common,
+                performance.Source,
+                performance.SourceId)
+        };
+        if (performance.Source == SourceArena)
+        {
+            drafts.Add(new GamificationEventDraft(
+                GamificationEventType.ArenaResult,
+                "arena-result",
+                "Arena-Rennen gewertet",
+                $"{performance.Wpm:0.0} WPM bei {performance.Accuracy:0.0} % Genauigkeit.",
+                0,
+                levelBefore,
+                levelAfter,
+                performance.Accuracy >= 99.9 ? GamificationRarity.Rare : GamificationRarity.Common,
+                performance.Source,
+                performance.SourceId));
+        }
+
+        if (previousBestWpm > 0 && performance.Wpm >= previousBestWpm + 2)
+        {
+            drafts.Add(new GamificationEventDraft(
+                GamificationEventType.PersonalBest,
+                "personal-best",
+                "Neue Bestleistung",
+                $"{performance.Wpm:0.0} WPM verbessern deine bisherige Marke von {previousBestWpm:0.0} WPM.",
+                0,
+                levelBefore,
+                levelAfter,
+                GamificationRarity.Rare,
+                performance.Source,
+                performance.SourceId));
+        }
+
+        drafts.AddRange(completedMissions.Select(item => new GamificationEventDraft(
+            GamificationEventType.MissionCompleted,
+            "mission-completed",
+            item.Mission.Title,
+            item.Mission.Description,
+            item.XpDelta,
+            levelBefore,
+            levelAfter,
+            RarityForMission(item.Mission),
+            SourceMission,
+            item.Mission.Id.ToString("N"))));
+        drafts.AddRange(unlockedAchievements.Select(achievement => new GamificationEventDraft(
+            GamificationEventType.AchievementUnlocked,
+            "achievement-unlocked",
+            achievement.Title,
+            achievement.Description,
+            0,
+            levelBefore,
+            levelAfter,
+            RarityForAchievement(achievement),
+            SourceAchievement,
+            achievement.Key)));
+        if (levelAfter > levelBefore)
+        {
+            drafts.Add(new GamificationEventDraft(
+                GamificationEventType.LevelUp,
+                $"level-up-{levelAfter}",
+                $"Level {levelAfter} erreicht",
+                $"Du bist von Level {levelBefore} auf Level {levelAfter} gestiegen.",
+                0,
+                levelBefore,
+                levelAfter,
+                RarityForLevel(levelAfter),
+                performance.Source,
+                performance.SourceId));
+        }
+
+        return drafts;
+    }
+
     private static GamificationRarity RarityForMission(Mission mission) =>
         mission.Key.StartsWith("weekly-", StringComparison.Ordinal) ? GamificationRarity.Rare : GamificationRarity.Common;
 
@@ -343,32 +450,96 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
         _ => GamificationRarity.Common
     };
 
-    private async Task EnsureMissionsAsync(Guid profileId, DateOnly periodStart, MissionCadence cadence, CancellationToken cancellationToken)
+    private async Task<MissionLoadResult> LoadOrCreateCurrentMissionsAsync(
+        IReadOnlyCollection<Guid> profileIds,
+        DateOnly date,
+        CancellationToken cancellationToken)
     {
-        var definitions = MotivationCatalog.MissionDefinitions.Where(definition => definition.Cadence == cadence).ToArray();
-        var existingKeys = await db.Missions
-            .Where(item => item.UserProfileId == profileId && item.MissionDate == periodStart)
-            .Select(item => item.Key)
-            .ToListAsync(cancellationToken);
-        var missing = definitions
-            .Where(definition => !existingKeys.Contains(definition.Key, StringComparer.Ordinal))
-            .ToArray();
-        if (missing.Length == 0)
+        if (profileIds.Count == 0)
         {
-            return;
+            return new MissionLoadResult(new Dictionary<Guid, List<Mission>>(), 0);
         }
 
-        db.Missions.AddRange(missing.Select(definition => new Mission
+        var distinctProfileIds = profileIds.Distinct().ToArray();
+        var weekStart = GetWeekStart(date);
+        var activeDates = new[] { date, weekStart }.Distinct().ToArray();
+        var missions = await db.Missions
+            .Where(item => distinctProfileIds.Contains(item.UserProfileId) && activeDates.Contains(item.MissionDate))
+            .ToListAsync(cancellationToken);
+        foreach (var local in db.Missions.Local.Where(item =>
+                     distinctProfileIds.Contains(item.UserProfileId) &&
+                     activeDates.Contains(item.MissionDate)))
         {
-            UserProfileId = profileId,
-            MissionDate = periodStart,
-            Key = definition.Key,
-            Title = definition.Title,
-            Description = definition.Description,
-            TargetValue = definition.TargetValue,
-            XpReward = definition.XpReward
-        }));
-        await db.SaveChangesAsync(cancellationToken);
+            if (missions.All(item => item.Id != local.Id))
+            {
+                missions.Add(local);
+            }
+        }
+
+        var existing = missions
+            .Select(item => (item.UserProfileId, item.MissionDate, item.Key))
+            .ToHashSet();
+        var addedCount = 0;
+        foreach (var profileId in distinctProfileIds)
+        {
+            foreach (var definition in MotivationCatalog.MissionDefinitions)
+            {
+                var missionDate = definition.Cadence == MissionCadence.Daily ? date : weekStart;
+                if (!existing.Add((profileId, missionDate, definition.Key)))
+                {
+                    continue;
+                }
+
+                var mission = new Mission
+                {
+                    UserProfileId = profileId,
+                    MissionDate = missionDate,
+                    Key = definition.Key,
+                    Title = definition.Title,
+                    Description = definition.Description,
+                    TargetValue = definition.TargetValue,
+                    XpReward = definition.XpReward
+                };
+                db.Missions.Add(mission);
+                missions.Add(mission);
+                addedCount++;
+            }
+        }
+
+        return new MissionLoadResult(
+            missions
+                .GroupBy(item => item.UserProfileId)
+                .ToDictionary(group => group.Key, group => group.ToList()),
+            addedCount);
+    }
+
+    private static MotivationPerformance CreateArenaPerformance(ArenaMotivationInput input)
+    {
+        if (string.IsNullOrWhiteSpace(input.SourceId))
+        {
+            throw new InvalidOperationException("Die Arena-Quelle ist ungültig.");
+        }
+
+        var totalCharacters = Math.Max(
+            MinimumXpCharacters,
+            (int)Math.Round(input.Wpm * input.DurationMilliseconds / 12_000d));
+        return new MotivationPerformance(
+            input.Profile.Id,
+            SourceArena,
+            input.SourceId.Length <= 80 ? input.SourceId : input.SourceId[..80],
+            null,
+            TrainingMode.Text,
+            input.Wpm,
+            input.Accuracy,
+            100,
+            input.DurationMilliseconds,
+            totalCharacters,
+            totalCharacters,
+            true,
+            true,
+            null,
+            false,
+            []);
     }
 
     private static int CalculateXp(MotivationPerformance performance, double previousBestWpm, bool demandingText)
@@ -429,6 +600,118 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
         });
         profile.ExperiencePoints += xp;
         return xp;
+    }
+
+    private async Task<HashSet<RewardLedgerIdentity>> LoadArenaLedgerEntriesAsync(
+        IReadOnlyCollection<ArenaBatchItem> items,
+        CancellationToken cancellationToken)
+    {
+        var known = new HashSet<RewardLedgerIdentity>();
+        if (items.Count > 0)
+        {
+            var profileIds = items.Select(item => item.Profile.Id).Distinct().ToArray();
+            var sourceIds = items.Select(item => item.Performance.SourceId).Distinct(StringComparer.Ordinal).ToArray();
+            var stored = await db.RewardLedgerEntries
+                .AsNoTracking()
+                .Where(item =>
+                    profileIds.Contains(item.UserProfileId) &&
+                    item.Source == SourceArena &&
+                    sourceIds.Contains(item.SourceId))
+                .Select(item => new { item.UserProfileId, item.Source, item.SourceId })
+                .ToListAsync(cancellationToken);
+            known.UnionWith(stored.Select(item => new RewardLedgerIdentity(item.UserProfileId, item.Source, item.SourceId)));
+        }
+
+        known.UnionWith(db.RewardLedgerEntries.Local.Select(item =>
+            new RewardLedgerIdentity(item.UserProfileId, item.Source, item.SourceId)));
+        return known;
+    }
+
+    private async Task AddKnownMissionLedgerEntriesAsync(
+        IReadOnlyCollection<Guid> profileIds,
+        IReadOnlyCollection<string> sourceIds,
+        ISet<RewardLedgerIdentity> known,
+        CancellationToken cancellationToken)
+    {
+        if (profileIds.Count == 0 || sourceIds.Count == 0)
+        {
+            return;
+        }
+
+        var stored = await db.RewardLedgerEntries
+            .AsNoTracking()
+            .Where(item =>
+                profileIds.Contains(item.UserProfileId) &&
+                item.Source == SourceMission &&
+                sourceIds.Contains(item.SourceId))
+            .Select(item => new { item.UserProfileId, item.Source, item.SourceId })
+            .ToListAsync(cancellationToken);
+        known.UnionWith(stored.Select(item => new RewardLedgerIdentity(item.UserProfileId, item.Source, item.SourceId)));
+        known.UnionWith(db.RewardLedgerEntries.Local.Select(item =>
+            new RewardLedgerIdentity(item.UserProfileId, item.Source, item.SourceId)));
+    }
+
+    private int AwardXpPrepared(
+        UserProfile profile,
+        string source,
+        string sourceId,
+        int xp,
+        DateTimeOffset awardedAt,
+        ISet<RewardLedgerIdentity> known)
+    {
+        if (xp <= 0 || !known.Add(new RewardLedgerIdentity(profile.Id, source, sourceId)))
+        {
+            return 0;
+        }
+
+        db.RewardLedgerEntries.Add(new RewardLedgerEntry
+        {
+            UserProfileId = profile.Id,
+            Source = source,
+            SourceId = sourceId,
+            Xp = xp,
+            AwardedAt = awardedAt
+        });
+        profile.ExperiencePoints += xp;
+        return xp;
+    }
+
+    private List<(Mission Mission, int XpDelta)> ApplyMissionProgress(
+        UserProfile profile,
+        MotivationPerformance performance,
+        IReadOnlyList<Mission> missions,
+        DateTimeOffset now,
+        ISet<RewardLedgerIdentity> knownLedgerEntries)
+    {
+        var completedMissions = new List<(Mission Mission, int XpDelta)>();
+        foreach (var mission in missions)
+        {
+            var delta = MissionProgressDelta(mission, performance);
+            if (delta <= 0)
+            {
+                continue;
+            }
+
+            var wasCompleted = mission.Completed;
+            mission.CurrentValue = Math.Min(mission.TargetValue, mission.CurrentValue + delta);
+            mission.Completed = mission.CurrentValue >= mission.TargetValue;
+            if (!wasCompleted && mission.Completed)
+            {
+                var missionXp = AwardXpPrepared(
+                    profile,
+                    SourceMission,
+                    mission.Id.ToString("N"),
+                    mission.XpReward,
+                    now,
+                    knownLedgerEntries);
+                if (missionXp > 0)
+                {
+                    completedMissions.Add((mission, missionXp));
+                }
+            }
+        }
+
+        return completedMissions;
     }
 
     private async Task<IReadOnlyList<AchievementDefinition>> UnlockAchievementsAsync(UserProfile profile, MotivationPerformance performance, double previousBestWpm, DateTimeOffset now, CancellationToken cancellationToken)
@@ -504,10 +787,69 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
             item.UserProfileId == profile.Id &&
             item.Completed &&
             item.Key.StartsWith("weekly-", StringComparison.Ordinal));
-        var bestWpm = Math.Max(previousBestWpm, performance.Wpm);
-        var unlock = new HashSet<string>(StringComparer.Ordinal);
+        var existing = new HashSet<string>(
+            await db.Achievements.Where(item => item.UserProfileId == profile.Id).Select(item => item.Key).ToListAsync(cancellationToken),
+            StringComparer.Ordinal);
+        foreach (var local in db.Achievements.Local.Where(item => item.UserProfileId == profile.Id))
+        {
+            existing.Add(local.Key);
+        }
 
-        AddThresholds(unlock, completedAttempts, [
+        return UnlockAchievements(
+            profile,
+            performance,
+            previousBestWpm,
+            now,
+            new AchievementSnapshot(
+                completedAttempts,
+                precise98Attempts,
+                precise95Attempts,
+                authoredTexts,
+                collections,
+                challengeResults,
+                arenaResults,
+                completedMissionIds.Count,
+                weeklyMissionCompleted,
+                existing));
+    }
+
+    private IReadOnlyList<AchievementDefinition> UnlockAchievements(
+        UserProfile profile,
+        MotivationPerformance performance,
+        double previousBestWpm,
+        DateTimeOffset now,
+        AchievementSnapshot snapshot)
+    {
+        var unlock = BuildAchievementKeys(profile, performance, previousBestWpm, snapshot);
+        var unlockedDefinitions = new List<AchievementDefinition>();
+        foreach (var definition in AchievementDefinitions.Where(item => unlock.Contains(item.Key)))
+        {
+            if (!snapshot.ExistingAchievementKeys.Contains(definition.Key))
+            {
+                db.Achievements.Add(new Achievement
+                {
+                    UserProfileId = profile.Id,
+                    Key = definition.Key,
+                    Title = definition.Title,
+                    Description = definition.Description,
+                    UnlockedAt = now
+                });
+                snapshot.ExistingAchievementKeys.Add(definition.Key);
+                unlockedDefinitions.Add(definition);
+            }
+        }
+
+        return unlockedDefinitions;
+    }
+
+    private static HashSet<string> BuildAchievementKeys(
+        UserProfile profile,
+        MotivationPerformance performance,
+        double previousBestWpm,
+        AchievementSnapshot snapshot)
+    {
+        var unlock = new HashSet<string>(StringComparer.Ordinal);
+        AddThresholds(unlock, snapshot.CompletedAttempts, [
             (1, "erster-versuch"),
             (5, "training-5-attempts"),
             (10, "training-10-attempts"),
@@ -550,9 +892,9 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
             unlock.Add("precision-100");
         }
 
-        AddThresholds(unlock, precise98Attempts, [(3, "precision-3x-98")]);
-        AddThresholds(unlock, precise95Attempts, [(10, "precision-10x-95")]);
-        AddSpeedThresholds(unlock, bestWpm);
+        AddThresholds(unlock, snapshot.Precise98Attempts, [(3, "precision-3x-98")]);
+        AddThresholds(unlock, snapshot.Precise95Attempts, [(10, "precision-10x-95")]);
+        AddSpeedThresholds(unlock, Math.Max(previousBestWpm, performance.Wpm));
         if (previousBestWpm > 0 && performance.Wpm >= previousBestWpm + 2)
         {
             unlock.Add("speed-personal-best");
@@ -564,7 +906,7 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
             (14, "streak-14"),
             (30, "streak-30")
         ]);
-        AddThresholds(unlock, Math.Max(profile.RatedMatchCount, arenaResults), [
+        AddThresholds(unlock, Math.Max(profile.RatedMatchCount, snapshot.ArenaResults), [
             (1, "arena-first"),
             (5, "arena-5"),
             (10, "arena-10")
@@ -584,60 +926,181 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
             unlock.Add("arena-perfect-accuracy");
         }
 
-        AddThresholds(unlock, authoredTexts, [
+        AddThresholds(unlock, snapshot.AuthoredTexts, [
             (1, "text-author-first"),
             (3, "text-author-3")
         ]);
-        if (collections >= 1)
+        if (snapshot.Collections >= 1)
         {
             unlock.Add("text-collection-first");
         }
 
-        AddThresholds(unlock, challengeResults, [
+        AddThresholds(unlock, snapshot.ChallengeResults, [
             (1, "team-first-challenge"),
             (3, "team-3-challenges")
         ]);
-        if (challengeResults >= 1 && performance.Accuracy >= 98)
+        if (snapshot.ChallengeResults >= 1 && performance.Accuracy >= 98)
         {
             unlock.Add("team-precise");
         }
 
-        AddThresholds(unlock, completedMissionIds.Count, [
+        AddThresholds(unlock, snapshot.CompletedMissions, [
             (1, "mission-first"),
             (5, "mission-5")
         ]);
-        if (weeklyMissionCompleted)
+        if (snapshot.WeeklyMissionCompleted)
         {
             unlock.Add("mission-weekly");
         }
 
-        var existing = new HashSet<string>(
-            await db.Achievements.Where(item => item.UserProfileId == profile.Id).Select(item => item.Key).ToListAsync(cancellationToken),
-            StringComparer.Ordinal);
-        foreach (var local in db.Achievements.Local.Where(item => item.UserProfileId == profile.Id))
-        {
-            existing.Add(local.Key);
-        }
+        return unlock;
+    }
 
-        var unlockedDefinitions = new List<AchievementDefinition>();
-        foreach (var definition in AchievementDefinitions.Where(item => unlock.Contains(item.Key)))
-        {
-            if (!existing.Contains(definition.Key))
+    private async Task<Dictionary<Guid, ArenaAchievementBaseline>> LoadArenaAchievementBaselinesAsync(
+        IReadOnlyCollection<Guid> profileIds,
+        CancellationToken cancellationToken)
+    {
+        var ids = profileIds.Distinct().ToArray();
+        var attemptRows = await db.TypingAttempts
+            .AsNoTracking()
+            .Where(item => ids.Contains(item.UserProfileId) && item.Completed && item.Official)
+            .GroupBy(item => item.UserProfileId)
+            .Select(group => new
             {
-                db.Achievements.Add(new Achievement
-                {
-                    UserProfileId = profile.Id,
-                    Key = definition.Key,
-                    Title = definition.Title,
-                    Description = definition.Description,
-                    UnlockedAt = now
-                });
-                existing.Add(definition.Key);
-                unlockedDefinitions.Add(definition);
-            }
-        }
+                ProfileId = group.Key,
+                Completed = group.Count(),
+                Precise98 = group.Count(item => item.Accuracy >= 98),
+                Precise95 = group.Count(item => item.Accuracy >= 95)
+            })
+            .ToListAsync(cancellationToken);
+        var authoredTextRows = await db.TrainingTexts
+            .AsNoTracking()
+            .Where(item => item.OwnerProfileId != null && ids.Contains(item.OwnerProfileId.Value))
+            .GroupBy(item => item.OwnerProfileId!.Value)
+            .Select(group => new { ProfileId = group.Key, Count = group.Count() })
+            .ToListAsync(cancellationToken);
+        var collectionRows = await db.TextCollections
+            .AsNoTracking()
+            .Where(item => ids.Contains(item.OwnerProfileId))
+            .GroupBy(item => item.OwnerProfileId)
+            .Select(group => new { ProfileId = group.Key, Count = group.Count() })
+            .ToListAsync(cancellationToken);
+        var challengeRows = await db.ChallengeRoundResults
+            .AsNoTracking()
+            .Where(item => ids.Contains(item.UserProfileId) && item.Status == ParticipantStatus.Finished)
+            .GroupBy(item => item.UserProfileId)
+            .Select(group => new { ProfileId = group.Key, Count = group.Count() })
+            .ToListAsync(cancellationToken);
+        var arenaRows = await db.LiveRoomParticipantSummaries
+            .AsNoTracking()
+            .Where(item => ids.Contains(item.UserProfileId) && item.Status == ParticipantStatus.Finished)
+            .GroupBy(item => item.UserProfileId)
+            .Select(group => new { ProfileId = group.Key, Count = group.Count() })
+            .ToListAsync(cancellationToken);
+        var missionRows = await db.Missions
+            .AsNoTracking()
+            .Where(item => ids.Contains(item.UserProfileId) && item.Completed)
+            .GroupBy(item => item.UserProfileId)
+            .Select(group => new
+            {
+                ProfileId = group.Key,
+                Count = group.Count(),
+                WeeklyCount = group.Count(item => item.Key.StartsWith("weekly-"))
+            })
+            .ToListAsync(cancellationToken);
+        var achievementRows = await db.Achievements
+            .AsNoTracking()
+            .Where(item => ids.Contains(item.UserProfileId))
+            .Select(item => new { item.UserProfileId, item.Key })
+            .ToListAsync(cancellationToken);
 
-        return unlockedDefinitions;
+        var attemptsByProfile = attemptRows.ToDictionary(item => item.ProfileId);
+        var authoredTextsByProfile = authoredTextRows.ToDictionary(item => item.ProfileId, item => item.Count);
+        var collectionsByProfile = collectionRows.ToDictionary(item => item.ProfileId, item => item.Count);
+        var challengesByProfile = challengeRows.ToDictionary(item => item.ProfileId, item => item.Count);
+        var arenasByProfile = arenaRows.ToDictionary(item => item.ProfileId, item => item.Count);
+        var missionsByProfile = missionRows.ToDictionary(
+            item => item.ProfileId,
+            item => new CompletedMissionBaseline(item.Count, item.WeeklyCount > 0));
+        var achievementsByProfile = achievementRows
+            .GroupBy(item => item.UserProfileId)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Select(item => item.Key).ToHashSet(StringComparer.Ordinal));
+
+        return ids.ToDictionary(
+            profileId => profileId,
+            profileId =>
+            {
+                attemptsByProfile.TryGetValue(profileId, out var attempts);
+                var missions = missionsByProfile.GetValueOrDefault(profileId) ?? CompletedMissionBaseline.Empty;
+                return new ArenaAchievementBaseline(
+                    attempts?.Completed ?? 0,
+                    attempts?.Precise98 ?? 0,
+                    attempts?.Precise95 ?? 0,
+                    authoredTextsByProfile.GetValueOrDefault(profileId),
+                    collectionsByProfile.GetValueOrDefault(profileId),
+                    challengesByProfile.GetValueOrDefault(profileId),
+                    arenasByProfile.GetValueOrDefault(profileId),
+                    missions.Count,
+                    missions.WeeklyCompleted,
+                    achievementsByProfile.GetValueOrDefault(profileId) ?? new HashSet<string>(StringComparer.Ordinal));
+            });
+    }
+
+    private AchievementSnapshot BuildArenaAchievementSnapshot(Guid profileId, ArenaAchievementBaseline baseline)
+    {
+        var newlyCompletedMissions = db.ChangeTracker.Entries<Mission>()
+            .Where(entry =>
+                entry.Entity.UserProfileId == profileId &&
+                entry.Entity.Completed &&
+                (entry.State == EntityState.Added ||
+                 (entry.State == EntityState.Modified &&
+                  !entry.OriginalValues.GetValue<bool>(nameof(Mission.Completed)))))
+            .Select(entry => entry.Entity)
+            .ToList();
+        var weeklyMissionCompleted = baseline.WeeklyMissionCompleted;
+        weeklyMissionCompleted |= newlyCompletedMissions.Any(mission =>
+            mission.Key.StartsWith("weekly-", StringComparison.Ordinal));
+
+        var existingAchievements = baseline.ExistingAchievementKeys.ToHashSet(StringComparer.Ordinal);
+        existingAchievements.UnionWith(db.Achievements.Local
+            .Where(item => item.UserProfileId == profileId)
+            .Select(item => item.Key));
+        return new AchievementSnapshot(
+            baseline.CompletedAttempts,
+            baseline.Precise98Attempts,
+            baseline.Precise95Attempts,
+            baseline.AuthoredTexts,
+            baseline.Collections,
+            baseline.ChallengeResults,
+            baseline.ArenaResults + 1,
+            baseline.CompletedMissions + newlyCompletedMissions.Count,
+            weeklyMissionCompleted,
+            existingAchievements);
+    }
+
+    private async Task<HashSet<GamificationEventIdentity>> LoadKnownArenaEventsAsync(
+        IReadOnlyCollection<Guid> profileIds,
+        IReadOnlyCollection<string> arenaSourceIds,
+        IReadOnlyCollection<string> missionSourceIds,
+        CancellationToken cancellationToken)
+    {
+        var stored = await db.GamificationEvents
+            .AsNoTracking()
+            .Where(item =>
+                profileIds.Contains(item.UserProfileId) &&
+                ((item.Source == SourceArena && arenaSourceIds.Contains(item.SourceId)) ||
+                 (item.Source == SourceMission && missionSourceIds.Contains(item.SourceId)) ||
+                 item.Source == SourceAchievement))
+            .Select(item => new { item.UserProfileId, item.Source, item.SourceId, item.EventKey })
+            .ToListAsync(cancellationToken);
+        var known = stored
+            .Select(item => new GamificationEventIdentity(item.UserProfileId, item.Source, item.SourceId, item.EventKey))
+            .ToHashSet();
+        known.UnionWith(db.GamificationEvents.Local.Select(item =>
+            new GamificationEventIdentity(item.UserProfileId, item.Source, item.SourceId, item.EventKey)));
+        return known;
     }
 
     private void UpdateWeaknesses(MotivationPerformance performance, DateTimeOffset now)
@@ -753,6 +1216,64 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
                 yield return error.Pattern;
             }
         }
+    }
+
+    private sealed record ArenaBatchItem(
+        UserProfile Profile,
+        MotivationPerformance Performance,
+        int Xp);
+
+    private readonly record struct RewardLedgerIdentity(
+        Guid UserProfileId,
+        string Source,
+        string SourceId);
+
+    private sealed record MissionLoadResult(
+        Dictionary<Guid, List<Mission>> MissionsByProfile,
+        int AddedCount);
+
+    private sealed record AchievementSnapshot(
+        int CompletedAttempts,
+        int Precise98Attempts,
+        int Precise95Attempts,
+        int AuthoredTexts,
+        int Collections,
+        int ChallengeResults,
+        int ArenaResults,
+        int CompletedMissions,
+        bool WeeklyMissionCompleted,
+        HashSet<string> ExistingAchievementKeys);
+
+    private sealed record ArenaAchievementBaseline(
+        int CompletedAttempts,
+        int Precise98Attempts,
+        int Precise95Attempts,
+        int AuthoredTexts,
+        int Collections,
+        int ChallengeResults,
+        int ArenaResults,
+        int CompletedMissions,
+        bool WeeklyMissionCompleted,
+        IReadOnlySet<string> ExistingAchievementKeys)
+    {
+        public static ArenaAchievementBaseline Empty { get; } = new(
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            false,
+            new HashSet<string>(StringComparer.Ordinal));
+    }
+
+    private sealed record CompletedMissionBaseline(
+        int Count,
+        bool WeeklyCompleted)
+    {
+        public static CompletedMissionBaseline Empty { get; } = new(0, false);
     }
 
     private sealed record MotivationPerformance(

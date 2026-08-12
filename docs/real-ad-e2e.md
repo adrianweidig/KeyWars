@@ -19,11 +19,11 @@ und schreibt nur bereinigte Evidenz unter `output/playwright/real-ad/`.
 
 ```powershell
 $env:KEYWARS_REAL_AD_BASE_URL='http://127.0.0.1:18080'
-$env:KEYWARS_REAL_AD_HOST_USER='keywars.e2e.host@top.secret'
+$env:KEYWARS_REAL_AD_HOST_USER='keywars.e2e.host@torvs.bw'
 $env:KEYWARS_REAL_AD_HOST_PASSWORD='<geschützt>'
-$env:KEYWARS_REAL_AD_GUEST_USER='keywars.e2e.guest@top.secret'
+$env:KEYWARS_REAL_AD_GUEST_USER='keywars.e2e.guest@torvs.bw'
 $env:KEYWARS_REAL_AD_GUEST_PASSWORD='<geschützt>'
-$env:KEYWARS_REAL_AD_DISABLED_USER='keywars.e2e.disabled@top.secret'
+$env:KEYWARS_REAL_AD_DISABLED_USER='keywars.e2e.disabled@torvs.bw'
 $env:KEYWARS_REAL_AD_DISABLED_PASSWORD='<geschützt>'
 $env:KEYWARS_REAL_AD_FORWARDED_PROTO='https'
 $env:KEYWARS_REAL_AD_FORWARDED_FOR='127.0.0.1'

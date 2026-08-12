@@ -17,7 +17,9 @@ jobs:
     outputs:
       created: ${{ steps.release.outputs.created }}
       image_repository: ${{ steps.release.outputs.image_repository }}
+      revision: ${{ steps.release.outputs.revision }}
       semver: ${{ steps.release.outputs.semver }}
+      source_repository: ${{ steps.release.outputs.source_repository }}
       version: ${{ steps.release.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -29,8 +31,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ ! "$GITHUB_REF_NAME" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
             echo "Release tags must use stable SemVer: vMAJOR.MINOR.PATCH" >&2
+            exit 1
+          fi
+
+          release_semver="${GITHUB_REF_NAME#v}"
+          repository_semver="$(tr -d '\r\n' < VERSION)"
+          if [[ "$release_semver" != "$repository_semver" ]]; then
+            echo "Release tag $GITHUB_REF_NAME does not match VERSION ($repository_semver)." >&2
             exit 1
           fi
 
@@ -41,27 +50,24 @@ jobs:
           fi
 
           image_repository="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/keywars"
+          source_repository="https://github.com/${GITHUB_REPOSITORY}"
           {
             echo "created=$(git show -s --format=%cI "$GITHUB_SHA")"
             echo "image_repository=$image_repository"
-            echo "semver=${GITHUB_REF_NAME#v}"
+            echo "revision=$GITHUB_SHA"
+            echo "semver=$release_semver"
+            echo "source_repository=$source_repository"
             echo "version=$GITHUB_REF_NAME"
           } >> "$GITHUB_OUTPUT"
-      - name: Validate changelog entry
-        env:
-          RELEASE_VERSION: ${{ steps.release.outputs.version }}
-        run: |
-          python - <<'PY'
-          import os
-          import re
-          from pathlib import Path
-
-          version = re.escape(os.environ["RELEASE_VERSION"])
-          changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
-          match = re.search(rf"(?ms)^## {version}(?:\s+-\s+[^\n]+)?\n(?P<body>.*?)(?=^## |\Z)", changelog)
-          if match is None or not match.group("body").strip():
-              raise SystemExit(f"CHANGELOG.md has no non-empty section for {os.environ['RELEASE_VERSION']}")
-          PY
+      - name: Validate repository release metadata
+        run: >-
+          python scripts/prepare_release_artifacts.py
+          --check-repository
+          --expected-image-repository "${{ steps.release.outputs.image_repository }}"
+      - name: Test release artifact contract
+        run: python scripts/check_release_artifacts.py --self-test
+      - name: Test published image contract
+        run: python scripts/check_published_image.py --self-test
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: 10.0.x
@@ -123,6 +129,17 @@ jobs:
           persist-credentials: false
       - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      - name: Verify pinned external deployment images
+        shell: bash
+        run: |
+          set -euo pipefail
+          tail -n +2 deploy/images.txt | while IFS= read -r image; do
+            if [[ -z "$image" || ! "$image" =~ @sha256:[0-9a-f]{64}$ ]]; then
+              echo "Invalid external image reference in deploy/images.txt: $image" >&2
+              exit 1
+            fi
+            docker buildx imagetools inspect "$image" --raw > /dev/null
+          done
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
@@ -146,138 +163,132 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           build-args: |
             VERSION=${{ needs.verify.outputs.semver }}
-            REVISION=${{ github.sha }}
+            REVISION=${{ needs.verify.outputs.revision }}
             CREATED=${{ needs.verify.outputs.created }}
-          provenance: true
+          provenance: mode=max
           sbom: true
+      - name: Verify published multi-architecture image
+        run: >-
+          python scripts/check_published_image.py
+          "${{ needs.verify.outputs.image_repository }}:${{ needs.verify.outputs.version }}"
+          --digest "${{ steps.push-image.outputs.digest }}"
+          --version "${{ needs.verify.outputs.version }}"
+          --revision "${{ needs.verify.outputs.revision }}"
+          --created "${{ needs.verify.outputs.created }}"
+          --source-repository "${{ needs.verify.outputs.source_repository }}"
       - name: Create release artifacts from published image
         env:
           IMAGE_DIGEST: ${{ steps.push-image.outputs.digest }}
           IMAGE_REPOSITORY: ${{ needs.verify.outputs.image_repository }}
+          RELEASE_CREATED: ${{ needs.verify.outputs.created }}
+          RELEASE_REVISION: ${{ needs.verify.outputs.revision }}
+          RELEASE_SOURCE: ${{ needs.verify.outputs.source_repository }}
           RELEASE_VERSION: ${{ needs.verify.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
           image_ref="${IMAGE_REPOSITORY}:${RELEASE_VERSION}"
+          canonical_ref="${IMAGE_REPOSITORY}@${IMAGE_DIGEST}"
           mkdir -p artifacts
 
+          docker buildx imagetools inspect "$canonical_ref" \
+            --format '{{ json (index .SBOM "linux/amd64").SPDX }}' \
+            > artifacts/SBOM-linux-amd64.spdx.json
+          docker buildx imagetools inspect "$canonical_ref" \
+            --format '{{ json (index .SBOM "linux/arm64").SPDX }}' \
+            > artifacts/SBOM-linux-arm64.spdx.json
           docker pull --platform linux/amd64 "$image_ref"
-          docker save "$image_ref" | gzip -c > "artifacts/keywars-${RELEASE_VERSION}-linux-amd64.tar.gz"
+          docker save "$image_ref" | gzip -n -9 > "artifacts/keywars-${RELEASE_VERSION}-linux-amd64.tar.gz"
           cp compose.yaml artifacts/
+          cp compose.scale.yaml artifacts/
           cp .env.example artifacts/default.env.example
+          cp .env.scale.example artifacts/scale.env.example
           cp docs/airgap-install.md artifacts/AIRGAP_INSTALL.md
+          cp docs/scale-operations.md artifacts/SCALE_OPERATIONS.md
 
-          python - <<'PY'
-          import json
-          import os
-          import re
-          from pathlib import Path
-
-          version = os.environ["RELEASE_VERSION"]
-          repository = os.environ["IMAGE_REPOSITORY"]
-          image_ref = f"{repository}:{version}"
-
-          compose_path = Path("artifacts/compose.yaml")
-          compose = compose_path.read_text(encoding="utf-8")
-          compose, replacements = re.subn(
-              r"\$\{KEYWARS_IMAGE:-[^}]+\}",
-              "${KEYWARS_IMAGE:-" + repository + "}",
-              compose,
-              count=1,
-          )
-          if replacements != 1:
-              raise SystemExit("compose.yaml does not expose the KEYWARS_IMAGE default")
-          compose_path.write_text(compose, encoding="utf-8")
-
-          env_path = Path("artifacts/default.env.example")
-          env_text = env_path.read_text(encoding="utf-8")
-          env_text, image_replacements = re.subn(
-              r"(?m)^KEYWARS_IMAGE=.*$", f"KEYWARS_IMAGE={repository}", env_text, count=1
-          )
-          env_text, version_replacements = re.subn(
-              r"(?m)^KEYWARS_VERSION=.*$", f"KEYWARS_VERSION={version}", env_text, count=1
-          )
-          if image_replacements != 1 or version_replacements != 1:
-              raise SystemExit(".env.example must define KEYWARS_IMAGE and KEYWARS_VERSION")
-          env_path.write_text(env_text, encoding="utf-8")
-
-          manifest = {
-              "schema_version": 2,
-              "version": version,
-              "release_notes": "RELEASE_NOTES.md",
-              "image": {
-                  "repository": repository,
-                  "image_ref": image_ref,
-                  "tags": [image_ref, f"{repository}:latest"],
-                  "digest": os.environ["IMAGE_DIGEST"],
-                  "sbom": "registry-attached",
-                  "provenance": "registry-attached",
-              },
-              "offline_archives": [
-                  {
-                      "file": f"keywars-{version}-linux-amd64.tar.gz",
-                      "platform": "linux/amd64",
-                      "format": "docker-save-tar-gzip",
-                      "image_ref": image_ref,
-                  }
-              ],
-              "deployment_files": ["compose.yaml", "default.env.example"],
-              "documentation_files": ["AIRGAP_INSTALL.md", "RELEASE_NOTES.md"],
-          }
-          Path("artifacts/RELEASE_MANIFEST.json").write_text(
-              json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
-          )
-
-          changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
-          match = re.search(
-              rf"(?ms)^## {re.escape(version)}(?:\s+-\s+[^\n]+)?\n(?P<body>.*?)(?=^## |\Z)",
-              changelog,
-          )
-          if match is None or not match.group("body").strip():
-              raise SystemExit(f"CHANGELOG.md has no non-empty section for {version}")
-          changes = match.group("body").strip()
-
-          release_notes = f"""# KeyWars {version}
-
-          {changes}
-
-          ## Container
-
-          - Image: `{image_ref}`
-          - Multi-Arch-Digest: `{os.environ['IMAGE_DIGEST']}`
-          - Plattformen: `linux/amd64`, `linux/arm64`
-          - SBOM und Provenance: als Registry-Attestierungen veröffentlicht
-
-          ## Release-Artefakte
-
-          - Offline-Image für `linux/amd64`
-          - `compose.yaml` und `default.env.example`
-          - `AIRGAP_INSTALL.md` für die Offline-Inbetriebnahme
-          - `RELEASE_MANIFEST.json` mit Image-Referenz und Digest
-          - `SHA256SUMS` zur Integritätsprüfung
-          """
-          release_notes = "\n".join(line.strip() for line in release_notes.strip().splitlines()) + "\n"
-          Path("artifacts/RELEASE_NOTES.md").write_text(release_notes, encoding="utf-8")
-          PY
-
-          (
-            cd artifacts
-            sha256sum \
-              "keywars-${RELEASE_VERSION}-linux-amd64.tar.gz" \
-              compose.yaml \
-              default.env.example \
-              AIRGAP_INSTALL.md \
-              RELEASE_MANIFEST.json \
-              RELEASE_NOTES.md > SHA256SUMS
-          )
+          python scripts/prepare_release_artifacts.py \
+            --artifact-dir artifacts \
+            --version "$RELEASE_VERSION" \
+            --image-repository "$IMAGE_REPOSITORY" \
+            --image-digest "$IMAGE_DIGEST" \
+            --revision "$RELEASE_REVISION" \
+            --created "$RELEASE_CREATED" \
+            --source-repository "$RELEASE_SOURCE"
       - name: Verify release artifacts before publication
-        run: python scripts/check_release_artifacts.py artifacts "${{ needs.verify.outputs.version }}"
+        run: >-
+          python scripts/check_release_artifacts.py
+          artifacts "${{ needs.verify.outputs.version }}"
+          --expected-revision "${{ needs.verify.outputs.revision }}"
+          --expected-created "${{ needs.verify.outputs.created }}"
+          --expected-source "${{ needs.verify.outputs.source_repository }}"
       - name: Publish GitHub release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           body_path: artifacts/RELEASE_NOTES.md
+          draft: false
           fail_on_unmatched_files: true
           files: artifacts/*
+          make_latest: true
+          name: KeyWars ${{ needs.verify.outputs.version }}
+          prerelease: false
+          tag_name: ${{ needs.verify.outputs.version }}
+          target_commitish: ${{ needs.verify.outputs.revision }}
+      - name: Verify published release metadata and asset inventory
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_REVISION: ${{ needs.verify.outputs.revision }}
+          RELEASE_VERSION: ${{ needs.verify.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_info="$(gh release view "$RELEASE_VERSION" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json tagName,isDraft,isPrerelease \
+            --jq '[.tagName, (.isDraft | tostring), (.isPrerelease | tostring)] | @tsv')"
+          IFS=$'\t' read -r tag_name is_draft is_prerelease <<< "$release_info"
+          if [[ "$tag_name" != "$RELEASE_VERSION" || "$is_draft" != "false" || \
+                "$is_prerelease" != "false" ]]; then
+            echo "Published release metadata does not describe the verified stable tag." >&2
+            exit 1
+          fi
+
+          tag_object="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_VERSION" \
+            --jq '[.object.type, .object.sha] | @tsv')"
+          IFS=$'\t' read -r tag_type tag_sha <<< "$tag_object"
+          if [[ "$tag_type" == "tag" ]]; then
+            tag_object="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_sha" \
+              --jq '[.object.type, .object.sha] | @tsv')"
+            IFS=$'\t' read -r tag_type tag_sha <<< "$tag_object"
+          fi
+          if [[ "$tag_type" != "commit" || "$tag_sha" != "$RELEASE_REVISION" ]]; then
+            echo "Published release tag does not resolve to $RELEASE_REVISION." >&2
+            exit 1
+          fi
+
+          archive="keywars-${RELEASE_VERSION}-linux-amd64.tar.gz"
+          bundle="keywars-${RELEASE_VERSION}-deployment-bundle.zip"
+          if ! diff -u \
+            <(printf '%s\n' \
+              AIRGAP_INSTALL.md \
+              RELEASE_MANIFEST.json \
+              RELEASE_NOTES.md \
+              SBOM-linux-amd64.spdx.json \
+              SBOM-linux-arm64.spdx.json \
+              SHA256SUMS \
+              compose.yaml \
+              compose.scale.yaml \
+              default.env.example \
+              scale.env.example \
+              SCALE_OPERATIONS.md \
+              "$bundle" \
+              "$archive" | sort) \
+            <(gh release view "$RELEASE_VERSION" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json assets \
+              --jq '.assets[].name' | sort); then
+            echo "Published release asset inventory differs from the expected public set." >&2
+            exit 1
+          fi
       - name: Download published release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -287,4 +298,9 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --dir published-artifacts
       - name: Verify published release assets
-        run: python scripts/check_release_artifacts.py published-artifacts "${{ needs.verify.outputs.version }}"
+        run: >-
+          python scripts/check_release_artifacts.py
+          published-artifacts "${{ needs.verify.outputs.version }}"
+          --expected-revision "${{ needs.verify.outputs.revision }}"
+          --expected-created "${{ needs.verify.outputs.created }}"
+          --expected-source "${{ needs.verify.outputs.source_repository }}"

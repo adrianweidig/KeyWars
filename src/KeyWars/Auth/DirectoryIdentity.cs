@@ -10,7 +10,10 @@ public sealed record DirectoryIdentity(
     string? Surname,
     string? Email,
     string? Department,
-    string? Title);
+    string? Title)
+{
+    public IReadOnlyCollection<string> GroupValues { get; init; } = [];
+}
 
 public sealed record AuthenticationResult(bool Succeeded, DirectoryIdentity? Identity, string? FailureMessage)
 {

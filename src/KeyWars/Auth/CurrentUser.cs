@@ -9,9 +9,10 @@ namespace KeyWars.Auth;
 public static class KeyWarsClaims
 {
     public const string ProfileId = "keywars:profile-id";
+    public const string ContentModerator = "keywars:content-moderator";
 }
 
-public sealed class CurrentUser(KeyWarsDbContext db, ProfileAccessGate? accessGate = null)
+public sealed class CurrentUser(KeyWarsDbContext db, IProfileAccessGate? accessGate = null)
 {
     public Guid? GetProfileId(ClaimsPrincipal principal)
     {
@@ -27,13 +28,17 @@ public sealed class CurrentUser(KeyWarsDbContext db, ProfileAccessGate? accessGa
             return null;
         }
 
-        if (accessGate?.IsBlocked(profileId.Value) == true)
+        if (accessGate is not null &&
+            await accessGate.GetStateAsync(profileId.Value, cancellationToken) != ProfileAccessState.Available)
         {
             return null;
         }
 
         var profile = await db.UserProfiles.SingleOrDefaultAsync(profile => profile.Id == profileId && !profile.Deleted, cancellationToken);
-        return accessGate?.IsBlocked(profileId.Value) == true ? null : profile;
+        return accessGate is not null &&
+            await accessGate.GetStateAsync(profileId.Value, cancellationToken) != ProfileAccessState.Available
+                ? null
+                : profile;
     }
 
     public async Task<UserProfile> RequireProfileAsync(ClaimsPrincipal principal, CancellationToken cancellationToken = default)

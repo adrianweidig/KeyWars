@@ -7,12 +7,16 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Options;
 
 namespace KeyWars.Pages;
 
 [AllowAnonymous]
 [EnableRateLimiting("keywars-login")]
-public sealed class AnmeldenModel(ILdapAuthenticator authenticator, ProfileProvisioner provisioner) : PageModel
+public sealed class AnmeldenModel(
+    ILdapAuthenticator authenticator,
+    ProfileProvisioner provisioner,
+    IOptions<ContentModerationOptions> moderationOptions) : PageModel
 {
     [BindProperty]
     public LoginInput Input { get; set; } = new();
@@ -46,6 +50,7 @@ public sealed class AnmeldenModel(ILdapAuthenticator authenticator, ProfileProvi
             new(ClaimTypes.Name, profile.DisplayName),
             new("samAccountName", profile.SamAccountName)
         };
+        claims.AddRange(ContentModeratorClaims.Create(result.Identity, moderationOptions.Value));
 
         var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
         await HttpContext.SignInAsync(

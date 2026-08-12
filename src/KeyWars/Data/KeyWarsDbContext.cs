@@ -3,12 +3,21 @@ using Microsoft.EntityFrameworkCore;
 
 namespace KeyWars.Data;
 
-public sealed class KeyWarsDbContext(DbContextOptions<KeyWarsDbContext> options) : DbContext(options)
+public class KeyWarsDbContext : DbContext
 {
+    public KeyWarsDbContext(DbContextOptions<KeyWarsDbContext> options) : base(options)
+    {
+    }
+
+    protected KeyWarsDbContext(DbContextOptions options) : base(options)
+    {
+    }
+
     public DbSet<UserProfile> UserProfiles => Set<UserProfile>();
     public DbSet<TrainingText> TrainingTexts => Set<TrainingText>();
     public DbSet<TextCollection> TextCollections => Set<TextCollection>();
     public DbSet<TextCollectionItem> TextCollectionItems => Set<TextCollectionItem>();
+    public DbSet<ContentModerationAuditEntry> ContentModerationAuditEntries => Set<ContentModerationAuditEntry>();
     public DbSet<TypingAttempt> TypingAttempts => Set<TypingAttempt>();
     public DbSet<TypingAttemptError> TypingAttemptErrors => Set<TypingAttemptError>();
     public DbSet<Challenge> Challenges => Set<Challenge>();
@@ -31,6 +40,7 @@ public sealed class KeyWarsDbContext(DbContextOptions<KeyWarsDbContext> options)
             entity.HasIndex(profile => profile.DirectoryObjectGuid).IsUnique();
             entity.HasIndex(profile => profile.SamAccountName);
             entity.HasIndex(profile => profile.DisplayName);
+            entity.HasIndex(profile => new { profile.Department, profile.LeaderboardVisible, profile.Deleted });
             entity.HasIndex(profile => new { profile.LeaderboardVisible, profile.Deleted });
             entity.Property(profile => profile.PreferredMode).HasConversion<string>();
         });
@@ -70,9 +80,22 @@ public sealed class KeyWarsDbContext(DbContextOptions<KeyWarsDbContext> options)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        modelBuilder.Entity<ContentModerationAuditEntry>(entity =>
+        {
+            entity.HasIndex(entry => new { entry.TargetType, entry.TargetId, entry.CreatedAt });
+            entity.HasIndex(entry => new { entry.ActorProfileId, entry.CreatedAt });
+            entity.HasIndex(entry => new { entry.TargetOwnerProfileId, entry.CreatedAt });
+            entity.Property(entry => entry.TargetType).HasConversion<string>();
+            entity.Property(entry => entry.Action).HasConversion<string>();
+        });
+
         modelBuilder.Entity<TypingAttempt>(entity =>
         {
             entity.HasIndex(attempt => new { attempt.UserProfileId, attempt.Mode, attempt.CreatedAt });
+            entity.HasIndex(attempt => new { attempt.UserProfileId, attempt.Phase, attempt.Completed, attempt.CreatedAt, attempt.Id });
+            entity.HasIndex(attempt => new { attempt.Phase, attempt.FinishedAt, attempt.PreparedAt, attempt.Id });
+            entity.HasIndex(attempt => new { attempt.Phase, attempt.FinishedAt, attempt.StartedAt, attempt.Id });
+            entity.HasIndex(attempt => new { attempt.Completed, attempt.Phase, attempt.PreparedAt, attempt.Id });
             entity.HasIndex(attempt => new { attempt.LeaderboardEligible, attempt.Phase, attempt.Completed, attempt.Official, attempt.Mode, attempt.FinishedAt });
             entity.HasIndex(attempt => new { attempt.TrainingTextId, attempt.LeaderboardEligible, attempt.Wpm });
             entity.HasIndex(attempt => attempt.TrainingTextId);
@@ -108,6 +131,8 @@ public sealed class KeyWarsDbContext(DbContextOptions<KeyWarsDbContext> options)
             entity.HasIndex(challenge => challenge.CreatorProfileId);
             entity.HasIndex(challenge => challenge.Status);
             entity.HasIndex(challenge => new { challenge.Status, challenge.FinishedAt });
+            entity.HasIndex(challenge => new { challenge.Status, challenge.ExpiresAt });
+            entity.HasIndex(challenge => challenge.RematchOfChallengeId).IsUnique();
             entity.Property(challenge => challenge.Mode).HasConversion<string>();
             entity.Property(challenge => challenge.Status).HasConversion<string>();
             entity.HasOne<UserProfile>()
@@ -117,6 +142,10 @@ public sealed class KeyWarsDbContext(DbContextOptions<KeyWarsDbContext> options)
             entity.HasOne<TrainingText>()
                 .WithMany()
                 .HasForeignKey(challenge => challenge.TrainingTextId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Challenge>()
+                .WithMany()
+                .HasForeignKey(challenge => challenge.RematchOfChallengeId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -148,6 +177,7 @@ public sealed class KeyWarsDbContext(DbContextOptions<KeyWarsDbContext> options)
         {
             entity.HasIndex(result => new { result.ChallengeRoundId, result.UserProfileId }).IsUnique();
             entity.HasIndex(result => new { result.UserProfileId, result.Status, result.FinishedAt });
+            entity.HasIndex(result => new { result.Status, result.FinishedAt, result.UserProfileId });
             entity.Property(result => result.Status).HasConversion<string>();
             entity.HasOne<ChallengeRound>()
                 .WithMany()
@@ -229,6 +259,7 @@ public sealed class KeyWarsDbContext(DbContextOptions<KeyWarsDbContext> options)
         modelBuilder.Entity<RewardLedgerEntry>(entity =>
         {
             entity.HasIndex(entry => new { entry.UserProfileId, entry.Source, entry.SourceId }).IsUnique();
+            entity.HasIndex(entry => new { entry.UserProfileId, entry.AwardedAt });
             entity.HasOne<UserProfile>()
                 .WithMany()
                 .HasForeignKey(entry => entry.UserProfileId)
@@ -238,6 +269,7 @@ public sealed class KeyWarsDbContext(DbContextOptions<KeyWarsDbContext> options)
         modelBuilder.Entity<Achievement>(entity =>
         {
             entity.HasIndex(achievement => new { achievement.UserProfileId, achievement.Key }).IsUnique();
+            entity.HasIndex(achievement => new { achievement.UserProfileId, achievement.UnlockedAt });
             entity.HasOne<UserProfile>()
                 .WithMany()
                 .HasForeignKey(achievement => achievement.UserProfileId)
@@ -246,7 +278,8 @@ public sealed class KeyWarsDbContext(DbContextOptions<KeyWarsDbContext> options)
 
         modelBuilder.Entity<GamificationEvent>(entity =>
         {
-            entity.HasIndex(item => new { item.UserProfileId, item.CreatedAt });
+            entity.HasIndex(item => new { item.UserProfileId, item.CreatedAt, item.Id });
+            entity.HasIndex(item => new { item.SeenAt, item.CreatedAt, item.Id });
             entity.HasIndex(item => new { item.UserProfileId, item.Source, item.SourceId, item.EventKey }).IsUnique();
             entity.Property(item => item.Type).HasConversion<string>();
             entity.Property(item => item.Rarity).HasConversion<string>();
@@ -264,5 +297,26 @@ public sealed class KeyWarsDbContext(DbContextOptions<KeyWarsDbContext> options)
                 .HasForeignKey(observation => observation.UserProfileId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
+    }
+
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        EnsureModerationAuditIsAppendOnly();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        EnsureModerationAuditIsAppendOnly();
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    private void EnsureModerationAuditIsAppendOnly()
+    {
+        if (ChangeTracker.Entries<ContentModerationAuditEntry>()
+            .Any(entry => entry.State is EntityState.Modified or EntityState.Deleted))
+        {
+            throw new InvalidOperationException("Moderationsprotokolle sind unveränderlich und dürfen nicht gelöscht werden.");
+        }
     }
 }

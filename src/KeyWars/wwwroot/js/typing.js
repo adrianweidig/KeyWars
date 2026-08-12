@@ -7,6 +7,7 @@ export function attachTypingApps() {
     const input = root.querySelector("[data-input]");
     const startButton = root.querySelector("[data-start]");
     const result = root.querySelector("[data-result]");
+    let liveRegion = root.querySelector("[data-typing-live-region]");
     const roundStats = root.querySelector("[data-round-stats]");
     const roundStatsContext = root.querySelector("[data-round-stats-context]");
     const challengeId = root.dataset.challengeId || "";
@@ -26,6 +27,15 @@ export function attachTypingApps() {
     timer.append(timerValue, timerLabel);
     analysis.className = "typing-analysis";
     result.classList.add("typing-result");
+    if (!liveRegion) {
+      liveRegion = document.createElement("div");
+      liveRegion.className = "visually-hidden";
+      liveRegion.dataset.typingLiveRegion = "true";
+      liveRegion.setAttribute("role", "status");
+      liveRegion.setAttribute("aria-live", "polite");
+      liveRegion.setAttribute("aria-atomic", "true");
+      root.append(liveRegion);
+    }
     if (root.dataset.timerPlacement === "before-target") {
       target.insertAdjacentElement("beforebegin", timer);
     } else {
@@ -48,6 +58,30 @@ export function attachTypingApps() {
     const wordDurationsMilliseconds = [];
     const mistakeMap = new Map();
     const numberFormat = new Intl.NumberFormat("de-DE", { maximumFractionDigits: 1 });
+
+    const announce = (message) => {
+      liveRegion.textContent = message;
+    };
+
+    const resetAfterPrepareFailure = (message) => {
+      root.classList.add("typing-idle");
+      root.classList.remove("typing-prepared", "typing-running", "typing-finished");
+      root.removeAttribute("aria-busy");
+      prepared = false;
+      finishing = false;
+      finished = false;
+      session = null;
+      serverStarted = false;
+      beginPromise = null;
+      input.disabled = true;
+      target.textContent = message;
+      result.textContent = "";
+      startButton.hidden = false;
+      startButton.disabled = false;
+      startButton.removeAttribute("aria-busy");
+      startButton.textContent = "Erneut versuchen";
+      announce(message);
+    };
 
     const request = () => ({
       mode: root.dataset.mode || "Sprint60",
@@ -195,13 +229,15 @@ export function attachTypingApps() {
         await beginPromise;
         return true;
       } catch {
-        result.textContent = "Der Versuch konnte nicht gestartet werden.";
+        const message = "Der Versuch konnte nicht gestartet werden. Bitte versuche es erneut.";
+        result.textContent = message;
         prepared = false;
         finished = true;
         input.disabled = true;
         startButton.hidden = false;
         startButton.disabled = false;
         startButton.textContent = "Erneut versuchen";
+        announce(message);
         return false;
       }
     };
@@ -398,12 +434,14 @@ export function attachTypingApps() {
       try {
         response = await postFinishWithRetry(endpoint, payload);
       } catch {
-        result.textContent = "Der Versuch konnte nicht gespeichert werden. Die Verbindung wird beim nächsten Abschluss sicher erneut geprüft.";
+        const message = "Der Versuch konnte nicht gespeichert werden. Prüfe die Verbindung und ändere die Eingabe, um erneut zu speichern.";
+        result.textContent = message;
         finishing = false;
         finished = false;
         input.disabled = false;
         root.classList.remove("typing-finished");
         root.classList.add("typing-running");
+        announce(message);
         return;
       }
 
@@ -419,6 +457,7 @@ export function attachTypingApps() {
           root.classList.remove("typing-finished");
           root.classList.add("typing-running");
           timerFrame = requestAnimationFrame(updateTimer);
+          announce(result.textContent);
           return;
         }
 
@@ -426,6 +465,7 @@ export function attachTypingApps() {
         finishing = false;
         finished = false;
         input.disabled = false;
+        announce(result.textContent);
         return;
       }
 
@@ -495,6 +535,7 @@ export function attachTypingApps() {
       if (challengeId) {
         startButton.disabled = true;
       }
+      announce(`${finishTitle}. ${numberFormat.format(data.wpm)} WPM, ${numberFormat.format(data.accuracy)} Prozent Genauigkeit.`);
     };
 
     const renderIdle = () => {
@@ -543,22 +584,36 @@ export function attachTypingApps() {
       render();
       startButton.disabled = true;
       startButton.textContent = "Lädt";
+      startButton.setAttribute("aria-busy", "true");
+      root.setAttribute("aria-busy", "true");
 
       const startEndpoint = challengeId ? `/api/herausforderungen/${challengeId}/start` : "/api/spielen/start";
-      const response = await fetch(startEndpoint, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(request())
-      });
-      if (!response.ok) {
-        target.textContent = "Die Runde konnte nicht vorbereitet werden.";
-        startButton.hidden = false;
-        startButton.disabled = false;
-        startButton.textContent = "Erneut versuchen";
+      let response;
+      try {
+        response = await fetch(startEndpoint, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(request())
+        });
+        if (!response.ok) {
+          resetAfterPrepareFailure("Die Runde konnte nicht vorbereitet werden. Bitte versuche es erneut.");
+          return;
+        }
+
+        session = await response.json();
+        if (!session?.id || !session?.nonce || typeof session?.text !== "string") {
+          throw new Error("Ungültige Rundendaten.");
+        }
+      } catch {
+        const message = navigator.onLine === false
+          ? "Keine Verbindung. Stelle die Verbindung wieder her und versuche es erneut."
+          : "Die Runde konnte nicht geladen werden. Bitte versuche es erneut.";
+        resetAfterPrepareFailure(message);
         return;
       }
 
-      session = await response.json();
+      root.removeAttribute("aria-busy");
+      startButton.removeAttribute("aria-busy");
       input.value = "";
       input.disabled = false;
       prepared = true;
@@ -569,6 +624,7 @@ export function attachTypingApps() {
       startButton.textContent = preparedStartLabel;
       render();
       resetTypingScroll(target);
+      announce("Runde bereit. Die Eingabe ist aktiv.");
     };
 
     startButton.addEventListener("click", async () => {

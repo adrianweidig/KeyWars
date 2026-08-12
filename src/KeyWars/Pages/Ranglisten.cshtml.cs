@@ -8,6 +8,7 @@ namespace KeyWars.Pages;
 public sealed class RanglistenModel(CurrentUser currentUser, CompetitionLeaderboardService leaderboards) : PageModel
 {
     public CompetitionOverview Overview { get; private set; } = EmptyOverview;
+    public string? CurrentDepartment { get; private set; }
 
     public IReadOnlyList<(CompetitionBoardKind Kind, string Value, string Label)> Boards { get; } =
     [
@@ -38,12 +39,18 @@ public sealed class RanglistenModel(CurrentUser currentUser, CompetitionLeaderbo
         (TrainingMode.Words100, "words100", DisplayNames.For(TrainingMode.Words100))
     ];
 
-    public async Task OnGetAsync(string? board, string? period, string? mode, Guid? textId, CancellationToken cancellationToken)
+    public async Task OnGetAsync(string? board, string? period, string? mode, Guid? textId, string? scope, CancellationToken cancellationToken)
     {
         var profile = await currentUser.RequireProfileAsync(User, cancellationToken);
+        CurrentDepartment = string.IsNullOrWhiteSpace(profile.Department) ? null : profile.Department.Trim();
         Overview = await leaderboards.GetAsync(
             profile,
-            new LeaderboardQuery(ParseBoard(board), ParsePeriod(period), ParseMode(mode), textId),
+            new LeaderboardQuery(
+                ParseBoard(board),
+                ParsePeriod(period),
+                ParseMode(mode),
+                textId,
+                string.Equals(scope, "department", StringComparison.OrdinalIgnoreCase)),
             cancellationToken);
     }
 
@@ -52,6 +59,8 @@ public sealed class RanglistenModel(CurrentUser currentUser, CompetitionLeaderbo
     public string PeriodValue(CompetitionPeriod period) => Periods.First(item => item.Period == period).Value;
 
     public string ModeValue(TrainingMode mode) => Modes.First(item => item.Mode == mode).Value;
+
+    public static string ScopeValue(bool ownDepartmentOnly) => ownDepartmentOnly ? "department" : "organization";
 
     private static CompetitionBoardKind ParseBoard(string? value) => value?.ToLowerInvariant() switch
     {

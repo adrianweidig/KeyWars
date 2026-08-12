@@ -54,6 +54,7 @@ public sealed class UserProfile
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? LastLoginAt { get; set; }
+    public DateTimeOffset? OnboardingCompletedAt { get; set; }
 }
 
 public sealed class TrainingText
@@ -66,6 +67,7 @@ public sealed class TrainingText
     public string SourceKey { get; set; } = "";
     public string Body { get; set; } = "";
     public TrainingTextVisibility Visibility { get; set; } = TrainingTextVisibility.Private;
+    public bool IsQuarantined { get; set; }
     public bool IsStandard { get; set; }
     public bool RatingEligible { get; set; }
     public int CharacterCount { get; set; }
@@ -82,6 +84,7 @@ public sealed class TextCollection
     [MaxLength(400)]
     public string? Description { get; set; }
     public TrainingTextVisibility Visibility { get; set; } = TrainingTextVisibility.Private;
+    public bool IsQuarantined { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
@@ -90,6 +93,23 @@ public sealed class TextCollectionItem
     public Guid TextCollectionId { get; set; }
     public Guid TrainingTextId { get; set; }
     public int SortOrder { get; set; }
+}
+
+public sealed class ContentModerationAuditEntry
+{
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public Guid ActorProfileId { get; set; }
+    [MaxLength(160)]
+    public string ActorDisplayName { get; set; } = "";
+    public ContentModerationTargetType TargetType { get; set; }
+    public Guid TargetId { get; set; }
+    public Guid TargetOwnerProfileId { get; set; }
+    [MaxLength(160)]
+    public string TargetTitle { get; set; } = "";
+    public ContentModerationAction Action { get; set; }
+    [MaxLength(500)]
+    public string Reason { get; set; } = "";
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
 public sealed class TypingAttempt
@@ -149,6 +169,7 @@ public sealed class TypingAttemptError
 public sealed class Challenge
 {
     public Guid Id { get; set; } = Guid.CreateVersion7();
+    public Guid? RematchOfChallengeId { get; set; }
     public Guid CreatorProfileId { get; set; }
     public Guid TrainingTextId { get; set; }
     [MaxLength(160)]

@@ -1,0 +1,45 @@
+---
+services:
+  postgres-tests:
+    image: mcr.microsoft.com/dotnet/sdk:10.0@sha256:e1fc6e423f543119c406d24e2e687d67c569f18f04a37a8b0005d80ad0dcee80
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        export KEYWARS_TEST_POSTGRES_CONNECTION_STRING="$$(cat /run/secrets/database-connection)"
+        exec dotnet test tests/KeyWars.IntegrationTests/KeyWars.IntegrationTests.csproj \
+          -c Release --no-build --no-restore \
+          --filter FullyQualifiedName~PostgreSqlPathUsesNativeRangesAndSkipsSqliteBackupRetention
+    working_dir: /src
+    volumes:
+      - .:/src:ro
+    secrets:
+      - database-connection
+    networks:
+      - backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  keywars-edge:
+    volumes:
+      - ./tests/cluster/Caddyfile:/etc/caddy/Caddyfile:ro
+
+  keywars-web:
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      KEYWARS__AUTH__DEVELOPMENT_LOGIN: "true"
+
+  keywars-arena:
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      KEYWARS__AUTH__DEVELOPMENT_LOGIN: "true"
+
+  keywars-worker:
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      KEYWARS__AUTH__DEVELOPMENT_LOGIN: "true"
+
+  keywars-migrate:
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      KEYWARS__AUTH__DEVELOPMENT_LOGIN: "true"

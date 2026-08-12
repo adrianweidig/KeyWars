@@ -53,7 +53,10 @@ public interface ILiveRoomCompletionWriter
     Task PersistAsync(CompletedRoomRecord record, CancellationToken cancellationToken);
 }
 
-public sealed class LiveRoomCompletionQueue : BackgroundService, ILiveRoomCompletionSink
+public sealed class LiveRoomCompletionQueue : BackgroundService,
+    ILiveRoomCompletionSink,
+    ILiveRoomCompletionDrain,
+    ILiveRoomCompletionMonitor
 {
     private const int MaxPersistenceAttempts = 3;
     private static readonly TimeSpan[] RetryDelays = [TimeSpan.FromMilliseconds(100), TimeSpan.FromMilliseconds(500)];
@@ -103,6 +106,11 @@ public sealed class LiveRoomCompletionQueue : BackgroundService, ILiveRoomComple
     public int FailedRecordCount => Volatile.Read(ref failedRecords);
     public long FailedAttempts => Volatile.Read(ref failedCompletions);
     public long RetryAttempts => Volatile.Read(ref retryAttempts);
+    public TimeSpan OldestPendingAge => trackedRecords.Values
+        .Where(tracker => tracker.State == CompletionState.Pending)
+        .Select(tracker => tracker.Age)
+        .DefaultIfEmpty(TimeSpan.Zero)
+        .Max();
 
     public CompletionReceipt Enqueue(CompletedRoomRecord record)
     {
@@ -516,6 +524,7 @@ public sealed class LiveRoomCompletionQueue : BackgroundService, ILiveRoomComple
 
     private sealed class CompletionTracker(CompletedRoomRecord record, CompletionState initialState)
     {
+        private readonly long enqueuedAt = Stopwatch.GetTimestamp();
         private readonly TaskCompletionSource completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly Guid[] profileIds = record.Participants
             .Select(participant => participant.UserProfileId)
@@ -528,6 +537,7 @@ public sealed class LiveRoomCompletionQueue : BackgroundService, ILiveRoomComple
         public CompletionState State => (CompletionState)Volatile.Read(ref state);
         public CompletionReceipt Receipt => receipt with { State = State };
         public Task Completion => completion.Task;
+        public TimeSpan Age => Stopwatch.GetElapsedTime(enqueuedAt);
 
         private readonly CompletionReceipt receipt = new(record.Id, record.IdempotencyKey, initialState);
 
@@ -548,21 +558,30 @@ public sealed class LiveRoomCompletionQueue : BackgroundService, ILiveRoomComple
     }
 }
 
-public sealed class SqliteLiveRoomCompletionWriter(IServiceScopeFactory scopeFactory) : ILiveRoomCompletionWriter
+public sealed class RelationalLiveRoomCompletionWriter(IServiceScopeFactory scopeFactory) : ILiveRoomCompletionWriter
 {
     public async Task PersistAsync(CompletedRoomRecord record, CancellationToken cancellationToken)
+    {
+        await using var strategyScope = scopeFactory.CreateAsyncScope();
+        var strategyDb = strategyScope.ServiceProvider.GetRequiredService<KeyWarsDbContext>();
+        var strategy = strategyDb.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(() => PersistOnceAsync(record, cancellationToken));
+    }
+
+    private async Task PersistOnceAsync(CompletedRoomRecord record, CancellationToken cancellationToken)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<KeyWarsDbContext>();
         var motivation = scope.ServiceProvider.GetRequiredService<MotivationService>();
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var participantIds = record.Participants.Select(item => item.UserProfileId).Distinct().ToArray();
+        await ProfileWriteFence.AcquireAsync(db, participantIds, cancellationToken);
         if (await db.LiveRoomSummaries.AnyAsync(item => item.Id == record.Id || item.IdempotencyKey == record.IdempotencyKey, cancellationToken))
         {
             await transaction.CommitAsync(cancellationToken);
             return;
         }
 
-        var participantIds = record.Participants.Select(item => item.UserProfileId).Distinct().ToArray();
         var profiles = await db.UserProfiles
             .Where(item => participantIds.Contains(item.Id) && !item.Deleted)
             .ToListAsync(cancellationToken);
@@ -571,6 +590,7 @@ public sealed class SqliteLiveRoomCompletionWriter(IServiceScopeFactory scopeFac
             throw new InvalidOperationException("Mindestens ein Arena-Teilnehmerprofil fehlt oder ist gelöscht; das Ergebnis wird nicht gewertet.");
         }
 
+        var profilesById = profiles.ToDictionary(profile => profile.Id);
         var ratingChanges = profiles.ToDictionary(profile => profile.Id, profile => new RatingChange(profile.Id, profile.ArenaRating, 0, profile.ArenaRating));
         var rankingInput = record.Participants
             .Select(item => new RaceResult(
@@ -625,6 +645,7 @@ public sealed class SqliteLiveRoomCompletionWriter(IServiceScopeFactory scopeFac
             AbortedByServer = isServerAbort
         });
 
+        var motivationInputs = new List<ArenaMotivationInput>(record.Participants.Count);
         foreach (var participant in record.Participants)
         {
             var ratingChange = ratingChanges[participant.UserProfileId];
@@ -645,16 +666,16 @@ public sealed class SqliteLiveRoomCompletionWriter(IServiceScopeFactory scopeFac
 
             if (!isServerAbort && participant.Status == ParticipantStatus.Finished)
             {
-                await motivation.ApplyArenaResultAsync(
-                    participant.UserProfileId,
+                motivationInputs.Add(new ArenaMotivationInput(
+                    profilesById[participant.UserProfileId],
                     $"{record.IdempotencyKey}:{participant.UserProfileId:N}",
                     participant.Wpm,
                     participant.Accuracy,
-                    participant.DurationMilliseconds,
-                    cancellationToken);
+                    participant.DurationMilliseconds));
             }
         }
 
+        await motivation.ApplyArenaResultsAsync(motivationInputs, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }

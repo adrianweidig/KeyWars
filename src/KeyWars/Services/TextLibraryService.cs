@@ -10,6 +10,17 @@ namespace KeyWars.Services;
 
 public sealed record TextQuality(int Bytes, int Characters, int Graphemes, int Lines, int Words, int EstimatedSeconds, bool ContainsUmlautsOrSymbols);
 
+public sealed record TextLibraryPage(
+    IReadOnlyList<TrainingText> Items,
+    int TotalCount,
+    int Page,
+    int PageSize,
+    int TotalPages)
+{
+    public bool HasPreviousPage => Page > 1;
+    public bool HasNextPage => Page < TotalPages;
+}
+
 public sealed class TextLibraryService(
     KeyWarsDbContext db,
     CurrentUser currentUser,
@@ -24,13 +35,22 @@ public sealed class TextLibraryService(
         TrainingTextVisibility? visibility = null,
         int page = 1,
         int pageSize = 48,
+        CancellationToken cancellationToken = default) =>
+        (await GetVisiblePageAsync(ownerProfileId, query, visibility, page, pageSize, cancellationToken)).Items;
+
+    public async Task<TextLibraryPage> GetVisiblePageAsync(
+        Guid ownerProfileId,
+        string? query = null,
+        TrainingTextVisibility? visibility = null,
+        int page = 1,
+        int pageSize = 48,
         CancellationToken cancellationToken = default)
     {
         var normalizedQuery = (query ?? string.Empty).Trim();
-        var boundedPage = Math.Max(1, page);
         var boundedPageSize = Math.Clamp(pageSize, 1, 100);
         var texts = db.TrainingTexts
-            .Where(text => text.IsStandard || text.Visibility == TrainingTextVisibility.Organization || text.OwnerProfileId == ownerProfileId);
+            .Where(text => !text.IsQuarantined &&
+                (text.IsStandard || text.Visibility == TrainingTextVisibility.Organization || text.OwnerProfileId == ownerProfileId));
         if (!string.IsNullOrWhiteSpace(normalizedQuery))
         {
             texts = texts.Where(text => text.Title.Contains(normalizedQuery) || text.Body.Contains(normalizedQuery));
@@ -41,24 +61,32 @@ public sealed class TextLibraryService(
             texts = texts.Where(text => !text.IsStandard && text.Visibility == requestedVisibility);
         }
 
-        return await texts
+        var totalCount = await texts.CountAsync(cancellationToken);
+        var totalPages = totalCount == 0 ? 1 : ((totalCount - 1) / boundedPageSize) + 1;
+        var boundedPage = Math.Clamp(page, 1, totalPages);
+        var items = await texts
+            .AsNoTracking()
             .OrderByDescending(text => text.IsStandard)
             .ThenBy(text => text.Title)
+            .ThenBy(text => text.Id)
             .Skip((boundedPage - 1) * boundedPageSize)
             .Take(boundedPageSize)
             .ToListAsync(cancellationToken);
+
+        return new TextLibraryPage(items, totalCount, boundedPage, boundedPageSize, totalPages);
     }
 
     public async Task<TrainingText> GetVisibleAsync(Guid ownerProfileId, Guid textId, CancellationToken cancellationToken = default)
     {
         return await db.TrainingTexts
-            .SingleAsync(text => text.Id == textId && (text.IsStandard || text.Visibility == TrainingTextVisibility.Organization || text.OwnerProfileId == ownerProfileId), cancellationToken);
+            .SingleAsync(text => text.Id == textId && !text.IsQuarantined &&
+                (text.IsStandard || text.Visibility == TrainingTextVisibility.Organization || text.OwnerProfileId == ownerProfileId), cancellationToken);
     }
 
     public async Task<TrainingText> GetOwnedEditableAsync(Guid ownerProfileId, Guid textId, CancellationToken cancellationToken = default)
     {
         return await db.TrainingTexts
-            .SingleAsync(text => text.Id == textId && text.OwnerProfileId == ownerProfileId && !text.IsStandard, cancellationToken);
+            .SingleAsync(text => text.Id == textId && text.OwnerProfileId == ownerProfileId && !text.IsStandard && !text.IsQuarantined, cancellationToken);
     }
 
     public async Task<TrainingText> CreateAsync(
@@ -162,7 +190,8 @@ public sealed class TextLibraryService(
         }
 
         var visibleTexts = await db.TrainingTexts
-            .Where(text => distinctTextIds.Contains(text.Id) && (text.IsStandard || text.Visibility == TrainingTextVisibility.Organization || text.OwnerProfileId == ownerProfileId))
+            .Where(text => distinctTextIds.Contains(text.Id) && !text.IsQuarantined &&
+                (text.IsStandard || text.Visibility == TrainingTextVisibility.Organization || text.OwnerProfileId == ownerProfileId))
             .ToListAsync(cancellationToken);
         if (visibleTexts.Count != distinctTextIds.Length)
         {

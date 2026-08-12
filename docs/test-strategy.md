@@ -1,48 +1,31 @@
-# Test Strategy
+# Teststrategie
 
-KeyWars treats tests as part of the feature contract. New functionality is not
-complete until the behavior is covered in the closest matching test layer.
+Tests sind Teil des Funktionsvertrags. Neues Verhalten wird in der niedrigsten
+sinnvollen Schicht abgesichert.
 
-| Area | Primary Test Layer | Examples |
-| --- | --- | --- |
-| Typing metrics, grapheme handling, ranking math | Unit tests | `TypingAndRankingTests`, `DisplayNamesTests` |
-| Attempt lifecycle and persistence | Integration tests | start/begin/finish, replay protection, error storage |
-| Motivation and gamification | Integration tests | XP ledger, missions, achievements, event feed, privacy reset |
-| Text library | Integration tests and browser tests | visibility, organization texts, card layout |
-| Challenges | Integration tests | invite, participate, finish, rating updates |
-| Live arena state | Unit and concurrency tests | room codes, progress deltas, reactions, concurrent joins |
-| Live arena persistence | Integration and concurrency tests | completion queue, abort handling, idempotency |
-| Security headers and HTTP smoke | E2E tests | auth redirects, CSP, health endpoints |
-| User-facing layout | Browser tests | desktop/mobile overflow, critical workflows |
-| Windows shell and rendered browser window | NUnit, FlaUI, OpenCV | UIA3 tree, real window, deterministic visual capture |
+| Änderung | Primäre Testschicht |
+| --- | --- |
+| Tippmetriken, Grapheme, Rating und reine Regeln | `KeyWars.UnitTests` |
+| Persistenz, Services, Datenschutz und Motivation | `KeyWars.IntegrationTests` |
+| parallele Arena-Zustände und Sperren | `KeyWars.ConcurrencyTests` |
+| HTTP, Authentifizierung und Sicherheitsheader | `KeyWars.E2ETests` |
+| Browserabläufe, Layout und Accessibility | `tests/browser` mit Playwright |
+| echtes Windows-Fenster und Bilderkennung | NUnit, FlaUI und OpenCV |
 
-## Coverage Rule
+## Regel
 
-When a change touches a public endpoint, PageModel, service method or SignalR
-message, add or update a test that would fail if the behavior regressed. If the
-change is only visual, add browser coverage for layout, overflow and console
-errors. If the change is a refactor, keep existing tests green and add a focused
-test for any newly extracted business component.
+Ändert sich ein Endpunkt, PageModel, Servicevertrag oder SignalR-Ereignis,
+muss ein Test die Regression sichtbar machen. Reine Layoutänderungen benötigen
+Browserabdeckung für Darstellung, Überlauf und Konsolenfehler. Ein Refactoring
+behält vorhandene Tests und ergänzt nur neue fachliche Grenzen.
 
-## Local Verification
+## Ausführen
 
-Use a .NET 10 SDK from `PATH` and run the commands from the repository root:
+Der vollständige lokale Standardlauf steht einmalig unter
+[Entwicklung: Schnellstart](development.md#schnellstart).
 
-```powershell
-dotnet restore ./KeyWars.slnx --locked-mode
-dotnet build ./KeyWars.slnx -c Release --no-restore
-dotnet test ./KeyWars.slnx -c Release --no-build --no-restore
-```
-
-Browser tests use Playwright and start the app through `tests/browser/start-keywars.mjs`:
-
-```powershell
-npm run test:browser
-```
-
-Windows UI tests complement Playwright with a real Edge or Chrome window,
-UIA3 inspection through FlaUI and OpenCV screenshot analysis. They run in the
-main CI workflow on Windows and skip explicitly on other operating systems:
+Windows-UI-Tests starten einen echten Edge- oder Chrome-Prozess und laufen in
+CI nur unter Windows:
 
 ```powershell
 $repoRoot = (Resolve-Path .).Path
@@ -51,5 +34,5 @@ dotnet build ./tests/KeyWars.WindowsUiTests/KeyWars.WindowsUiTests.csproj -c Rel
 dotnet test ./tests/KeyWars.WindowsUiTests/KeyWars.WindowsUiTests.csproj -c Release --no-build --no-restore
 ```
 
-Detailed prerequisites and overrides are documented in
+Voraussetzungen und optionale Pfade stehen in
 [`tests/KeyWars.WindowsUiTests/README.md`](../tests/KeyWars.WindowsUiTests/README.md).

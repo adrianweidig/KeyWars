@@ -1,5 +1,6 @@
 import { attachTypingApps } from "./typing.js";
 import { attachArenaPages } from "./arena.js";
+import { attachArenaRosterControls } from "./arena-roster.js";
 
 function attachRoomCodeInputs() {
   document.querySelectorAll("[data-room-code-input]").forEach((input) => {
@@ -120,6 +121,44 @@ function attachThemeToggle() {
       renderTheme(theme.readSystemTheme());
     }
   });
+}
+
+function attachValidationFeedback() {
+  const summaries = [...document.querySelectorAll(".validation-summary-errors")];
+  const fieldErrors = [...document.querySelectorAll(".field-validation-error[data-valmsg-for]")];
+  const invalidFields = [];
+
+  summaries.forEach((summary) => {
+    summary.setAttribute("role", "alert");
+    summary.setAttribute("aria-live", "assertive");
+    summary.setAttribute("aria-atomic", "true");
+    summary.tabIndex = -1;
+  });
+
+  fieldErrors.forEach((error, index) => {
+    const fieldName = error.dataset.valmsgFor;
+    const field = [...document.querySelectorAll("[name]")]
+      .find((candidate) => candidate.getAttribute("name") === fieldName);
+    if (!field) {
+      return;
+    }
+
+    error.id ||= `validation-error-${index + 1}`;
+    error.setAttribute("role", "alert");
+    error.setAttribute("aria-live", "polite");
+    field.setAttribute("aria-invalid", "true");
+    const describedBy = new Set((field.getAttribute("aria-describedby") || "").split(/\s+/).filter(Boolean));
+    describedBy.add(error.id);
+    field.setAttribute("aria-describedby", [...describedBy].join(" "));
+    invalidFields.push(field);
+  });
+
+  const focusTarget = summaries.find((summary) => summary.textContent.trim()) ||
+    invalidFields[0];
+  if (focusTarget) {
+    focusTarget.tabIndex = -1;
+    requestAnimationFrame(() => focusTarget.focus({ preventScroll: true }));
+  }
 }
 
 function attachMobileMenu() {
@@ -443,11 +482,13 @@ function absoluteUrl(value) {
 
 attachTypingApps();
 attachArenaPages();
+attachArenaRosterControls();
 attachArenaCreateForms();
 attachRoomCodeInputs();
 attachCopyButtons();
 attachShareButtons();
 attachSubmitGuards();
+attachValidationFeedback();
 attachThemeToggle();
 attachMobileMenu();
 attachDesktopSidebar();

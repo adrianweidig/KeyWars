@@ -2,7 +2,7 @@ using System.Collections.Concurrent;
 
 namespace KeyWars.Services;
 
-public sealed class AttemptSessionStore
+public sealed class AttemptSessionStore : IAttemptSessionStateStore
 {
     private readonly ConcurrentDictionary<Guid, AttemptSession> sessions = new();
     private readonly AsyncKeyedLock<Guid> lifecycleLocks = new();
@@ -57,8 +57,18 @@ public sealed class AttemptSessionStore
         }
     }
 
-    public ValueTask<IAsyncDisposable> AcquireLifecycleLockAsync(Guid id, CancellationToken cancellationToken = default) =>
-        lifecycleLocks.AcquireAsync(id, cancellationToken);
+    public async ValueTask<IOperationLease> AcquireLifecycleLockAsync(Guid id, CancellationToken cancellationToken = default) =>
+        new AttemptOperationLease(await lifecycleLocks.AcquireAsync(id, cancellationToken));
+
+    private sealed class AttemptOperationLease(IAsyncDisposable lease) : IOperationLease
+    {
+        public CancellationToken LeaseLost => CancellationToken.None;
+        public void ThrowIfLost()
+        {
+        }
+
+        public ValueTask DisposeAsync() => lease.DisposeAsync();
+    }
 
     public IReadOnlyList<Guid> GetExpiredIds(DateTimeOffset now, TimeSpan lifetime)
     {
@@ -66,6 +76,7 @@ public sealed class AttemptSessionStore
         {
             return sessions
                 .Where(item => IsExpired(item.Value, now, lifetime))
+                .Take(100)
                 .Select(item => item.Key)
                 .ToArray();
         }
@@ -113,5 +124,67 @@ public sealed class AttemptSessionStore
     {
         var reference = session.StartedAt ?? session.PreparedAt;
         return now - reference > lifetime;
+    }
+
+    ValueTask IAttemptSessionStateStore.AddAsync(
+        AttemptSession session,
+        TimeSpan lifetime,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        Add(session);
+        return ValueTask.CompletedTask;
+    }
+
+    ValueTask<AttemptSession?> IAttemptSessionStateStore.GetAsync(Guid id, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        TryGet(id, out var session);
+        return ValueTask.FromResult(session);
+    }
+
+    ValueTask<bool> IAttemptSessionStateStore.TryUpdateAsync(
+        AttemptSession current,
+        AttemptSession updated,
+        TimeSpan lifetime,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return ValueTask.FromResult(TryUpdate(current, updated));
+    }
+
+    ValueTask<AttemptSession?> IAttemptSessionStateStore.RemoveAsync(Guid id, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        TryRemove(id, out var session);
+        return ValueTask.FromResult(session);
+    }
+
+    ValueTask<IReadOnlyList<AttemptSession>> IAttemptSessionStateStore.RemoveProfileAsync(
+        Guid profileId,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return ValueTask.FromResult(RemoveProfile(profileId));
+    }
+
+    ValueTask<IReadOnlyList<Guid>> IAttemptSessionStateStore.GetExpiredIdsAsync(
+        DateTimeOffset now,
+        TimeSpan lifetime,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return ValueTask.FromResult(GetExpiredIds(now, lifetime));
+    }
+
+    ValueTask<AttemptSession?> IAttemptSessionStateStore.TryRemoveExpiredAsync(
+        Guid id,
+        DateTimeOffset now,
+        TimeSpan lifetime,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        TryRemoveExpired(id, now, lifetime, out var session);
+        return ValueTask.FromResult(session);
     }
 }

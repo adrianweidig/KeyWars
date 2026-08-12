@@ -23,14 +23,15 @@ Die lokale Anwendung startet mit:
 dotnet run --project ./src/KeyWars/KeyWars.csproj
 ```
 
-Der Entwicklungslogin ist ausschließlich für `Development` vorgesehen.
+Der Entwicklungslogin ist ausschließlich für `Development` vorgesehen und wird
+zusätzlich über `KEYWARS__AUTH__DEVELOPMENT_LOGIN` gesteuert.
 Produktionskonfigurationen müssen LDAP oder Active Directory verwenden.
 
 ## Modulkarte
 
 | Bereich | Verantwortung | Typische Änderungen |
 | --- | --- | --- |
-| `Domain` | Entitäten, Enums und reine Berechnungen | Tippmetriken, Ranking, XP-Regeln |
+| `Domain` | Entitäten, Korpora und reine Berechnungen | Tippmetriken, Arena-Division, Text-Hash, Ranking |
 | `Data` | EF Core, Migrationen, Initialisierung und Backups | Schema, Abfragen, Datenpflege |
 | `Services` | Anwendungsfälle und Laufzeitkoordination | Challenges, Profile, Arena, Motivation |
 | `Infrastructure` | Endpunkte, Middleware und Konfigurationsbindung | HTTP, Health, Sicherheitsheader |
@@ -43,14 +44,18 @@ Persistierte Regeln beginnen in `Domain` oder `Services`, nicht in Razor Pages
 oder JavaScript. Seiten und Browsercode stellen den serverseitigen Zustand dar,
 erfinden aber keine eigene XP-, Ranking- oder Persistenzlogik.
 
+`ArenaDivision` ist die einzige Zuordnung von Rating zu Divisionsname.
+`TextHash` erzeugt den normalisierten Fingerabdruck für Versuche und Challenges.
+`GermanWordBank` enthält nur kuratierte Tipptexte und Wortlisten; die
+Tippalgorithmen bleiben in `TypingEngine`.
+
 ## Live-Arena
 
 Die Arena ist nach Verantwortung aufgeteilt:
 
 - `LiveRoomContracts.cs`: öffentliche Request-, Snapshot- und
   Persistenzverträge;
-- `LiveRoomState.cs`: ausschließlich interner, synchronisierter
-  In-Memory-Zustand;
+- `LiveRoomState.cs`: interner, synchronisierter Raumzustand;
 - `LiveRoomProgress.cs`: Eingabegrenzen, Graphemfortschritt, WPM, Genauigkeit
   und Ranghinweise;
 - `LiveRoomScoring.cs`: Runden-, Serien- und Teamwertung;

@@ -12,7 +12,8 @@ public sealed class LiveRoomManager(
     TypingEngine typingEngine,
     ILogger<LiveRoomManager> logger,
     ILiveRoomCompletionSink? completionSink = null,
-    LiveProgressBroadcaster? progressBroadcaster = null)
+    LiveProgressBroadcaster? progressBroadcaster = null,
+    ILiveRoomUpdateSender? updateSender = null)
 {
     private const int MinimumParticipants = 2;
     private const string RoomCodeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -20,30 +21,28 @@ public sealed class LiveRoomManager(
     private readonly ConcurrentDictionary<Guid, LiveRoomState> rooms = new();
     private readonly ConcurrentDictionary<string, Guid> roomCodes = new(StringComparer.OrdinalIgnoreCase);
 
-    public LiveRoomSnapshot CreateRoom(CreateLiveRoomRequest request)
+    public LiveRoomSnapshot CreateRoom(CreateLiveRoomRequest request, bool enforceLocalRoomCapacity = true)
     {
         if (request.Mode is not (LiveRoomMode.Classic or LiveRoomMode.Series or LiveRoomMode.Team))
         {
             throw new InvalidOperationException("Dieser Arena-Modus ist noch nicht freigeschaltet.");
         }
 
-        if (request.Visibility == LiveRoomVisibility.InvitationOnly)
-        {
-            throw new InvalidOperationException("Einladungsräume sind noch nicht implementiert. Verwende Code oder intern offene Räume.");
-        }
-
         var normalizedTarget = NormalizeArenaTarget(request.Text);
         var now = timeProvider.GetUtcNow();
-        CleanupExpiredRooms(now);
+        if (enforceLocalRoomCapacity)
+        {
+            CleanupExpiredRooms(now);
+        }
         lock (createGate)
         {
-            var activeRoomCount = CountRoomsTowardCapacity();
+            var activeRoomCount = enforceLocalRoomCapacity ? CountRoomsTowardCapacity() : 0;
             if (completionSink is not null && !completionSink.CanAcceptNewRoom(activeRoomCount))
             {
                 throw new InvalidOperationException("Die Arena nimmt vorübergehend keine neuen Räume an, weil die Ergebnispersistenz ausgelastet ist.");
             }
 
-            if (activeRoomCount >= options.Value.MaxConcurrentRooms)
+            if (enforceLocalRoomCapacity && activeRoomCount >= options.Value.MaxConcurrentRooms)
             {
                 throw new InvalidOperationException("Die maximale Anzahl gleichzeitiger Live-Räume ist erreicht.");
             }
@@ -68,6 +67,33 @@ public sealed class LiveRoomManager(
                 ParticipantStatus.Joined,
                 now,
                 request.Mode == LiveRoomMode.Team ? 1 : null);
+
+            var invitations = (request.Invitations ?? [])
+                .Where(item => item.ProfileId != Guid.Empty && item.ProfileId != request.CreatorProfileId)
+                .GroupBy(item => item.ProfileId)
+                .Select(group => group.First())
+                .ToArray();
+            if (request.Visibility != LiveRoomVisibility.InvitationOnly && invitations.Length > 0)
+            {
+                throw new InvalidOperationException("Einladungen können nur für Einladungsräume festgelegt werden.");
+            }
+
+            if (invitations.Length + 1 > maxParticipants)
+            {
+                throw new InvalidOperationException("Die Einladungsliste überschreitet die maximale Raumgröße.");
+            }
+
+            foreach (var invitation in invitations)
+            {
+                room.InvitedProfileIds.Add(invitation.ProfileId);
+                room.Participants[invitation.ProfileId] = new LiveParticipantState(
+                    invitation.ProfileId,
+                    string.IsNullOrWhiteSpace(invitation.DisplayName) ? "Eingeladen" : invitation.DisplayName.Trim(),
+                    ParticipantStatus.Invited,
+                    now,
+                    request.Mode == LiveRoomMode.Team ? NextTeamNumber(room) : null);
+            }
+
             rooms[room.Id] = room;
             roomCodes[room.Code] = room.Id;
             return Snapshot(room, now);
@@ -85,15 +111,157 @@ public sealed class LiveRoomManager(
             .ToList();
     }
 
+    public LiveRoomLobbyPage ListLobbySummaries(Guid viewerProfileId, int offset = 0, int limit = 20)
+    {
+        var now = timeProvider.GetUtcNow();
+        CleanupExpiredRooms(now);
+        offset = Math.Max(0, offset);
+        limit = Math.Clamp(limit, 1, 100);
+        var summaries = new List<LiveRoomLobbySummary>();
+        foreach (var room in rooms.Values)
+        {
+            lock (room.Gate)
+            {
+                if (room.Phase != LiveRoomPhase.Lobby || room.Finished || !CanDiscover(room, viewerProfileId))
+                {
+                    continue;
+                }
+
+                summaries.Add(BuildLobbySummary(room));
+            }
+        }
+
+        var ordered = summaries
+            .OrderBy(item => item.Title, StringComparer.CurrentCultureIgnoreCase)
+            .ThenBy(item => item.RoomId)
+            .ToArray();
+        return new LiveRoomLobbyPage(ordered.Skip(offset).Take(limit).ToArray(), offset, limit, ordered.Length);
+    }
+
+    public LiveRoomMetricsSnapshot MetricsSnapshot()
+    {
+        var active = 0;
+        var open = 0;
+        var running = 0;
+        var participants = 0;
+        foreach (var room in rooms.Values)
+        {
+            lock (room.Gate)
+            {
+                if (!room.Finished)
+                {
+                    active++;
+                }
+
+                if (!room.Finished && room.Phase == LiveRoomPhase.Lobby)
+                {
+                    open++;
+                }
+
+                if (!room.Finished && room.Phase is LiveRoomPhase.Countdown or LiveRoomPhase.Running)
+                {
+                    running++;
+                }
+
+                if (!room.Finished)
+                {
+                    participants += room.Participants.Values.Count(CountsTowardCapacity);
+                }
+            }
+        }
+
+        return new LiveRoomMetricsSnapshot(active, open, running, participants);
+    }
+
+    public LiveRoomMemento ExportRoomState(Guid roomId)
+    {
+        var room = GetRoom(roomId);
+        lock (room.Gate)
+        {
+            return CreateMemento(room);
+        }
+    }
+
+    public LiveRoomSnapshot ProjectSnapshot(LiveRoomMemento memento)
+    {
+        ArgumentNullException.ThrowIfNull(memento);
+        var room = RestoreRoom(memento);
+        return LiveRoomSnapshotProjector.Create(
+            room,
+            timeProvider.GetUtcNow(),
+            memento.PersistenceState);
+    }
+
+    public bool ImportRoomState(LiveRoomMemento memento)
+    {
+        ArgumentNullException.ThrowIfNull(memento);
+        lock (createGate)
+        {
+            if (rooms.TryGetValue(memento.Id, out var existing))
+            {
+                lock (existing.Gate)
+                {
+                    if (existing.StateVersion > memento.StateVersion)
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            var room = RestoreRoom(memento);
+            if (rooms.TryGetValue(memento.Id, out existing) &&
+                !StringComparer.OrdinalIgnoreCase.Equals(existing.Code, room.Code))
+            {
+                RemoveRoomCodeMapping(existing.Code, existing.Id);
+            }
+
+            rooms[memento.Id] = room;
+            roomCodes[room.Code] = room.Id;
+            return true;
+        }
+    }
+
+    public bool RemoveRoomState(Guid roomId) => RemoveRoomState(roomId, notifyDependents: true);
+
+    internal bool UnloadRoomState(Guid roomId) => RemoveRoomState(roomId, notifyDependents: false);
+
+    private bool RemoveRoomState(Guid roomId, bool notifyDependents)
+    {
+        lock (createGate)
+        {
+            if (!rooms.TryRemove(roomId, out var room))
+            {
+                return false;
+            }
+
+            RemoveRoomCodeMapping(room.Code, roomId);
+            if (notifyDependents)
+            {
+                progressBroadcaster?.RemoveRoom(roomId);
+                updateSender?.RemoveRoom(roomId);
+            }
+            return true;
+        }
+    }
+
     public LiveRoomSnapshot JoinByCode(string code, Guid profileId, string displayName)
     {
+        var roomId = ResolveRoomIdByCode(code);
+        return JoinByResolvedCode(roomId, code, profileId, displayName);
+    }
+
+    public LiveRoomSnapshot JoinByResolvedCode(Guid roomId, string code, Guid profileId, string displayName) =>
+        Join(roomId, profileId, displayName, viaCode: true, expectedCode: NormalizeRoomCode(code));
+
+    public Guid ResolveRoomIdByCode(string code)
+    {
         var normalizedCode = NormalizeRoomCode(code);
-        if (!roomCodes.TryGetValue(normalizedCode, out var roomId) || !rooms.TryGetValue(roomId, out var room))
+        if (!roomCodes.TryGetValue(normalizedCode, out var roomId) || !rooms.ContainsKey(roomId))
         {
             throw new InvalidOperationException("Der Raumcode ist ungültig.");
         }
 
-        return Join(room.Id, profileId, displayName, viaCode: true);
+        return roomId;
     }
 
     public static string NormalizeRoomCode(string code)
@@ -130,9 +298,165 @@ public sealed class LiveRoomManager(
                 throw new InvalidOperationException("Dieses Profil nimmt nicht mehr aktiv an der Lobby teil.");
             }
 
-            participant.Ready = ready;
-            participant.Status = ready ? ParticipantStatus.Ready : ParticipantStatus.Joined;
-            participant.DisconnectedAt = null;
+            var nextStatus = ready ? ParticipantStatus.Ready : ParticipantStatus.Joined;
+            if (participant.Ready != ready || participant.Status != nextStatus || participant.DisconnectedAt is not null)
+            {
+                participant.Ready = ready;
+                participant.Status = nextStatus;
+                participant.DisconnectedAt = null;
+                Touch(room);
+            }
+            snapshot = SnapshotUnlocked(room, now);
+        }
+
+        return QueuePersistence(completed, snapshot);
+    }
+
+    public LiveRoomSnapshot SetLobbyLocked(Guid roomId, Guid hostProfileId, bool locked)
+    {
+        var room = GetRoom(roomId);
+        lock (room.Gate)
+        {
+            var now = timeProvider.GetUtcNow();
+            AdvancePhase(room, now);
+            RequireHost(room, hostProfileId);
+            if (room.Phase != LiveRoomPhase.Lobby)
+            {
+                throw new InvalidOperationException("Die Lobby kann nur vor dem Start gesperrt oder entsperrt werden.");
+            }
+
+            if (room.LobbyLocked != locked)
+            {
+                room.LobbyLocked = locked;
+                Touch(room);
+            }
+
+            return SnapshotUnlocked(room, now);
+        }
+    }
+
+    public LiveRoomSnapshot TransferHost(Guid roomId, Guid hostProfileId, Guid nextHostProfileId)
+    {
+        var room = GetRoom(roomId);
+        lock (room.Gate)
+        {
+            var now = timeProvider.GetUtcNow();
+            AdvancePhase(room, now);
+            RequireHost(room, hostProfileId);
+            if (room.CreatorProfileId == nextHostProfileId)
+            {
+                return SnapshotUnlocked(room, now);
+            }
+
+            if (room.Phase is not (LiveRoomPhase.Lobby or LiveRoomPhase.RoundResults))
+            {
+                throw new InvalidOperationException("Die Raumleitung kann nur in der Lobby oder zwischen Runden übertragen werden.");
+            }
+
+            var nextHost = RequireParticipant(room, nextHostProfileId);
+            if (!IsHostCandidate(room, nextHost))
+            {
+                throw new InvalidOperationException("Die gewählte Person ist aktuell nicht als Raumleitung verfügbar.");
+            }
+
+            room.CreatorProfileId = nextHostProfileId;
+            Touch(room);
+            return SnapshotUnlocked(room, now);
+        }
+    }
+
+    public LiveRoomSnapshot Kick(Guid roomId, Guid hostProfileId, Guid targetProfileId)
+    {
+        var room = GetRoom(roomId);
+        lock (room.Gate)
+        {
+            var now = timeProvider.GetUtcNow();
+            AdvancePhase(room, now);
+            RequireHost(room, hostProfileId);
+            if (targetProfileId == room.CreatorProfileId)
+            {
+                throw new InvalidOperationException("Übertrage zuerst die Raumleitung, bevor du den bisherigen Host entfernst.");
+            }
+
+            if (room.Phase is not (LiveRoomPhase.Lobby or LiveRoomPhase.RoundResults))
+            {
+                throw new InvalidOperationException("Teilnehmende können nur in der Lobby oder zwischen Runden entfernt werden.");
+            }
+
+            var participant = RequireParticipant(room, targetProfileId);
+            if (room.ExcludedProfileIds.Add(targetProfileId))
+            {
+                participant.Ready = false;
+                participant.DisconnectedAt = now;
+                if (room.Phase == LiveRoomPhase.Lobby)
+                {
+                    participant.Status = ParticipantStatus.LeftBeforeStart;
+                    participant.FinishedAt = now;
+                }
+
+                Touch(room);
+            }
+
+            return SnapshotUnlocked(room, now);
+        }
+    }
+
+    public LiveRoomSnapshot Close(Guid roomId, Guid hostProfileId)
+    {
+        var room = GetRoom(roomId);
+        CompletedRoomRecord? completed = null;
+        LiveRoomSnapshot snapshot;
+        lock (room.Gate)
+        {
+            var now = timeProvider.GetUtcNow();
+            AdvancePhase(room, now);
+            RequireHost(room, hostProfileId);
+            if (room.Phase == LiveRoomPhase.Closed)
+            {
+                return SnapshotUnlocked(room, now);
+            }
+
+            if (room.Finished)
+            {
+                throw new InvalidOperationException("Dieser Raum ist bereits beendet.");
+            }
+
+            var activeRound = room.Phase is LiveRoomPhase.Countdown or LiveRoomPhase.Running;
+            foreach (var participant in room.Participants.Values)
+            {
+                if (participant.Status is ParticipantStatus.LeftBeforeStart or ParticipantStatus.Declined or ParticipantStatus.Cancelled)
+                {
+                    continue;
+                }
+
+                participant.Ready = false;
+                participant.FinishedAt ??= now;
+                participant.Status = activeRound ? ParticipantStatus.AbortedByServer : ParticipantStatus.Cancelled;
+                if (activeRound && participant.DurationMilliseconds == 0 && room.RaceStartsAt is { } raceStartsAt)
+                {
+                    participant.DurationMilliseconds = (int)Math.Round(
+                        LiveRoomProgress.NormalizeDuration(now - raceStartsAt).TotalMilliseconds);
+                }
+            }
+
+            room.Finished = true;
+            room.FinishedAt = now;
+            room.RoundEndsAt = now;
+            room.Phase = LiveRoomPhase.Closed;
+            room.PhaseChangedAt = now;
+            room.CloseReason = "Der Raum wurde durch die Raumleitung geschlossen.";
+            room.RoundVersion++;
+            Touch(room);
+            if (activeRound)
+            {
+                room.PersistenceState = CompletionState.Pending;
+                completed = BuildPersistenceRecord(room);
+            }
+            else
+            {
+                room.PersistenceState = CompletionState.AbortedUnconfirmed;
+            }
+
             snapshot = SnapshotUnlocked(room, now);
         }
 
@@ -239,6 +563,7 @@ public sealed class LiveRoomManager(
                 participant.Accuracy = metrics.Accuracy;
                 participant.Wpm = metrics.Wpm;
                 participant.CorrectCharacters = metrics.CorrectCharacters;
+                Touch(room);
                 LiveRoomScoring.ApplyPlacements(room);
                 completed ??= TryCompleteRoom(room, now);
                 snapshot = SnapshotUnlocked(room, now);
@@ -280,6 +605,7 @@ public sealed class LiveRoomManager(
                 participant.FinishedAt = now;
                 participant.DurationMilliseconds = (int)Math.Round(
                     LiveRoomProgress.NormalizeDuration(now - room.RaceStartsAt.Value).TotalMilliseconds);
+                Touch(room);
                 LiveRoomScoring.ApplyPlacements(room);
                 completed ??= TryCompleteRoom(room, now);
                 snapshot = SnapshotUnlocked(room, now);
@@ -300,24 +626,9 @@ public sealed class LiveRoomManager(
             completed = ApplyDisconnectTimeouts(room, now);
             AdvancePhase(room, now);
             var participant = RequireParticipant(room, profileId);
-            if (participant.Status is ParticipantStatus.Joined or ParticipantStatus.Ready)
+            if (LiveRoomDisconnectRules.MarkDisconnected(room, participant, now))
             {
-                participant.Status = ParticipantStatus.Disconnected;
-                participant.DisconnectedAt = now;
-            }
-            else if (participant.Status == ParticipantStatus.Running)
-            {
-                participant.Status = ParticipantStatus.Disconnected;
-                participant.DisconnectedAt = now;
-            }
-            else if (room.Phase == LiveRoomPhase.RoundResults)
-            {
-                participant.DisconnectedAt = now;
-                participant.Ready = false;
-            }
-            else if (participant.Status is ParticipantStatus.Finished or ParticipantStatus.Dnf)
-            {
-                participant.DisconnectedAt = now;
+                Touch(room);
             }
 
             ApplyHostDisconnectRule(room);
@@ -354,10 +665,10 @@ public sealed class LiveRoomManager(
             LiveRoomSnapshot? changedSnapshot = null;
             lock (room.Gate)
             {
-                var previousVersion = room.RoundVersion;
+                var previousVersion = room.StateVersion;
                 completed = ApplyDisconnectTimeouts(room, now);
                 AdvancePhase(room, now);
-                if (room.RoundVersion != previousVersion)
+                if (room.StateVersion != previousVersion)
                 {
                     changedSnapshot = SnapshotUnlocked(room, now);
                 }
@@ -379,120 +690,203 @@ public sealed class LiveRoomManager(
 
     public void RemoveProfile(Guid profileId)
     {
-        var now = timeProvider.GetUtcNow();
-        foreach (var room in rooms.Values)
+        foreach (var roomId in rooms.Keys)
         {
-            CompletedRoomRecord? completed = null;
-            lock (room.Gate)
+            RemoveProfileFromRoom(roomId, profileId);
+        }
+    }
+
+    public void RemoveProfileFromRoom(Guid roomId, Guid profileId)
+    {
+        if (!rooms.TryGetValue(roomId, out var room))
+        {
+            return;
+        }
+
+        var now = timeProvider.GetUtcNow();
+        CompletedRoomRecord? completed = null;
+        lock (room.Gate)
+        {
+            if (!room.Participants.TryGetValue(profileId, out var participant))
             {
-                if (!room.Participants.TryGetValue(profileId, out var participant))
-                {
-                    continue;
-                }
-
-                room.ExcludedProfileIds.Add(profileId);
-                if (participant.Status is ParticipantStatus.Finished or ParticipantStatus.Dnf or ParticipantStatus.LeftBeforeStart)
-                {
-                    ApplyHostDisconnectRule(room);
-                    TryAbortStrandedSeries(room, now);
-                    continue;
-                }
-
-                if (room.Phase == LiveRoomPhase.Lobby)
-                {
-                    participant.Status = ParticipantStatus.LeftBeforeStart;
-                    participant.Ready = false;
-                    participant.FinishedAt = now;
-                    ApplyHostDisconnectRule(room);
-                }
-                else
-                {
-                    participant.Status = ParticipantStatus.Dnf;
-                    participant.Ready = false;
-                    participant.FinishedAt = now;
-                    participant.DurationMilliseconds = room.RaceStartsAt is { } raceStartsAt
-                        ? (int)Math.Round(LiveRoomProgress.NormalizeDuration(now - raceStartsAt).TotalMilliseconds)
-                        : 0;
-                    LiveRoomScoring.ApplyPlacements(room);
-                    completed = TryCompleteRoom(room, now);
-                }
-
-                ApplyHostDisconnectRule(room);
-                TryAbortStrandedSeries(room, now);
+                return;
             }
 
-            QueuePersistence(completed);
+            var changed = room.ExcludedProfileIds.Add(profileId);
+            if (participant.Status is ParticipantStatus.Finished or ParticipantStatus.Dnf or ParticipantStatus.LeftBeforeStart)
+            {
+                if (changed)
+                {
+                    Touch(room);
+                }
+                ApplyHostDisconnectRule(room);
+                TryAbortStrandedSeries(room, now);
+                return;
+            }
+
+            if (room.Phase == LiveRoomPhase.Lobby)
+            {
+                participant.Status = ParticipantStatus.LeftBeforeStart;
+                participant.Ready = false;
+                participant.FinishedAt = now;
+                changed = true;
+                ApplyHostDisconnectRule(room);
+            }
+            else
+            {
+                participant.Status = ParticipantStatus.Dnf;
+                participant.Ready = false;
+                participant.FinishedAt = now;
+                participant.DurationMilliseconds = room.RaceStartsAt is { } raceStartsAt
+                    ? (int)Math.Round(LiveRoomProgress.NormalizeDuration(now - raceStartsAt).TotalMilliseconds)
+                    : 0;
+                changed = true;
+                LiveRoomScoring.ApplyPlacements(room);
+                completed = TryCompleteRoom(room, now);
+            }
+
+            ApplyHostDisconnectRule(room);
+            TryAbortStrandedSeries(room, now);
+            if (changed)
+            {
+                Touch(room);
+            }
         }
+
+        QueuePersistence(completed);
     }
 
     public int AbortActiveRooms()
     {
-        var now = timeProvider.GetUtcNow();
         var abortedRooms = 0;
-        foreach (var room in rooms.Values)
+        foreach (var roomId in rooms.Keys)
         {
-            CompletedRoomRecord? completed = null;
-            lock (room.Gate)
-            {
-                if (room.Finished || room.Phase is not (LiveRoomPhase.Countdown or LiveRoomPhase.Running))
-                {
-                    continue;
-                }
-
-                foreach (var participant in room.Participants.Values)
-                {
-                    if (participant.Status is ParticipantStatus.Finished or ParticipantStatus.Dnf or ParticipantStatus.LeftBeforeStart)
-                    {
-                        continue;
-                    }
-
-                    participant.Status = ParticipantStatus.AbortedByServer;
-                    participant.Ready = false;
-                    participant.FinishedAt = now;
-                    participant.DurationMilliseconds = room.RaceStartsAt is { } raceStartsAt
-                        ? (int)Math.Round(LiveRoomProgress.NormalizeDuration(now - raceStartsAt).TotalMilliseconds)
-                        : 0;
-                }
-
-                room.Finished = true;
-                room.FinishedAt = now;
-                room.RoundEndsAt = now;
-                room.Phase = LiveRoomPhase.Aborted;
-                room.PhaseChangedAt = now;
-                room.CloseReason = "Der Server wurde beendet; diese Runde wurde ohne Rating abgebrochen.";
-                room.RoundVersion++;
-                room.PersistenceState = CompletionState.Pending;
-                completed = BuildPersistenceRecord(room);
-                abortedRooms++;
-            }
-
-            QueuePersistence(completed);
+            abortedRooms += AbortActiveRoom(roomId);
         }
 
         return abortedRooms;
     }
 
-    private LiveRoomSnapshot Join(Guid roomId, Guid profileId, string displayName, bool viaCode)
+    public int AbortActiveRoom(Guid roomId)
+    {
+        if (!rooms.TryGetValue(roomId, out var room))
+        {
+            return 0;
+        }
+
+        var now = timeProvider.GetUtcNow();
+        CompletedRoomRecord? completed;
+        lock (room.Gate)
+        {
+            if (room.Finished || room.Phase is not (LiveRoomPhase.Countdown or LiveRoomPhase.Running))
+            {
+                return 0;
+            }
+
+            foreach (var participant in room.Participants.Values)
+            {
+                if (participant.Status is ParticipantStatus.Finished or ParticipantStatus.Dnf or ParticipantStatus.LeftBeforeStart)
+                {
+                    continue;
+                }
+
+                participant.Status = ParticipantStatus.AbortedByServer;
+                participant.Ready = false;
+                participant.FinishedAt = now;
+                participant.DurationMilliseconds = room.RaceStartsAt is { } raceStartsAt
+                    ? (int)Math.Round(LiveRoomProgress.NormalizeDuration(now - raceStartsAt).TotalMilliseconds)
+                    : 0;
+            }
+
+            room.Finished = true;
+            room.FinishedAt = now;
+            room.RoundEndsAt = now;
+            room.Phase = LiveRoomPhase.Aborted;
+            room.PhaseChangedAt = now;
+            room.CloseReason = "Der Server wurde beendet; diese Runde wurde ohne Rating abgebrochen.";
+            room.RoundVersion++;
+            Touch(room);
+            room.PersistenceState = CompletionState.Pending;
+            completed = BuildPersistenceRecord(room);
+        }
+
+        QueuePersistence(completed);
+        return 1;
+    }
+
+    private LiveRoomSnapshot Join(
+        Guid roomId,
+        Guid profileId,
+        string displayName,
+        bool viaCode,
+        string? expectedCode = null)
     {
         var room = GetRoom(roomId);
         CompletedRoomRecord? completed = null;
         LiveRoomSnapshot snapshot;
         lock (room.Gate)
         {
+            if (expectedCode is not null && !StringComparer.OrdinalIgnoreCase.Equals(room.Code, expectedCode))
+            {
+                throw new InvalidOperationException("Der Raumcode ist ungültig.");
+            }
+
             var now = timeProvider.GetUtcNow();
             completed = ApplyDisconnectTimeouts(room, now);
             AdvancePhase(room, now);
             if (room.Participants.TryGetValue(profileId, out var existing))
             {
-                existing.DisplayName = displayName;
+                if (room.ExcludedProfileIds.Contains(profileId))
+                {
+                    throw new InvalidOperationException("Du wurdest aus diesem Raum entfernt.");
+                }
+
+                var changed = false;
+                if (!StringComparer.Ordinal.Equals(existing.DisplayName, displayName))
+                {
+                    existing.DisplayName = displayName;
+                    changed = true;
+                }
+
+                if (existing.Status == ParticipantStatus.Invited)
+                {
+                    if (room.Finished || room.Phase != LiveRoomPhase.Lobby)
+                    {
+                        throw new InvalidOperationException("Dieser Raum läuft bereits.");
+                    }
+
+                    if (room.LobbyLocked)
+                    {
+                        throw new InvalidOperationException("Die Lobby ist aktuell gesperrt.");
+                    }
+
+                    existing.Status = ParticipantStatus.Joined;
+                    changed = true;
+                }
                 if (existing.Status == ParticipantStatus.Disconnected)
                 {
                     existing.Status = room.Phase == LiveRoomPhase.Running
                         ? ParticipantStatus.Running
                         : existing.Ready ? ParticipantStatus.Ready : ParticipantStatus.Joined;
+                    changed = true;
+                }
+                else if (existing.Status == ParticipantStatus.LeftBeforeStart && room.Phase == LiveRoomPhase.Lobby)
+                {
+                    existing.Status = ParticipantStatus.Joined;
+                    existing.Ready = false;
+                    changed = true;
                 }
 
-                existing.DisconnectedAt = null;
+                if (existing.DisconnectedAt is not null)
+                {
+                    existing.DisconnectedAt = null;
+                    changed = true;
+                }
+
+                if (changed)
+                {
+                    Touch(room);
+                }
                 ApplyHostDisconnectRule(room);
                 snapshot = SnapshotUnlocked(room, now);
             }
@@ -513,6 +907,16 @@ public sealed class LiveRoomManager(
                     throw new InvalidOperationException("Für diesen Raum ist der Raumcode erforderlich.");
                 }
 
+                if (room.Visibility == LiveRoomVisibility.InvitationOnly && !room.InvitedProfileIds.Contains(profileId))
+                {
+                    throw new InvalidOperationException("Dieser Raum ist nur für eingeladene Personen zugänglich.");
+                }
+
+                if (room.LobbyLocked)
+                {
+                    throw new InvalidOperationException("Die Lobby ist aktuell gesperrt.");
+                }
+
                 if (room.Participants.Values.Count(CountsTowardCapacity) >= room.MaxParticipants)
                 {
                     throw new InvalidOperationException("Dieser Raum ist voll.");
@@ -524,6 +928,7 @@ public sealed class LiveRoomManager(
                     ParticipantStatus.Joined,
                     now,
                     room.Mode == LiveRoomMode.Team ? NextTeamNumber(room) : null);
+                Touch(room);
                 ApplyHostDisconnectRule(room);
                 snapshot = SnapshotUnlocked(room, now);
             }
@@ -562,15 +967,19 @@ public sealed class LiveRoomManager(
                 participant.TypedTextPreview = LiveRoomProgress.BuildTypedTextPreview(room.TargetElements, inputElements);
                 participant.Accuracy = LiveRoomProgress.CalculateAccuracy(correctCharacters, inputElements.Count);
                 participant.Wpm = LiveRoomProgress.CalculateWpm(participant.CorrectCharacters, room.RaceStartsAt, now);
+                Touch(room);
                 delta = new LiveProgressDelta(
                     room.Id,
                     room.RoundVersion,
+                    room.StateVersion,
                     participant.ProfileId,
+                    participant.Sequence,
                     participant.CorrectCharacters,
-                    participant.TypedTextPreview,
+                    participant.TypedTextPreview.Length,
+                    LiveRoomProgress.BuildTypedStateBits(room.TargetElements, inputElements),
                     participant.Wpm,
                     participant.Accuracy,
-                    LiveRoomProgress.CalculateRankHint(room, participant.ProfileId));
+                    null);
                 snapshot = includeSnapshot ? SnapshotUnlocked(room, now) : null;
             }
         }
@@ -590,45 +999,7 @@ public sealed class LiveRoomManager(
     private CompletedRoomRecord? ApplyDisconnectTimeouts(LiveRoomState room, DateTimeOffset now)
     {
         var grace = TimeSpan.FromSeconds(Math.Clamp(options.Value.ReconnectGraceSeconds, 0, 300));
-        var changed = false;
-        foreach (var participant in room.Participants.Values)
-        {
-            if (participant.Status != ParticipantStatus.Disconnected || participant.DisconnectedAt is null)
-            {
-                continue;
-            }
-
-            if (now - participant.DisconnectedAt.Value < grace)
-            {
-                continue;
-            }
-
-            if (room.Phase == LiveRoomPhase.Lobby)
-            {
-                participant.Status = ParticipantStatus.LeftBeforeStart;
-                participant.Ready = false;
-                participant.FinishedAt = participant.DisconnectedAt;
-                ApplyHostDisconnectRule(room);
-            }
-            else
-            {
-                participant.Status = ParticipantStatus.Dnf;
-                participant.Ready = false;
-                participant.FinishedAt = participant.DisconnectedAt;
-                participant.DurationMilliseconds = room.RaceStartsAt is { } raceStartsAt
-                    ? (int)Math.Round(LiveRoomProgress.NormalizeDuration(
-                        participant.DisconnectedAt.Value - raceStartsAt).TotalMilliseconds)
-                    : 0;
-            }
-
-            changed = true;
-        }
-
-        if (changed)
-        {
-            LiveRoomScoring.ApplyPlacements(room);
-            room.RoundVersion++;
-        }
+        LiveRoomDisconnectRules.ApplyTimeouts(room, now, grace);
 
         var completed = TryCompleteRoom(room, now);
         ApplyHostDisconnectRule(room);
@@ -637,31 +1008,7 @@ public sealed class LiveRoomManager(
     }
 
     private static void ApplyHostDisconnectRule(LiveRoomState room)
-    {
-        if (room.Phase is not (LiveRoomPhase.Lobby or LiveRoomPhase.RoundResults))
-        {
-            return;
-        }
-
-        if (room.Participants.TryGetValue(room.CreatorProfileId, out var creator) &&
-            IsHostCandidate(room, creator))
-        {
-            return;
-        }
-
-        var nextHost = room.Participants.Values
-            .Where(participant => IsHostCandidate(room, participant))
-            .OrderBy(item => item.JoinedAt)
-            .ThenBy(item => item.ProfileId)
-            .FirstOrDefault();
-        if (nextHost is null || nextHost.ProfileId == room.CreatorProfileId)
-        {
-            return;
-        }
-
-        room.CreatorProfileId = nextHost.ProfileId;
-        room.RoundVersion++;
-    }
+        => LiveRoomHostRules.ApplyAutomaticTransfer(room);
 
     private void TryAbortStrandedSeries(LiveRoomState room, DateTimeOffset now)
     {
@@ -694,71 +1041,22 @@ public sealed class LiveRoomManager(
         room.CloseReason = "Die Serie wurde beendet, weil nach der Wiederverbindungsfrist niemand mehr verbunden war.";
         room.PersistenceState = CompletionState.AbortedUnconfirmed;
         room.RoundVersion++;
+        Touch(room);
     }
 
     private static bool IsHostCandidate(LiveRoomState room, LiveParticipantState participant)
-    {
-        if (room.ExcludedProfileIds.Contains(participant.ProfileId) ||
-            participant.Status == ParticipantStatus.LeftBeforeStart ||
-            participant.DisconnectedAt is not null)
-        {
-            return false;
-        }
-
-        return room.Phase == LiveRoomPhase.Lobby
-            ? IsLobbyActive(participant)
-            : participant.Status is ParticipantStatus.Finished or ParticipantStatus.Dnf;
-    }
+        => LiveRoomHostRules.IsCandidate(room, participant);
 
     private CompletedRoomRecord? TryCompleteRoom(LiveRoomState room, DateTimeOffset now)
     {
-        if (room.Finished || room.Phase != LiveRoomPhase.Running)
+        var transition = LiveRoomCompletionRules.TryComplete(room, now);
+        if (transition.EnteredRoundResults)
         {
-            return null;
-        }
-
-        var competingParticipants = room.Participants.Values
-            .Where(item => !room.ExcludedProfileIds.Contains(item.ProfileId) && item.Status != ParticipantStatus.LeftBeforeStart)
-            .ToArray();
-        if (competingParticipants.Length == 0)
-        {
-            room.Finished = true;
-            room.FinishedAt = now;
-            room.RoundEndsAt = now;
-            room.Phase = LiveRoomPhase.Aborted;
-            room.PhaseChangedAt = now;
-            room.CloseReason = "Der Raum wurde beendet, weil keine wertbaren Teilnehmenden mehr vorhanden sind.";
-            room.RoundVersion++;
-            room.PersistenceState = CompletionState.AbortedUnconfirmed;
-            return null;
-        }
-
-        var terminal = competingParticipants.All(item => item.Status is ParticipantStatus.Finished or ParticipantStatus.Dnf);
-        if (!terminal)
-        {
-            return null;
-        }
-
-        LiveRoomScoring.ScoreCompletedRound(room, competingParticipants);
-        room.RoundEndsAt = now;
-        room.Phase = room.CurrentRound < room.RoundCount
-            ? LiveRoomPhase.RoundResults
-            : LiveRoomPhase.SeriesResults;
-        room.PhaseChangedAt = now;
-        room.RoundVersion++;
-        if (room.Phase == LiveRoomPhase.RoundResults)
-        {
-            room.PersistenceState = null;
             ApplyHostDisconnectRule(room);
             TryAbortStrandedSeries(room, now);
-            return null;
         }
 
-        room.Finished = true;
-        room.FinishedAt = now;
-        LiveRoomScoring.ApplyOverallPlacements(room);
-        room.PersistenceState = CompletionState.Pending;
-        return BuildPersistenceRecord(room);
+        return transition.Record;
     }
 
     private int CountRoomsTowardCapacity()
@@ -806,8 +1104,20 @@ public sealed class LiveRoomManager(
                 continue;
             }
 
-            roomCodes.TryRemove(room.Code, out _);
+            RemoveRoomCodeMapping(room.Code, room.Id);
             progressBroadcaster?.RemoveRoom(room.Id);
+            updateSender?.RemoveRoom(room.Id);
+        }
+    }
+
+    private void RemoveRoomCodeMapping(string code, Guid roomId)
+    {
+        lock (createGate)
+        {
+            if (roomCodes.TryGetValue(code, out var mappedRoomId) && mappedRoomId == roomId)
+            {
+                roomCodes.TryRemove(code, out _);
+            }
         }
     }
 
@@ -847,6 +1157,7 @@ public sealed class LiveRoomManager(
         room.RaceStartsAt = now.AddSeconds(Math.Clamp(options.Value.CountdownSeconds, 1, 10));
         room.RoundEndsAt = null;
         room.RoundVersion++;
+        Touch(room);
         foreach (var participant in room.Participants.Values.Where(item => item.Status is ParticipantStatus.Ready or ParticipantStatus.Joined))
         {
             participant.Ready = true;
@@ -876,6 +1187,8 @@ public sealed class LiveRoomManager(
             participant.DurationMilliseconds = 0;
             participant.Accuracy = 0;
         }
+
+        Touch(room);
     }
 
     private LiveRoomState GetRoom(Guid roomId)
@@ -890,6 +1203,206 @@ public sealed class LiveRoomManager(
             : throw new InvalidOperationException("Du bist nicht in diesem Raum.");
     }
 
+    private static LiveRoomMemento CreateMemento(LiveRoomState room) => new(
+        room.Id,
+        room.CreatorProfileId,
+        room.Code,
+        room.Title,
+        room.Text,
+        room.Mode,
+        room.Visibility,
+        room.RoundCount,
+        room.MaxParticipants,
+        room.CreatedAt,
+        room.Phase,
+        room.CurrentRound,
+        room.RoundVersion,
+        room.StateVersion,
+        room.LobbyLocked,
+        room.PhaseChangedAt,
+        room.CountdownStartsAt,
+        room.RaceStartsAt,
+        room.RoundEndsAt,
+        room.CloseReason,
+        room.Started,
+        room.Finished,
+        room.CompletionReceipt,
+        room.PersistenceState,
+        room.StartedAt,
+        room.FinishedAt,
+        room.ExcludedProfileIds.Order().ToArray(),
+        room.InvitedProfileIds.Order().ToArray(),
+        new Dictionary<int, int>(room.TeamRoundWins),
+        room.Participants.Values
+            .OrderBy(participant => participant.JoinedAt)
+            .ThenBy(participant => participant.ProfileId)
+            .Select(participant => new LiveParticipantMemento(
+                participant.ProfileId,
+                participant.DisplayName,
+                participant.Status,
+                participant.JoinedAt,
+                participant.TeamNumber,
+                participant.Ready,
+                participant.Sequence,
+                participant.CorrectCharacters,
+                participant.TypedTextPreview,
+                participant.Wpm,
+                participant.Placement,
+                participant.FinishedAt,
+                participant.DisconnectedAt,
+                participant.DurationMilliseconds,
+                participant.Accuracy,
+                participant.SeriesPoints,
+                participant.RoundWins,
+                participant.FinishedRounds,
+                participant.CompletedRounds,
+                participant.TotalDurationMilliseconds,
+                participant.TotalWpm,
+                participant.TotalAccuracy))
+            .ToArray());
+
+    private static LiveRoomState RestoreRoom(LiveRoomMemento memento)
+    {
+        if (memento.Id == Guid.Empty ||
+            memento.CreatorProfileId == Guid.Empty ||
+            memento.StateVersion < 1 ||
+            memento.RoundVersion < 1 ||
+            memento.CurrentRound < 1 ||
+            memento.RoundCount < 1 ||
+            memento.MaxParticipants < MinimumParticipants ||
+            !StringComparer.Ordinal.Equals(NormalizeRoomCode(memento.Code), memento.Code))
+        {
+            throw new InvalidOperationException("Der verteilte Arena-Zustand ist ungültig.");
+        }
+
+        var room = new LiveRoomState(
+            memento.Id,
+            memento.CreatorProfileId,
+            memento.Code,
+            memento.Title,
+            memento.Text,
+            memento.Mode,
+            memento.Visibility,
+            memento.RoundCount,
+            memento.MaxParticipants,
+            memento.CreatedAt)
+        {
+            Phase = memento.Phase,
+            CurrentRound = memento.CurrentRound,
+            RoundVersion = memento.RoundVersion,
+            StateVersion = memento.StateVersion,
+            LobbyLocked = memento.LobbyLocked,
+            PhaseChangedAt = memento.PhaseChangedAt,
+            CountdownStartsAt = memento.CountdownStartsAt,
+            RaceStartsAt = memento.RaceStartsAt,
+            RoundEndsAt = memento.RoundEndsAt,
+            CloseReason = memento.CloseReason,
+            Started = memento.Started,
+            Finished = memento.Finished,
+            CompletionReceipt = memento.CompletionReceipt,
+            PersistenceState = memento.PersistenceState,
+            StartedAt = memento.StartedAt,
+            FinishedAt = memento.FinishedAt
+        };
+
+        foreach (var profileId in memento.ExcludedProfileIds)
+        {
+            room.ExcludedProfileIds.Add(profileId);
+        }
+
+        foreach (var profileId in memento.InvitedProfileIds)
+        {
+            room.InvitedProfileIds.Add(profileId);
+        }
+
+        foreach (var (teamNumber, roundWins) in memento.TeamRoundWins)
+        {
+            room.TeamRoundWins[teamNumber] = roundWins;
+        }
+
+        foreach (var item in memento.Participants)
+        {
+            if (item.ProfileId == Guid.Empty || room.Participants.ContainsKey(item.ProfileId))
+            {
+                throw new InvalidOperationException("Der verteilte Arena-Teilnehmerzustand ist ungültig.");
+            }
+
+            room.Participants[item.ProfileId] = new LiveParticipantState(
+                item.ProfileId,
+                item.DisplayName,
+                item.Status,
+                item.JoinedAt,
+                item.TeamNumber)
+            {
+                Ready = item.Ready,
+                Sequence = item.Sequence,
+                CorrectCharacters = item.CorrectCharacters,
+                TypedTextPreview = item.TypedTextPreview,
+                Wpm = item.Wpm,
+                Placement = item.Placement,
+                FinishedAt = item.FinishedAt,
+                DisconnectedAt = item.DisconnectedAt,
+                DurationMilliseconds = item.DurationMilliseconds,
+                Accuracy = item.Accuracy,
+                SeriesPoints = item.SeriesPoints,
+                RoundWins = item.RoundWins,
+                FinishedRounds = item.FinishedRounds,
+                CompletedRounds = item.CompletedRounds,
+                TotalDurationMilliseconds = item.TotalDurationMilliseconds,
+                TotalWpm = item.TotalWpm,
+                TotalAccuracy = item.TotalAccuracy
+            };
+        }
+
+        if (!room.Participants.ContainsKey(room.CreatorProfileId))
+        {
+            throw new InvalidOperationException("Der verteilte Arena-Zustand enthält keine Raumleitung.");
+        }
+
+        return room;
+    }
+
+    private static void RequireHost(LiveRoomState room, Guid profileId)
+        => LiveRoomHostRules.RequireHost(room, profileId);
+
+    private static bool CanDiscover(LiveRoomState room, Guid viewerProfileId)
+    {
+        if (room.Visibility == LiveRoomVisibility.InternalOpen)
+        {
+            return true;
+        }
+
+        if (room.CreatorProfileId == viewerProfileId || room.Participants.ContainsKey(viewerProfileId))
+        {
+            return true;
+        }
+
+        return room.Visibility == LiveRoomVisibility.InvitationOnly && room.InvitedProfileIds.Contains(viewerProfileId);
+    }
+
+    private static LiveRoomLobbySummary BuildLobbySummary(LiveRoomState room) => new(
+        room.Id,
+        room.CreatorProfileId,
+        room.Participants.TryGetValue(room.CreatorProfileId, out var creator)
+            ? creator.DisplayName
+            : "Raumleitung",
+        room.Visibility == LiveRoomVisibility.Code ? "" : room.Code,
+        room.Title,
+        room.Mode,
+        room.Visibility,
+        room.Phase,
+        room.RoundCount,
+        room.CurrentRound,
+        room.Participants.Values.Count(participant => participant.Status is ParticipantStatus.Joined or ParticipantStatus.Ready),
+        room.MaxParticipants,
+        room.LobbyLocked,
+        room.StateVersion);
+
+    internal static void Touch(LiveRoomState room)
+    {
+        room.StateVersion = checked(room.StateVersion + 1);
+    }
+
     private LiveRoomSnapshot Snapshot(LiveRoomState room, DateTimeOffset now)
     {
         lock (room.Gate)
@@ -901,7 +1414,6 @@ public sealed class LiveRoomManager(
 
     private LiveRoomSnapshot SnapshotUnlocked(LiveRoomState room, DateTimeOffset now)
     {
-        var exposeTargetText = room.Phase is LiveRoomPhase.Running or LiveRoomPhase.RoundResults or LiveRoomPhase.SeriesResults or LiveRoomPhase.Closed;
         var persistenceState = room.PersistenceState;
         if (room.Finished &&
             persistenceState == CompletionState.Pending &&
@@ -909,7 +1421,11 @@ public sealed class LiveRoomManager(
             completionSink is not null)
         {
             persistenceState = completionSink.GetStatus(room.Id).State;
-            room.PersistenceState = persistenceState;
+            if (room.PersistenceState != persistenceState)
+            {
+                room.PersistenceState = persistenceState;
+                Touch(room);
+            }
             if (room.CompletionReceipt is not null)
             {
                 room.CompletionReceipt = room.CompletionReceipt with { State = persistenceState.Value };
@@ -921,52 +1437,7 @@ public sealed class LiveRoomManager(
             persistenceState ??= CompletionState.AbortedUnconfirmed;
         }
 
-        return new LiveRoomSnapshot(
-            room.Id,
-            room.CreatorProfileId,
-            room.Code,
-            room.Title,
-            exposeTargetText ? room.Text : "",
-            room.TargetCharacterCount,
-            room.MaxParticipants,
-            room.Mode,
-            room.Visibility,
-            room.RoundCount,
-            room.CurrentRound,
-            room.RoundVersion,
-            room.Phase,
-            room.Started,
-            room.Finished,
-            now,
-            room.PhaseChangedAt,
-            room.CountdownStartsAt,
-            room.RaceStartsAt,
-            room.StartedAt,
-            room.FinishedAt,
-            room.CloseReason,
-            room.Participants.Values
-                .OrderBy(item => item.Placement ?? int.MaxValue)
-                .ThenByDescending(item => item.CorrectCharacters)
-                .ThenBy(item => item.DisplayName)
-                .Select(item => new LiveParticipantSnapshot(
-                    item.ProfileId,
-                    item.DisplayName,
-                    item.Status,
-                    item.Ready,
-                    item.Sequence,
-                    item.CorrectCharacters,
-                    exposeTargetText ? item.TypedTextPreview : "",
-                    item.Wpm,
-                    item.Placement,
-                    item.DurationMilliseconds,
-                    item.Accuracy,
-                    item.TeamNumber,
-                    item.SeriesPoints,
-                    item.RoundWins))
-                .ToList(),
-            persistenceState,
-            LiveRoomScoring.BuildTeamSnapshots(room),
-            room.RoundEndsAt);
+        return LiveRoomSnapshotProjector.Create(room, now, persistenceState);
     }
 
     private static int ValidateRoundCount(LiveRoomMode mode, int roundCount)
@@ -1008,6 +1479,7 @@ public sealed class LiveRoomManager(
         room.Phase = LiveRoomPhase.Running;
         room.PhaseChangedAt = room.RaceStartsAt.Value;
         room.RoundVersion++;
+        Touch(room);
         foreach (var participant in room.Participants.Values)
         {
             if (participant.Status is ParticipantStatus.Ready or ParticipantStatus.Joined)
@@ -1044,38 +1516,26 @@ public sealed class LiveRoomManager(
         return new string(chars);
     }
 
-    private CompletedRoomRecord BuildPersistenceRecord(LiveRoomState room) => new(
-        room.Id,
-        room.CurrentRound,
-        room.RoundVersion,
-        $"{room.Id:N}:{room.CurrentRound}:{room.RoundVersion}",
-        room.CreatorProfileId,
-        room.Code,
-        room.Mode,
-        room.Visibility,
-        room.RoundCount,
-        room.CreatedAt,
-        room.StartedAt,
-        room.FinishedAt,
-        room.Participants.Values
-            .Where(item =>
-                !room.ExcludedProfileIds.Contains(item.ProfileId) &&
-                item.Status != ParticipantStatus.LeftBeforeStart)
-            .Select(item => new CompletedParticipantRecord(
-            item.ProfileId,
-            item.Status == ParticipantStatus.AbortedByServer
-                ? ParticipantStatus.AbortedByServer
-                : item.FinishedRounds > 0 ? ParticipantStatus.Finished : ParticipantStatus.Dnf,
-            item.Placement,
-            item.CompletedRounds > 0 ? item.TotalDurationMilliseconds : item.DurationMilliseconds,
-            item.CompletedRounds > 0 ? item.AverageWpm : item.Wpm,
-            item.CompletedRounds > 0 ? item.AverageAccuracy : item.Accuracy,
-            item.TeamNumber)).ToList());
+    private static CompletedRoomRecord BuildPersistenceRecord(LiveRoomState room) =>
+        LiveRoomCompletionRules.BuildPersistenceRecord(room);
 
     private LiveRoomSnapshot QueuePersistence(CompletedRoomRecord? record, LiveRoomSnapshot snapshot)
     {
         var state = QueuePersistence(record);
-        return record is null ? snapshot : snapshot with { PersistenceState = state };
+        if (record is null)
+        {
+            return snapshot;
+        }
+
+        if (!rooms.TryGetValue(record.Id, out var room))
+        {
+            return snapshot with { PersistenceState = state };
+        }
+
+        lock (room.Gate)
+        {
+            return SnapshotUnlocked(room, timeProvider.GetUtcNow()) with { PersistenceState = state };
+        }
     }
 
     private CompletionState? QueuePersistence(CompletedRoomRecord? record)
@@ -1097,7 +1557,11 @@ public sealed class LiveRoomManager(
                 };
                 var receipt = EnqueueCompletion(record);
                 room.CompletionReceipt = receipt;
-                room.PersistenceState = receipt.State;
+                if (room.PersistenceState != receipt.State)
+                {
+                    room.PersistenceState = receipt.State;
+                    Touch(room);
+                }
                 return receipt.State;
             }
         }
@@ -1116,6 +1580,46 @@ public sealed class LiveRoomManager(
         {
             logger.LogError(ex, "Ein Arena-Ergebnis konnte nicht für die Persistenz eingereiht werden.");
             return new CompletionReceipt(record.Id, record.IdempotencyKey, CompletionState.Failed);
+        }
+    }
+
+    internal void EnsurePendingPersistenceQueued(Guid roomId)
+    {
+        if (completionSink is null || !rooms.TryGetValue(roomId, out var room))
+        {
+            return;
+        }
+
+        lock (room.Gate)
+        {
+            if (!room.Finished ||
+                room.PersistenceState is not (CompletionState.Pending or CompletionState.Failed) ||
+                room.CompletionReceipt is null)
+            {
+                return;
+            }
+
+            var record = BuildPersistenceRecord(room);
+            record = record with
+            {
+                Participants = record.Participants
+                    .Where(participant => !room.ExcludedProfileIds.Contains(participant.UserProfileId))
+                    .ToArray()
+            };
+            try
+            {
+                var receipt = completionSink.Enqueue(record);
+                room.CompletionReceipt = receipt;
+                if (room.PersistenceState != receipt.State)
+                {
+                    room.PersistenceState = receipt.State;
+                    Touch(room);
+                }
+            }
+            catch (Exception exception)
+            {
+                logger.LogError(exception, "Der fehlende Arena-Ergebnisauftrag {RoomId} konnte noch nicht rekonstruiert werden.", roomId);
+            }
         }
     }
 }

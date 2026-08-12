@@ -169,12 +169,69 @@ public sealed class TextLibraryServiceTests
         await context.Service.CreateAsync(context.Profile.Id, "Beta", "zwei", TrainingTextVisibility.Private);
         await context.Service.CreateAsync(context.Profile.Id, "Gamma", "drei", TrainingTextVisibility.Organization);
 
-        var search = await context.Service.ListVisibleAsync(context.Profile.Id, "amm");
-        var privatePage = await context.Service.ListVisibleAsync(context.Profile.Id, visibility: TrainingTextVisibility.Private, page: 2, pageSize: 1);
+        var search = await context.Service.GetVisiblePageAsync(context.Profile.Id, " amm ");
+        var privatePage = await context.Service.GetVisiblePageAsync(
+            context.Profile.Id,
+            visibility: TrainingTextVisibility.Private,
+            page: 2,
+            pageSize: 1);
+        var beyondLastPage = await context.Service.GetVisiblePageAsync(
+            context.Profile.Id,
+            visibility: TrainingTextVisibility.Private,
+            page: int.MaxValue,
+            pageSize: 1);
+        var emptyPage = await context.Service.GetVisiblePageAsync(
+            context.Profile.Id,
+            query: "nicht-vorhanden",
+            page: int.MinValue,
+            pageSize: 0);
 
-        Assert.Single(search);
-        Assert.Equal("Gamma", search[0].Title);
-        Assert.Single(privatePage);
+        Assert.Equal(1, search.TotalCount);
+        Assert.Equal("Gamma", Assert.Single(search.Items).Title);
+        Assert.Equal(2, privatePage.TotalCount);
+        Assert.Equal(2, privatePage.TotalPages);
+        Assert.Equal(2, privatePage.Page);
+        Assert.True(privatePage.HasPreviousPage);
+        Assert.False(privatePage.HasNextPage);
+        Assert.Equal("Beta", Assert.Single(privatePage.Items).Title);
+        Assert.Equal(2, beyondLastPage.Page);
+        Assert.Equal(2, beyondLastPage.TotalPages);
+        Assert.Equal("Beta", Assert.Single(beyondLastPage.Items).Title);
+        Assert.Empty(emptyPage.Items);
+        Assert.Equal(0, emptyPage.TotalCount);
+        Assert.Equal(1, emptyPage.Page);
+        Assert.Equal(1, emptyPage.PageSize);
+        Assert.Equal(1, emptyPage.TotalPages);
+    }
+
+    [Fact]
+    public async Task QuarantinedContentCannotBeReadCopiedEditedOrCollected()
+    {
+        await using var context = await TextLibraryTestContext.CreateAsync();
+        var text = await context.Service.CreateAsync(
+            context.Profile.Id,
+            "Beanstandet",
+            "Dieser Inhalt bleibt bis zur Freigabe verborgen.",
+            TrainingTextVisibility.Organization);
+        text.IsQuarantined = true;
+        await context.Db.SaveChangesAsync();
+
+        var page = await context.Service.GetVisiblePageAsync(context.Profile.Id);
+
+        Assert.DoesNotContain(page.Items, item => item.Id == text.Id);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            context.Service.GetVisibleAsync(context.Profile.Id, text.Id));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            context.Service.CopyAsync(context.Profile.Id, text.Id));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            context.Service.UpdateAsync(context.Profile.Id, text.Id, "Neu", "Nicht freigeben", TrainingTextVisibility.Organization));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            context.Service.CreateCollectionAsync(
+                context.Profile.Id,
+                "Nicht erlaubt",
+                null,
+                TrainingTextVisibility.Private,
+                [text.Id]));
     }
 
     private sealed class TextLibraryTestContext : IAsyncDisposable

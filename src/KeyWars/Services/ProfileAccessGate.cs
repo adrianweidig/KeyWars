@@ -9,7 +9,30 @@ public enum ProfileAccessState
     Deleted
 }
 
-public sealed class ProfileAccessGate
+public interface IProfileAccessGate
+{
+    ValueTask<ProfileAccessState> GetStateAsync(
+        Guid profileId,
+        CancellationToken cancellationToken = default);
+    ValueTask<IOperationLease> AcquireAsync(
+        Guid profileId,
+        CancellationToken cancellationToken = default);
+    ValueTask<IOperationLease> AcquireManyAsync(
+        IEnumerable<Guid> profileIds,
+        CancellationToken cancellationToken = default);
+    ValueTask<IOperationLease?> TryBeginOperationAsync(
+        Guid profileId,
+        CancellationToken cancellationToken = default);
+    Task WaitForIdleAsync(Guid profileId, CancellationToken cancellationToken = default);
+    ValueTask CompleteOperationAsync(
+        Guid profileId,
+        CancellationToken cancellationToken = default);
+    ValueTask MarkDeletedAsync(
+        Guid profileId,
+        CancellationToken cancellationToken = default);
+}
+
+public sealed class ProfileAccessGate : IProfileAccessGate
 {
     private readonly ConcurrentDictionary<Guid, ProfileAccessEntry> entries = new();
 
@@ -27,6 +50,14 @@ public sealed class ProfileAccessGate
     }
 
     public bool IsBlocked(Guid profileId) => GetState(profileId) != ProfileAccessState.Available;
+
+    public ValueTask<ProfileAccessState> GetStateAsync(
+        Guid profileId,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return ValueTask.FromResult(GetState(profileId));
+    }
 
     public IDisposable Acquire(Guid profileId)
     {
@@ -74,6 +105,22 @@ public sealed class ProfileAccessGate
         }
     }
 
+    public ValueTask<IOperationLease> AcquireAsync(
+        Guid profileId,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return ValueTask.FromResult<IOperationLease>(new AsyncLease(Acquire(profileId)));
+    }
+
+    public ValueTask<IOperationLease> AcquireManyAsync(
+        IEnumerable<Guid> profileIds,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return ValueTask.FromResult<IOperationLease>(new AsyncLease(AcquireMany(profileIds)));
+    }
+
     public bool TryBeginOperation(Guid profileId)
     {
         var entry = entries.GetOrAdd(profileId, static _ => new ProfileAccessEntry());
@@ -90,6 +137,17 @@ public sealed class ProfileAccessGate
                 : new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             return true;
         }
+    }
+
+    public ValueTask<IOperationLease?> TryBeginOperationAsync(
+        Guid profileId,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return ValueTask.FromResult<IOperationLease?>(
+            TryBeginOperation(profileId)
+                ? new LocalOperationLease(this, profileId)
+                : null);
     }
 
     public Task WaitForIdleAsync(Guid profileId, CancellationToken cancellationToken = default)
@@ -135,6 +193,15 @@ public sealed class ProfileAccessGate
         }
     }
 
+    public ValueTask CompleteOperationAsync(
+        Guid profileId,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        CompleteOperation(profileId);
+        return ValueTask.CompletedTask;
+    }
+
     public void MarkDeleted(Guid profileId)
     {
         var entry = entries.GetOrAdd(profileId, static _ => new ProfileAccessEntry());
@@ -149,6 +216,15 @@ public sealed class ProfileAccessGate
             entry.Generation++;
             entry.Idle = null;
         }
+    }
+
+    public ValueTask MarkDeletedAsync(
+        Guid profileId,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        MarkDeleted(profileId);
+        return ValueTask.CompletedTask;
     }
 
     private ProfileOperationException CreateBlockedException(Guid profileId) =>
@@ -215,6 +291,44 @@ public sealed class ProfileAccessGate
             {
                 DisposeReverse(released);
             }
+        }
+    }
+
+    private sealed class AsyncLease(IDisposable lease) : IOperationLease
+    {
+        private IDisposable? current = lease;
+
+        public CancellationToken LeaseLost => CancellationToken.None;
+
+        public void ThrowIfLost()
+        {
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            Interlocked.Exchange(ref current, null)?.Dispose();
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class LocalOperationLease(ProfileAccessGate owner, Guid profileId) : IOperationLease
+    {
+        private int disposed;
+
+        public CancellationToken LeaseLost => CancellationToken.None;
+
+        public void ThrowIfLost()
+        {
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            if (Interlocked.Exchange(ref disposed, 1) == 0)
+            {
+                owner.CompleteOperation(profileId);
+            }
+
+            return ValueTask.CompletedTask;
         }
     }
 }

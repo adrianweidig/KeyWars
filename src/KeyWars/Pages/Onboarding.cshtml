@@ -1,0 +1,87 @@
+@page "/onboarding"
+@model KeyWars.Pages.OnboardingModel
+@{
+    ViewData["Title"] = "Erste Schritte";
+}
+
+<section class="page-header">
+    <div>
+        <span class="eyebrow">Schritt @Model.Schritt von 3</span>
+        <h1>KeyWars kurz einrichten</h1>
+        <p class="lead">Drei kurze Entscheidungen. Alles lässt sich später in den Einstellungen ändern.</p>
+    </div>
+    <form method="post" asp-page-handler="Skip">
+        <button type="submit" class="secondary">Einrichtung überspringen</button>
+    </form>
+</section>
+
+<ol class="onboarding-progress" aria-label="Einrichtungsschritte">
+    <li aria-current="@(Model.Schritt == 1 ? "step" : null)" class="@(Model.Schritt >= 1 ? "active" : "")">Training</li>
+    <li aria-current="@(Model.Schritt == 2 ? "step" : null)" class="@(Model.Schritt >= 2 ? "active" : "")">Sichtbarkeit</li>
+    <li aria-current="@(Model.Schritt == 3 ? "step" : null)" class="@(Model.Schritt >= 3 ? "active" : "")">Loslegen</li>
+</ol>
+
+<section class="card onboarding-card">
+    <div asp-validation-summary="ModelOnly" role="alert" aria-live="assertive"></div>
+    @if (Model.Schritt == 1)
+    {
+        <form method="post" asp-page-handler="Training" class="form-grid">
+            <h2>Wie möchtest du starten?</h2>
+            <p class="muted">Diese Auswahl wird dein bevorzugter Modus.</p>
+            <label>
+                Trainingsmodus
+                <select asp-for="Input.PreferredMode">
+                    <option value="Sprint60">60-Sekunden-Sprint</option>
+                    <option value="Words25">25 Wörter</option>
+                    <option value="Text">Texttraining</option>
+                    <option value="WeaknessFocus">Fehlerfokus</option>
+                </select>
+            </label>
+            <span asp-validation-for="Input.PreferredMode"></span>
+            <div class="form-actions">
+                <button type="submit">Weiter</button>
+            </div>
+        </form>
+    }
+    else if (Model.Schritt == 2)
+    {
+        <form method="post" asp-page-handler="Visibility" class="form-grid">
+            <h2>Was darf sichtbar sein?</h2>
+            <label class="checkbox-label">
+                <input type="checkbox" asp-for="Input.LeaderboardVisible" />
+                Mein Profil in Ranglisten anzeigen
+            </label>
+            <label class="checkbox-label">
+                <input type="checkbox" asp-for="Input.ShowLiveWpm" />
+                Live-WPM in der Arena anzeigen
+            </label>
+            <label class="checkbox-label">
+                <input type="checkbox" asp-for="Input.ReducedMotion" />
+                Bewegungen reduzieren
+            </label>
+            <div class="form-actions">
+                <a class="button secondary" asp-page="/Onboarding" asp-route-schritt="1">Zurück</a>
+                <button type="submit">Weiter</button>
+            </div>
+        </form>
+    }
+    else
+    {
+        <form method="post" asp-page-handler="Finish" class="form-grid">
+            <h2>Womit möchtest du loslegen?</h2>
+            <label>
+                Startziel
+                <select asp-for="Input.Destination">
+                    <option value="DailyChallenge">Tageschallenge</option>
+                    <option value="Sprint">Sprinttraining</option>
+                    <option value="TextLibrary">Textbibliothek</option>
+                </select>
+            </label>
+            <span asp-validation-for="Input.Destination"></span>
+            <div class="form-actions">
+                <a class="button secondary" asp-page="/Onboarding" asp-route-schritt="2">Zurück</a>
+                <button type="submit">Einrichtung abschließen</button>
+            </div>
+        </form>
+    }
+</section>

@@ -209,6 +209,9 @@ export function showConnectionError(error) {
   const alert = document.querySelector("[data-arena-error]") || document.createElement("div");
   alert.dataset.arenaError = "true";
   alert.className = "alert";
+  alert.setAttribute("role", "alert");
+  alert.setAttribute("aria-live", "assertive");
+  alert.setAttribute("aria-atomic", "true");
   alert.textContent = message;
   document.querySelector("[data-arena-room]")?.before(alert);
 }

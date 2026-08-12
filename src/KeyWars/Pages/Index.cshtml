@@ -17,6 +17,23 @@
 
 <h1 class="visually-hidden">KeyWars Start</h1>
 
+@if (Model.Profile.OnboardingCompletedAt is null)
+{
+    <section class="panel onboarding-prompt" aria-labelledby="onboarding-prompt-title">
+        <div>
+            <span class="eyebrow">Neu bei KeyWars</span>
+            <h2 id="onboarding-prompt-title">In drei Schritten startklar</h2>
+            <p>Trainingsmodus, Sichtbarkeit und erstes Ziel auswählen. Du kannst die Einrichtung jederzeit überspringen.</p>
+        </div>
+        <div class="form-actions">
+            <a class="button" asp-page="/Onboarding">Einrichtung starten</a>
+            <form method="post" asp-page="/Onboarding" asp-page-handler="Skip">
+                <button type="submit" class="secondary">Überspringen</button>
+            </form>
+        </div>
+    </section>
+}
+
 <section class="dashboard-cockpit" aria-label="KeyWars Cockpit">
     <article class="panel instant-round-panel typing-session-card typing-focus-primary dashboard-quick-round" data-typing-app data-mode="Sprint60" data-seconds="60" data-words="120" data-timer-placement="before-target" data-hide-start-when-prepared="true">
         <div class="section-header">
@@ -60,7 +77,10 @@
                 <h2>Tages-Sprint 60s</h2>
                 <p>24h-Board. Nur der beste gültige Lauf zählt.</p>
             </div>
-            <a class="mode-select-link" asp-page="/Ranglisten" asp-route-board="sprint" asp-route-period="day" asp-route-mode="sprint60">24h</a>
+            <div class="card-actions">
+                <a class="mode-select-link" asp-page="/Tageschallenge">Tageschallenge</a>
+                <a class="mode-select-link" asp-page="/Ranglisten" asp-route-board="sprint" asp-route-period="day" asp-route-mode="sprint60">24h</a>
+            </div>
         </div>
 
         <div class="daily-board-content @(podium.Count == 0 ? "is-empty" : "has-results")">

@@ -1,0 +1,32 @@
+name: release-contract
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-contract-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Validate version, changelog and release-notes template
+        run: >-
+          python scripts/prepare_release_artifacts.py
+          --check-repository
+          --expected-image-repository "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/keywars"
+      - name: Test release artifact contract
+        run: python scripts/check_release_artifacts.py --self-test
+      - name: Test published image contract
+        run: python scripts/check_published_image.py --self-test

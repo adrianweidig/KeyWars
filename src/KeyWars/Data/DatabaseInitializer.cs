@@ -12,10 +12,18 @@ public sealed class DatabaseInitializer(
     {
         await using var scope = services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<KeyWarsDbContext>();
-        await BaselineExistingEnsureCreatedDatabaseAsync(db, cancellationToken);
+        if (db.Database.IsSqlite())
+        {
+            await BaselineExistingEnsureCreatedDatabaseAsync(db, cancellationToken);
+        }
+
         await db.Database.MigrateAsync(cancellationToken);
-        await AbortOrphanedAttemptsAsync(db, cancellationToken);
-        await db.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;", cancellationToken);
+        if (db.Database.IsSqlite())
+        {
+            await AbortOrphanedAttemptsAsync(db, cancellationToken);
+            await db.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;", cancellationToken);
+        }
+
         await SeedStandardTextsAsync(db, cancellationToken);
         logger.LogInformation("KeyWars-Datenbank ist bereit ({Environment}).", environment.EnvironmentName);
     }

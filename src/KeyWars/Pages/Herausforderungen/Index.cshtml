@@ -1,4 +1,5 @@
 @page "/herausforderungen"
+@using KeyWars.Services
 @model KeyWars.Pages.Herausforderungen.IndexModel
 @{
     ViewData["Title"] = "Herausforderungen";
@@ -17,11 +18,36 @@
 </section>
 
 <section class="card">
-    @if (Model.Challenges.Count == 0)
+    <nav class="challenge-filter-list" aria-label="Herausforderungen filtern">
+        @foreach (var filter in Enum.GetValues<ChallengeListFilter>())
+        {
+            var value = IndexModel.FilterValue(filter);
+            var label = filter switch
+            {
+                ChallengeListFilter.Invitations => "Einladungen",
+                ChallengeListFilter.Active => "Aktiv",
+                ChallengeListFilter.Completed => "Abgeschlossen",
+                _ => "Alle"
+            };
+            <a class="button secondary"
+               asp-page="/Herausforderungen/Index"
+               asp-route-status="@value"
+               asp-route-seite="1"
+               aria-current="@(Model.ChallengePage.Filter == filter ? "page" : null)">
+                @label
+                @if (filter == ChallengeListFilter.Invitations && Model.ChallengePage.UnreadCount > 0)
+                {
+                    <span class="pill">@Model.ChallengePage.UnreadCount neu</span>
+                }
+            </a>
+        }
+    </nav>
+
+    @if (Model.ChallengePage.Items.Count == 0)
     {
         <div class="empty-state featured-empty challenge-empty">
-            <h3>Noch keine Herausforderung aktiv</h3>
-            <p>Starte eine Gruppenrunde für Klasse, Team oder Abteilung. Alle bekommen denselben Modus und vergleichen ihr bestes Ergebnis.</p>
+            <h3>Keine passenden Herausforderungen</h3>
+            <p>Wechsle den Filter oder starte eine neue Gruppenrunde für Team oder Abteilung.</p>
             <div class="empty-action-grid">
                 <a class="button" asp-page="/Herausforderungen/Neu">Gruppe herausfordern</a>
                 <a class="button secondary" asp-page="/Spielen/Index">Vorher trainieren</a>
@@ -31,18 +57,41 @@
     else
     {
         <table class="table">
-            <thead><tr><th>Titel</th><th>Modus</th><th>Status</th><th>Ende</th></tr></thead>
+            <thead><tr><th>Titel</th><th>Modus</th><th>Mein Status</th><th>Challenge</th><th>Ende</th></tr></thead>
             <tbody>
-            @foreach (var challenge in Model.Challenges)
+            @foreach (var item in Model.ChallengePage.Items)
             {
+                var challenge = item.Challenge;
                 <tr>
-                    <td data-label="Titel"><a asp-page="/Herausforderungen/Details" asp-route-id="@challenge.Id">@challenge.Title</a></td>
-                    <td data-label="Modus">@challenge.Mode</td>
-                    <td data-label="Status"><span class="pill">@challenge.Status</span></td>
+                    <td data-label="Titel">
+                        <a asp-page="/Herausforderungen/Details" asp-route-id="@challenge.Id">@challenge.Title</a>
+                        @if (item.IsUnread)
+                        {
+                            <span class="pill">Neu</span>
+                        }
+                    </td>
+                    <td data-label="Modus">@DisplayNames.For(challenge.Mode)</td>
+                    <td data-label="Mein Status"><span class="pill">@DisplayNames.For(item.ParticipantStatus)</span></td>
+                    <td data-label="Challenge"><span class="pill">@DisplayNames.For(challenge.Status)</span></td>
                     <td data-label="Ende">@challenge.ExpiresAt.LocalDateTime.ToString("g")</td>
                 </tr>
             }
             </tbody>
         </table>
+    }
+
+    @if (Model.ChallengePage.TotalPages > 1)
+    {
+        <nav class="pagination" aria-label="Herausforderungen Seiten">
+            <a class="button secondary"
+               asp-route-status="@Model.Status"
+               asp-route-seite="@(Model.ChallengePage.Page - 1)"
+               aria-disabled="@(Model.ChallengePage.Page <= 1)">Zurück</a>
+            <span aria-current="page">Seite @Model.ChallengePage.Page von @Model.ChallengePage.TotalPages · @Model.ChallengePage.TotalCount insgesamt</span>
+            <a class="button secondary"
+               asp-route-status="@Model.Status"
+               asp-route-seite="@(Model.ChallengePage.Page + 1)"
+               aria-disabled="@(Model.ChallengePage.Page >= Model.ChallengePage.TotalPages)">Weiter</a>
+        </nav>
     }
 </section>

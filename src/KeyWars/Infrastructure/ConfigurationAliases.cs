@@ -1,5 +1,6 @@
 using System.Net;
 using KeyWars.Auth;
+using KeyWars.Data;
 using KeyWars.Services;
 using Microsoft.AspNetCore.HttpOverrides;
 
@@ -34,6 +35,14 @@ public static class ConfigurationAliases
         var options = new AuthOptions();
         BindAuth(configuration, options);
         return options;
+    }
+
+    public static void BindModeration(IConfiguration configuration, ContentModerationOptions options)
+    {
+        var section = configuration.GetSection("KEYWARS:MODERATION");
+        section.Bind(options);
+        SetString(section, "MODERATOR_GROUP_DNS", value => options.ModeratorGroupDns = value);
+        SetString(section, "MODERATOR_GROUP_VALUES", value => options.ModeratorGroupValues = value);
     }
 
     public static LdapOptions GetLdap(IConfiguration configuration)
@@ -124,6 +133,30 @@ public static class ConfigurationAliases
         SetInt(section, "MAX_TEXT_LINES", value => options.MaxTextLines = value);
     }
 
+    public static void BindRetention(IConfiguration configuration, RetentionOptions options)
+    {
+        var section = configuration.GetSection("KEYWARS:RETENTION");
+        section.Bind(options);
+        SetRetentionBool(section, "ENABLED", value => options.Enabled = value);
+        SetRetentionBool(section, "DRY_RUN", value => options.DryRun = value);
+        SetRetentionInt(section, "INTERVAL_HOURS", value => options.IntervalHours = value);
+        SetRetentionInt(section, "BATCH_SIZE", value => options.BatchSize = value);
+        SetRetentionInt(section, "MAX_BATCHES_PER_RUN", value => options.MaxBatchesPerRun = value);
+        SetRetentionInt(section, "STALE_ATTEMPT_HOURS", value => options.StaleAttemptHours = value);
+        SetRetentionInt(section, "ABANDONED_ATTEMPT_RETENTION_DAYS", value => options.AbandonedAttemptRetentionDays = value);
+        SetRetentionInt(section, "SEEN_GAMIFICATION_EVENT_RETENTION_DAYS", value => options.SeenGamificationEventRetentionDays = value);
+        SetRetentionInt(section, "BACKUP_RETENTION_DAYS", value => options.BackupRetentionDays = value);
+        SetRetentionInt(section, "MINIMUM_BACKUP_PAIRS", value => options.MinimumBackupPairs = value);
+    }
+
+    public static RetentionOptions GetRetention(IConfiguration configuration)
+    {
+        var options = new RetentionOptions();
+        BindRetention(configuration, options);
+        options.Validate();
+        return options;
+    }
+
     private static void SetString(IConfiguration section, string key, Action<string> set)
     {
         var value = section[key];
@@ -147,6 +180,38 @@ public static class ConfigurationAliases
         {
             set(value);
         }
+    }
+
+    private static void SetRetentionInt(IConfiguration section, string key, Action<int> set)
+    {
+        var configured = section[key];
+        if (string.IsNullOrWhiteSpace(configured))
+        {
+            return;
+        }
+
+        if (!int.TryParse(configured, out var value))
+        {
+            throw new InvalidOperationException($"KEYWARS__RETENTION__{key} muss eine ganze Zahl sein.");
+        }
+
+        set(value);
+    }
+
+    private static void SetRetentionBool(IConfiguration section, string key, Action<bool> set)
+    {
+        var configured = section[key];
+        if (string.IsNullOrWhiteSpace(configured))
+        {
+            return;
+        }
+
+        if (!bool.TryParse(configured, out var value))
+        {
+            throw new InvalidOperationException($"KEYWARS__RETENTION__{key} muss true oder false sein.");
+        }
+
+        set(value);
     }
 
     private static void SetIntInRange(IConfiguration section, string key, int minimum, int maximum, Action<int> set)
