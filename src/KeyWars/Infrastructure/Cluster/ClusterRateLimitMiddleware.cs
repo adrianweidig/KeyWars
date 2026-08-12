@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using KeyWars.Auth;
 using KeyWars.Services;
+using Microsoft.Extensions.Options;
 
 namespace KeyWars.Infrastructure.Cluster;
 
@@ -10,6 +11,8 @@ public sealed class ClusterRateLimitMiddleware(RequestDelegate next)
     public async Task InvokeAsync(
         HttpContext context,
         RuntimeTopology topology,
+        IHostEnvironment environment,
+        IOptions<AuthOptions> authOptions,
         ISharedRateLimiter limiter)
     {
         if (!topology.IsCluster)
@@ -26,7 +29,7 @@ public sealed class ClusterRateLimitMiddleware(RequestDelegate next)
         {
             partition = "login";
             key = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-            limit = 10;
+            limit = environment.IsDevelopment() && authOptions.Value.DevelopmentLogin ? 200 : 10;
         }
         else if (request.Path.StartsWithSegments("/api"))
         {
