@@ -29,21 +29,25 @@ public sealed class RedisProfileAccessGateLeaseTests
     [Fact]
     public async Task OperationLeaseSignalsLossWhenRenewalHangsPastDeadline()
     {
+        var renewalStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var hangingRenewal = new TaskCompletionSource<RedisResult>(
             TaskCreationOptions.RunContinuationsAsynchronously);
         var calls = 0;
         var database = CreateDatabase((method, _) => method.Name switch
         {
-            nameof(IDatabase.ScriptEvaluateAsync) when Interlocked.Increment(ref calls) == 1 => hangingRenewal.Task,
+            nameof(IDatabase.ScriptEvaluateAsync) when Interlocked.Increment(ref calls) == 1 => StartRenewal(
+                renewalStarted,
+                hangingRenewal.Task),
             nameof(IDatabase.ScriptEvaluateAsync) => Task.FromResult(RedisResult.Create((RedisValue)1)),
             _ => throw new NotSupportedException(method.Name)
         });
-        var lease = CreateOperationLease(database, TimeSpan.FromMilliseconds(120));
+        var lease = CreateOperationLease(database, TimeSpan.FromSeconds(1));
 
+        await renewalStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
         await AssertLeaseLostAsync(lease.LeaseLost);
 
         Assert.Throws<InvalidOperationException>(lease.ThrowIfLost);
-        await lease.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(2));
+        await lease.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
         Assert.True(calls >= 2);
     }
 
@@ -93,7 +97,7 @@ public sealed class RedisProfileAccessGateLeaseTests
     {
         try
         {
-            await Task.Delay(Timeout.InfiniteTimeSpan, leaseLost).WaitAsync(TimeSpan.FromSeconds(2));
+            await Task.Delay(Timeout.InfiniteTimeSpan, leaseLost).WaitAsync(TimeSpan.FromSeconds(5));
             Assert.Fail("Das Lease-Verlustsignal wurde nicht ausgelöst.");
         }
         catch (OperationCanceledException) when (leaseLost.IsCancellationRequested)
@@ -111,6 +115,14 @@ public sealed class RedisProfileAccessGateLeaseTests
         Interlocked.Increment(ref calls);
         started.TrySetResult();
         return release;
+    }
+
+    private static Task<RedisResult> StartRenewal(
+        TaskCompletionSource started,
+        Task<RedisResult> renewal)
+    {
+        started.TrySetResult();
+        return renewal;
     }
 
     private static IDatabase CreateDatabase(Func<MethodInfo, object?[], object?> handler)

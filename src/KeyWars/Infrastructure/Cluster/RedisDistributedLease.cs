@@ -351,16 +351,15 @@ internal sealed class RedisDistributedLease : IOperationLease
         Interlocked.CompareExchange(ref renewalFailure, exception, null);
         try
         {
-            leaseLostCancellation.Cancel();
+            renewalCancellation.Cancel();
         }
         catch (ObjectDisposedException)
         {
         }
 
-
         try
         {
-            renewalCancellation.Cancel();
+            ObserveFailure(leaseLostCancellation.CancelAsync());
         }
         catch (ObjectDisposedException)
         {

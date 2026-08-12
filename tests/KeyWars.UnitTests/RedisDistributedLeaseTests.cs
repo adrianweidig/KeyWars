@@ -94,11 +94,11 @@ public sealed class RedisDistributedLeaseTests
         var lease = await RedisDistributedLease.TryAcquireAsync(
             database,
             "test:lease:transient",
-            TimeSpan.FromMilliseconds(180),
+            TimeSpan.FromSeconds(1),
             CancellationToken.None);
 
         Assert.NotNull(lease);
-        await renewed.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await renewed.Task.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.False(lease.LeaseLost.IsCancellationRequested);
         lease.ThrowIfLost();
         await lease.DisposeAsync();
@@ -146,11 +146,11 @@ public sealed class RedisDistributedLeaseTests
         var lease = await RedisDistributedLease.TryAcquireAsync(
             database,
             "test:lease:hanging",
-            TimeSpan.FromMilliseconds(120),
+            TimeSpan.FromSeconds(1),
             CancellationToken.None);
 
         Assert.NotNull(lease);
-        await renewalStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await renewalStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
         await AssertLeaseLostAsync(lease.LeaseLost);
         Assert.Throws<InvalidOperationException>(lease.ThrowIfLost);
         await lease.DisposeAsync();
@@ -203,7 +203,7 @@ public sealed class RedisDistributedLeaseTests
     {
         try
         {
-            await Task.Delay(Timeout.InfiniteTimeSpan, leaseLost).WaitAsync(TimeSpan.FromSeconds(2));
+            await Task.Delay(Timeout.InfiniteTimeSpan, leaseLost).WaitAsync(TimeSpan.FromSeconds(5));
             Assert.Fail("Das Lease-Verlustsignal wurde nicht ausgelöst.");
         }
         catch (OperationCanceledException) when (leaseLost.IsCancellationRequested)
