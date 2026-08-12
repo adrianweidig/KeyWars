@@ -68,7 +68,7 @@ public sealed class RedisLivePresenceStateStore(
         var current = new PresenceConnection(connectionId, profileId, roomId, timeProvider.GetUtcNow());
         await database.StringSetAsync(ConnectionKey(connectionId), Serialize(current), ConnectionLifetime);
         await database.SetAddAsync(ProfileKey(profileId), ConnectionKey(connectionId).ToString());
-        return new LivePresenceSwitch(existing?.RoomId, previousRoomLostLastConnection)
+        return new LivePresenceSwitch(changed ? existing?.RoomId : null, previousRoomLostLastConnection)
         {
             Changed = changed
         };

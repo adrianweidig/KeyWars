@@ -1146,6 +1146,7 @@ public sealed class LiveRoomConcurrencyTests
 
         var unchanged = await presence.EnterRoomAsync(profileId, "tab", previousRoomId);
         Assert.False(unchanged.Changed);
+        Assert.Null(unchanged.PreviousRoomId);
         await presence.RollbackEnterRoomAsync(profileId, "tab", previousRoomId, unchanged);
         Assert.Equal(1, await presence.CountRoomConnectionsAsync(profileId, previousRoomId));
     }

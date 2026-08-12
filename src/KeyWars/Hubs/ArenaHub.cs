@@ -309,7 +309,7 @@ public sealed class ArenaHub(
 
     private async Task ApplyRoomSwitchAsync(Guid profileId, LivePresenceSwitch roomSwitch)
     {
-        if (roomSwitch.PreviousRoomId is not { } previousRoomId)
+        if (!roomSwitch.Changed || roomSwitch.PreviousRoomId is not { } previousRoomId)
         {
             return;
         }
