@@ -555,6 +555,14 @@ public sealed class RelationalLiveRoomCompletionWriter(IServiceScopeFactory scop
 {
     public async Task PersistAsync(CompletedRoomRecord record, CancellationToken cancellationToken)
     {
+        await using var strategyScope = scopeFactory.CreateAsyncScope();
+        var strategyDb = strategyScope.ServiceProvider.GetRequiredService<KeyWarsDbContext>();
+        var strategy = strategyDb.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(() => PersistOnceAsync(record, cancellationToken));
+    }
+
+    private async Task PersistOnceAsync(CompletedRoomRecord record, CancellationToken cancellationToken)
+    {
         await using var scope = scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<KeyWarsDbContext>();
         var motivation = scope.ServiceProvider.GetRequiredService<MotivationService>();

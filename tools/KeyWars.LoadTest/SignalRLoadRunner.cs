@@ -197,7 +197,8 @@ internal sealed class SignalRLoadRunner(LoadTestOptions options)
                         roomId,
                         clients[index].ProfileId,
                         expectedCorrectCharacters,
-                        expectedIndexes);
+                        expectedIndexes,
+                        clients[index].ParticipantIndex);
                 }
 
                 await Task.WhenAll(clients.Select((client, index) => metrics.MeasureAsync(

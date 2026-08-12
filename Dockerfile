@@ -42,7 +42,7 @@ LABEL org.opencontainers.image.title="KeyWars" \
 WORKDIR /app
 # hadolint ignore=DL3008
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates libldap2 libsasl2-2 \
+    && apt-get install -y --no-install-recommends ca-certificates libgssapi-krb5-2 libldap2 libsasl2-2 \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /data/dataprotection-keys /data/backups \
     && chown -R app:app /data

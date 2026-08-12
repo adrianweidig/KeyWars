@@ -122,15 +122,17 @@ internal sealed class FanoutTracker(MetricRegistry metrics)
     private long expectedDeliveries;
     private long observedDeliveries;
     private long missingDeliveries;
+    private int emittedMissingDiagnostics;
 
     public FanoutExpectation Register(
         Guid roomId,
         Guid participantId,
         int correctCharacters,
-        IReadOnlyCollection<int> expectedClientIndexes)
+        IReadOnlyCollection<int> expectedClientIndexes,
+        int? sourceClientIndex = null)
     {
         var key = new ProgressKey(roomId, participantId, correctCharacters);
-        var expectation = new FanoutExpectation(key, expectedClientIndexes);
+        var expectation = new FanoutExpectation(key, expectedClientIndexes, sourceClientIndex);
         pending.GetOrAdd(key, _ => new ConcurrentQueue<FanoutExpectation>()).Enqueue(expectation);
         Interlocked.Add(ref expectedDeliveries, expectedClientIndexes.Count);
         return expectation;
@@ -180,15 +182,22 @@ internal sealed class FanoutTracker(MetricRegistry metrics)
         }
         catch (TimeoutException)
         {
-            var missing = expectation.MarkMissing();
-            for (var index = 0; index < missing; index++)
+            var missingClients = expectation.MarkMissing();
+            if (missingClients.Length > 0 && Interlocked.Increment(ref emittedMissingDiagnostics) <= 20)
+            {
+                Console.WriteLine(
+                    $"Fan-out fehlt: Raum={expectation.Key.RoomId:N}, Quelle={expectation.SourceClientIndex?.ToString() ?? "?"}, " +
+                    $"Empfänger={string.Join(',', missingClients)}");
+            }
+
+            for (var index = 0; index < missingClients.Length; index++)
             {
                 metrics.Record("progress.fanout-recipient", timeout.TotalMilliseconds, true);
             }
 
-            Interlocked.Add(ref missingDeliveries, missing);
+            Interlocked.Add(ref missingDeliveries, missingClients.Length);
             RemoveCompleted(expectation);
-            return missing;
+            return missingClients.Length;
         }
     }
 
@@ -222,9 +231,13 @@ internal sealed class FanoutExpectation
     private readonly long started = Stopwatch.GetTimestamp();
     private readonly TaskCompletionSource completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    public FanoutExpectation(ProgressKey key, IReadOnlyCollection<int> expectedClientIndexes)
+    public FanoutExpectation(
+        ProgressKey key,
+        IReadOnlyCollection<int> expectedClientIndexes,
+        int? sourceClientIndex)
     {
         Key = key;
+        SourceClientIndex = sourceClientIndex;
         remaining = new ConcurrentDictionary<int, byte>(expectedClientIndexes.Select(index => new KeyValuePair<int, byte>(index, 0)));
         if (remaining.IsEmpty)
         {
@@ -233,6 +246,7 @@ internal sealed class FanoutExpectation
     }
 
     public ProgressKey Key { get; }
+    public int? SourceClientIndex { get; }
     public Task Completion => completion.Task;
     public bool IsComplete => completion.Task.IsCompleted;
 
@@ -251,9 +265,9 @@ internal sealed class FanoutExpectation
         return Stopwatch.GetElapsedTime(started).TotalMilliseconds;
     }
 
-    public int MarkMissing()
+    public int[] MarkMissing()
     {
-        var missing = remaining.Count;
+        var missing = remaining.Keys.Order().ToArray();
         remaining.Clear();
         completion.TrySetResult();
         return missing;

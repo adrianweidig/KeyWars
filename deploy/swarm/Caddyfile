@@ -5,7 +5,7 @@
 	@metrics path /metrics
 	respond @metrics "not found" 404
 
-	@arena path /arena* /hubs/arena* /api/arena* /profil/loeschen* /profil/statistik-zuruecksetzen*
+	@arena path /arena* /hubs/arena* /api/arena* /health/arena-* /profil/loeschen* /profil/statistik-zuruecksetzen*
 	reverse_proxy @arena keywars-arena:8080 {
 		header_up X-Forwarded-Proto https
 		stream_close_delay 5m
