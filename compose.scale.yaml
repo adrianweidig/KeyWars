@@ -84,6 +84,7 @@ services:
       - /config:size=16m,mode=1777,noexec,nosuid,nodev
       - /tmp:size=16m,mode=1777,noexec,nosuid,nodev
     cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
     security_opt: [no-new-privileges:true]
     stop_grace_period: 30s
     depends_on:
