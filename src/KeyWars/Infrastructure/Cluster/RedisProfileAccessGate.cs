@@ -446,7 +446,7 @@ public sealed class RedisProfileAccessGate(IConnectionMultiplexer redis) : IProf
             Interlocked.CompareExchange(ref renewalFailure, exception, null);
             try
             {
-                leaseLostCancellation.Cancel();
+                renewalCancellation.Cancel();
             }
             catch (ObjectDisposedException)
             {
@@ -454,7 +454,7 @@ public sealed class RedisProfileAccessGate(IConnectionMultiplexer redis) : IProf
 
             try
             {
-                renewalCancellation.Cancel();
+                ObserveFailure(leaseLostCancellation.CancelAsync());
             }
             catch (ObjectDisposedException)
             {
@@ -735,7 +735,7 @@ public sealed class RedisProfileAccessGate(IConnectionMultiplexer redis) : IProf
             Interlocked.CompareExchange(ref renewalFailure, exception, null);
             try
             {
-                leaseLost.Cancel();
+                renewalCancellation.Cancel();
             }
             catch (ObjectDisposedException)
             {
@@ -743,7 +743,7 @@ public sealed class RedisProfileAccessGate(IConnectionMultiplexer redis) : IProf
 
             try
             {
-                renewalCancellation.Cancel();
+                ObserveFailure(leaseLost.CancelAsync());
             }
             catch (ObjectDisposedException)
             {
