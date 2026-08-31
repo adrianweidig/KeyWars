@@ -13,9 +13,9 @@
     <PackageReference Include="coverlet.collector" Version="10.0.1" />
     <PackageReference Include="FlaUI.Core" Version="5.0.0" />
     <PackageReference Include="FlaUI.UIA3" Version="5.0.0" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
     <PackageReference Include="NUnit" Version="4.6.1" />
-    <PackageReference Include="NUnit3TestAdapter" Version="6.2.0" />
+    <PackageReference Include="NUnit3TestAdapter" Version="6.3.0" />
     <PackageReference Include="OpenCvSharp4" Version="4.13.0.20260627" />
     <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.13.0.20260627" />
   </ItemGroup>
