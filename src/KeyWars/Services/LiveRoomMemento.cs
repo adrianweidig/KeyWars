@@ -32,7 +32,11 @@ public sealed record LiveRoomMemento(
     IReadOnlyList<Guid> ExcludedProfileIds,
     IReadOnlyList<Guid> InvitedProfileIds,
     IReadOnlyDictionary<int, int> TeamRoundWins,
-    IReadOnlyList<LiveParticipantMemento> Participants);
+    IReadOnlyList<LiveParticipantMemento> Participants,
+    Guid? QuotaOwnerProfileId = null,
+    bool RatingEligible = false,
+    bool TargetCompetitionEligible = false,
+    DateTimeOffset? RoundDeadlineAt = null);
 
 public sealed record LiveParticipantMemento(
     Guid ProfileId,
@@ -56,4 +60,13 @@ public sealed record LiveParticipantMemento(
     int CompletedRounds,
     int TotalDurationMilliseconds,
     double TotalWpm,
-    double TotalAccuracy);
+    double TotalAccuracy,
+    bool CompetitionEligible = false,
+    int TypedStateOffset = 0,
+    int TypedCharacters = 0,
+    int ProgressEvidenceRoundVersion = 0,
+    int ProgressEvidenceRevision = 0,
+    int ProgressEvidenceCorrectCharacters = 0,
+    int ProgressEvidenceCount = 0,
+    DateTimeOffset? ProgressEvidenceObservedAt = null,
+    bool ProgressEvidenceInvalid = false);

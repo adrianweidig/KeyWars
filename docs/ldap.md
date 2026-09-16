@@ -22,9 +22,11 @@ Optional:
 | `KEYWARS_LDAP_OPERATION_TIMEOUT_SECONDS` | 10 | Such-Timeout, 1 bis 120 Sekunden |
 | `KEYWARS_LDAP_ALLOW_STARTTLS` | `false` | muss für jedes `ldap://`-Ziel `true` sein |
 
-Moderationsgruppen werden separat über `KEYWARS_MODERATOR_GROUP_DNS` oder
-`KEYWARS_MODERATOR_GROUP_VALUES` konfiguriert. Leere Werte vergeben keine
-Rechte. Details: [Konfiguration](configuration.md#content-moderation).
+Moderationsgruppen werden außerhalb von Development ausschließlich als
+vollständige `memberOf`-DNs über `KEYWARS_MODERATOR_GROUP_DNS` konfiguriert.
+`KEYWARS_MODERATOR_GROUP_VALUES` ist nur für lokale Entwicklung zulässig.
+Leere Werte vergeben keine Rechte. Details:
+[Konfiguration](configuration.md#content-moderation).
 
 LDAPS ist der Standard. Bei einer eigenen CA müssen die LDAP-DNS-Namen zum
 Zertifikat passen. Ohne eigenen CA-Pfad gilt der Zertifikatsspeicher des

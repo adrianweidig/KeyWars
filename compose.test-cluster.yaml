@@ -1,0 +1,303 @@
+---
+name: keywars-test-cluster
+
+x-keywars-image: &keywars-image
+  image: ${KEYWARS_TEST_CLUSTER_IMAGE:-keywars:cluster-test}
+
+x-keywars-environment: &keywars-environment
+  ASPNETCORE_ENVIRONMENT: Development
+  ASPNETCORE_HTTP_PORTS: "8080"
+  ConnectionStrings__KeyWars: Host=postgres;Port=5432;Database=keywars;Username=keywars;Password=${KEYWARS_TEST_POSTGRES_PASSWORD:?set by tests/cluster/Invoke-ClusterHarness.ps1}
+  KEYWARS__AUTH__DEVELOPMENT_LOGIN: "true"
+  KEYWARS__CLUSTER__PROTOCOL_VERSION: "3"
+  KEYWARS__DATABASE__PROVIDER: postgresql
+  KEYWARS__DATAPROTECTION__APPLICATION_NAME: KeyWars.ClusterHarness
+  KEYWARS__LIVE__COUNTDOWN_SECONDS: "1"
+  KEYWARS__LIVE__MAX_CONCURRENT_ROOMS: "200"
+  KEYWARS__LIVE__MAX_PARTICIPANTS_PER_ROOM: "64"
+  KEYWARS__LIVE__PROGRESS_BROADCAST_HZ: "20"
+  KEYWARS__PROXY__KNOWN_NETWORKS: 172.16.0.0/12
+  KEYWARS__REDIS__CONNECTION_STRING: redis-node-1:6379,redis-node-2:6379,redis-node-3:6379,redis-node-4:6379,redis-node-5:6379,redis-node-6:6379,abortConnect=false,connectRetry=5,connectTimeout=10000,syncTimeout=15000
+  KEYWARS__TEST__ROLLOUT_ID: ${KEYWARS_TEST_ROLLOUT_ID:-baseline}
+  Logging__LogLevel__Default: Warning
+  Logging__LogLevel__Microsoft: Warning
+  TZ: Europe/Berlin
+
+x-keywars-service: &keywars-service
+  <<: *keywars-image
+  environment: *keywars-environment
+  networks:
+    - backend
+  read_only: true
+  tmpfs:
+    - /tmp:size=64m,mode=1777,noexec,nosuid,nodev
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  stop_grace_period: 60s
+  healthcheck:
+    test: ["CMD", "dotnet", "KeyWars.dll", "healthcheck"]
+    interval: 5s
+    timeout: 5s
+    retries: 12
+    start_period: 20s
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis-cluster-init:
+      condition: service_completed_successfully
+
+x-redis-node: &redis-node
+  image: redis:8.6.5-alpine@sha256:cd218f4b106a332c5c992e38a9480bfb9d7e9f8f7b0ec9a0023bfa36d9a408f9
+  entrypoint: ["/bin/sh", "-ec"]
+  command:
+    - |
+      exec redis-server \
+        --appendonly yes \
+        --appendfsync everysec \
+        --cluster-enabled yes \
+        --cluster-config-file nodes.conf \
+        --cluster-node-timeout 5000 \
+        --cluster-announce-ip "$${REDIS_ANNOUNCE_IP}" \
+        --cluster-announce-port 6379 \
+        --cluster-announce-bus-port 16379 \
+        --maxmemory-policy noeviction
+  networks:
+    backend:
+  restart: unless-stopped
+  stop_grace_period: 20s
+  healthcheck:
+    test: ["CMD", "redis-cli", "ping"]
+    interval: 2s
+    timeout: 2s
+    retries: 30
+    start_period: 5s
+
+services:
+  postgres:
+    image: postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
+    environment:
+      POSTGRES_DB: keywars
+      POSTGRES_USER: keywars
+      POSTGRES_PASSWORD: ${KEYWARS_TEST_POSTGRES_PASSWORD:?set by tests/cluster/Invoke-ClusterHarness.ps1}
+    volumes:
+      - postgres-test-cluster-data:/var/lib/postgresql
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keywars -d keywars"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+    stop_grace_period: 60s
+
+  redis-node-1:
+    <<: *redis-node
+    hostname: redis-node-1
+    environment:
+      REDIS_ANNOUNCE_IP: 172.28.250.11
+    volumes:
+      - redis-node-1-data:/data
+    networks:
+      backend:
+        ipv4_address: 172.28.250.11
+
+  redis-node-2:
+    <<: *redis-node
+    hostname: redis-node-2
+    environment:
+      REDIS_ANNOUNCE_IP: 172.28.250.12
+    volumes:
+      - redis-node-2-data:/data
+    networks:
+      backend:
+        ipv4_address: 172.28.250.12
+
+  redis-node-3:
+    <<: *redis-node
+    hostname: redis-node-3
+    environment:
+      REDIS_ANNOUNCE_IP: 172.28.250.13
+    volumes:
+      - redis-node-3-data:/data
+    networks:
+      backend:
+        ipv4_address: 172.28.250.13
+
+  redis-node-4:
+    <<: *redis-node
+    hostname: redis-node-4
+    environment:
+      REDIS_ANNOUNCE_IP: 172.28.250.14
+    volumes:
+      - redis-node-4-data:/data
+    networks:
+      backend:
+        ipv4_address: 172.28.250.14
+
+  redis-node-5:
+    <<: *redis-node
+    hostname: redis-node-5
+    environment:
+      REDIS_ANNOUNCE_IP: 172.28.250.15
+    volumes:
+      - redis-node-5-data:/data
+    networks:
+      backend:
+        ipv4_address: 172.28.250.15
+
+  redis-node-6:
+    <<: *redis-node
+    hostname: redis-node-6
+    environment:
+      REDIS_ANNOUNCE_IP: 172.28.250.16
+    volumes:
+      - redis-node-6-data:/data
+    networks:
+      backend:
+        ipv4_address: 172.28.250.16
+
+  redis-cluster-init:
+    image: redis:8.6.5-alpine@sha256:cd218f4b106a332c5c992e38a9480bfb9d7e9f8f7b0ec9a0023bfa36d9a408f9
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        if redis-cli -h redis-node-1 cluster info 2>/dev/null | grep -q '^cluster_state:ok'; then
+          exit 0
+        fi
+        redis-cli --cluster create \
+          redis-node-1:6379 redis-node-2:6379 redis-node-3:6379 \
+          redis-node-4:6379 redis-node-5:6379 redis-node-6:6379 \
+          --cluster-replicas 1 --cluster-yes
+        attempt=0
+        until redis-cli -h redis-node-1 cluster info | grep -q '^cluster_state:ok'; do
+          attempt=$$((attempt + 1))
+          if [ "$$attempt" -ge 60 ]; then
+            redis-cli -h redis-node-1 cluster info
+            exit 1
+          fi
+          sleep 1
+        done
+    networks:
+      - backend
+    depends_on:
+      redis-node-1: { condition: service_healthy }
+      redis-node-2: { condition: service_healthy }
+      redis-node-3: { condition: service_healthy }
+      redis-node-4: { condition: service_healthy }
+      redis-node-5: { condition: service_healthy }
+      redis-node-6: { condition: service_healthy }
+    restart: "no"
+
+  keywars-protocol-cutover:
+    <<: *keywars-service
+    command: ["maintenance", "cluster-protocol", "cutover", "--confirm-apps-stopped"]
+    environment:
+      <<: *keywars-environment
+      KEYWARS__RUNTIME__ROLE: migrate
+    healthcheck:
+      disable: true
+    restart: "no"
+
+  keywars-cluster-probe:
+    image: mcr.microsoft.com/dotnet/sdk:10.0@sha256:e1fc6e423f543119c406d24e2e687d67c569f18f04a37a8b0005d80ad0dcee80
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        exec dotnet tests/cluster/KeyWars.ClusterProbe/bin/Release/net10.0/KeyWars.ClusterProbe.dll \
+          "$$KEYWARS_PROBE_REDIS_CONNECTION"
+    environment:
+      KEYWARS_PROBE_REDIS_CONNECTION: redis-node-1:6379,redis-node-2:6379,redis-node-3:6379,redis-node-4:6379,redis-node-5:6379,redis-node-6:6379,abortConnect=false,connectRetry=5,connectTimeout=10000,syncTimeout=15000
+    working_dir: /src
+    volumes:
+      - .:/src:ro
+    networks:
+      - backend
+    depends_on:
+      redis-cluster-init:
+        condition: service_completed_successfully
+    restart: "no"
+
+  keywars-migrate:
+    <<: *keywars-service
+    environment:
+      <<: *keywars-environment
+      KEYWARS__RUNTIME__ROLE: migrate
+    healthcheck:
+      disable: true
+    restart: "no"
+
+  keywars-web:
+    <<: *keywars-service
+    environment:
+      <<: *keywars-environment
+      KEYWARS__RUNTIME__ROLE: web
+    networks: [frontend, backend]
+    restart: unless-stopped
+    deploy:
+      replicas: 2
+
+  keywars-arena:
+    <<: *keywars-service
+    environment:
+      <<: *keywars-environment
+      KEYWARS__RUNTIME__ROLE: arena
+    networks: [frontend, backend]
+    restart: unless-stopped
+    deploy:
+      replicas: 2
+
+  keywars-worker:
+    <<: *keywars-service
+    environment:
+      <<: *keywars-environment
+      KEYWARS__RUNTIME__ROLE: worker
+    restart: unless-stopped
+    deploy:
+      replicas: 2
+
+  keywars-edge:
+    image: caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
+    ports:
+      - "127.0.0.1:${KEYWARS_TEST_CLUSTER_PORT:-5192}:8080"
+    volumes:
+      - ./tests/cluster/Caddyfile:/etc/caddy/Caddyfile:ro
+    networks:
+      - frontend
+    read_only: true
+    tmpfs:
+      - /data:size=16m,mode=1777,noexec,nosuid,nodev
+      - /config:size=16m,mode=1777,noexec,nosuid,nodev
+      - /tmp:size=16m,mode=1777,noexec,nosuid,nodev
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:8080/health/edge"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    depends_on:
+      keywars-web:
+        condition: service_healthy
+      keywars-arena:
+        condition: service_healthy
+
+networks:
+  frontend:
+  backend:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.28.250.0/24
+
+volumes:
+  postgres-test-cluster-data:
+  redis-node-1-data:
+  redis-node-2-data:
+  redis-node-3-data:
+  redis-node-4-data:
+  redis-node-5-data:
+  redis-node-6-data:

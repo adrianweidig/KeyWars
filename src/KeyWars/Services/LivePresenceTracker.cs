@@ -129,6 +129,22 @@ public sealed class LivePresenceTracker(IOptions<LiveOptions> options, TimeProvi
         }
     }
 
+    public LivePresenceLeave? RemoveConnection(Guid profileId, string connectionId)
+    {
+        lock (gate)
+        {
+            if (!byConnectionId.TryGetValue(connectionId, out var connection) || connection.ProfileId != profileId)
+            {
+                return null;
+            }
+
+            RemoveConnectionUnlocked(connectionId, out var oldRoomId, out var oldProfileId, out var roomLostLastConnection);
+            return oldRoomId is null || oldProfileId is null
+                ? null
+                : new LivePresenceLeave(oldRoomId.Value, oldProfileId.Value, roomLostLastConnection);
+        }
+    }
+
     public int CountRoomConnections(Guid profileId, Guid roomId)
     {
         lock (gate)
@@ -158,6 +174,22 @@ public sealed class LivePresenceTracker(IOptions<LiveOptions> options, TimeProvi
             }
 
             return connectionIds;
+        }
+    }
+
+    public void RemoveProfile(Guid profileId)
+    {
+        lock (gate)
+        {
+            if (!byProfileId.TryGetValue(profileId, out var profileConnections))
+            {
+                return;
+            }
+
+            foreach (var connectionId in profileConnections.Keys.ToArray())
+            {
+                RemoveConnectionUnlocked(connectionId, out _, out _, out _);
+            }
         }
     }
 
@@ -204,11 +236,12 @@ public sealed class LivePresenceTracker(IOptions<LiveOptions> options, TimeProvi
     }
 
     public ValueTask<LivePresenceLeave?> RemoveConnectionAsync(
+        Guid profileId,
         string connectionId,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return ValueTask.FromResult(RemoveConnection(connectionId));
+        return ValueTask.FromResult(RemoveConnection(profileId, connectionId));
     }
 
     public ValueTask<int> CountRoomConnectionsAsync(
@@ -220,6 +253,27 @@ public sealed class LivePresenceTracker(IOptions<LiveOptions> options, TimeProvi
         return ValueTask.FromResult(CountRoomConnections(profileId, roomId));
     }
 
+    public ValueTask<bool> RefreshConnectionAsync(
+        Guid profileId,
+        string connectionId,
+        Guid roomId,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (gate)
+        {
+            if (!byConnectionId.TryGetValue(connectionId, out var connection) ||
+                connection.ProfileId != profileId ||
+                connection.RoomId != roomId)
+            {
+                return ValueTask.FromResult(false);
+            }
+
+            connection.LastSeenAt = timeProvider.GetUtcNow();
+            return ValueTask.FromResult(true);
+        }
+    }
+
     public ValueTask<IReadOnlyList<string>> RemoveProfileFromRoomAsync(
         Guid profileId,
         Guid roomId,
@@ -227,6 +281,15 @@ public sealed class LivePresenceTracker(IOptions<LiveOptions> options, TimeProvi
     {
         cancellationToken.ThrowIfCancellationRequested();
         return ValueTask.FromResult(RemoveProfileFromRoom(profileId, roomId));
+    }
+
+    public ValueTask RemoveProfileAsync(
+        Guid profileId,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        RemoveProfile(profileId);
+        return ValueTask.CompletedTask;
     }
 
     private void AddConnectionUnlocked(LivePresenceConnection connection)

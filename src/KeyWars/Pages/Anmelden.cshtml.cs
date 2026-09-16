@@ -6,17 +6,17 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
-using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
 
 namespace KeyWars.Pages;
 
 [AllowAnonymous]
-[EnableRateLimiting("keywars-login")]
 public sealed class AnmeldenModel(
     ILdapAuthenticator authenticator,
     ProfileProvisioner provisioner,
-    IOptions<ContentModerationOptions> moderationOptions) : PageModel
+    IOptions<ContentModerationOptions> moderationOptions,
+    IOptions<AuthOptions> authOptions,
+    TimeProvider timeProvider) : PageModel
 {
     [BindProperty]
     public LoginInput Input { get; set; } = new();
@@ -53,10 +53,19 @@ public sealed class AnmeldenModel(
         claims.AddRange(ContentModeratorClaims.Create(result.Identity, moderationOptions.Value));
 
         var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+        var principal = new ClaimsPrincipal(identity);
+        var now = DateTimeOffset.FromUnixTimeSeconds(timeProvider.GetUtcNow().ToUnixTimeSeconds());
+        var absoluteLifetime = ProfileCookieValidation.GetAbsoluteLifetime(authOptions.Value.CookieLifetimeHours);
+        ProfileCookieValidation.Initialize(principal, now);
         await HttpContext.SignInAsync(
             CookieAuthenticationDefaults.AuthenticationScheme,
-            new ClaimsPrincipal(identity),
-            new AuthenticationProperties { IsPersistent = false });
+            principal,
+            new AuthenticationProperties
+            {
+                IsPersistent = false,
+                IssuedUtc = now,
+                ExpiresUtc = now.Add(absoluteLifetime)
+            });
 
         return LocalRedirect(Url.IsLocalUrl(ReturnUrl) ? ReturnUrl : "/");
     }

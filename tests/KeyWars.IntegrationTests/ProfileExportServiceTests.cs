@@ -26,7 +26,7 @@ public sealed class ProfileExportServiceTests
     }
 
     [Fact]
-    public async Task FullExportStreamsCompleteVersionThreeSchemaWithoutTrackingOrInternalSecrets()
+    public async Task FullExportStreamsCompleteCurrentSchemaWithoutTrackingOrInternalSecrets()
     {
         await using var context = await ExportTestContext.CreateAsync();
         var seeded = await context.SeedCompleteInventoryAsync(attemptCount: 140);
@@ -48,6 +48,8 @@ public sealed class ProfileExportServiceTests
         Assert.False(root.GetProperty("Range").GetProperty("Filtered").GetBoolean());
         Assert.Equal(140, root.GetProperty("Attempts").GetArrayLength());
         Assert.Single(root.GetProperty("AttemptErrors").EnumerateArray());
+        Assert.Single(root.GetProperty("Seasons").EnumerateArray());
+        Assert.Single(root.GetProperty("SeasonScores").EnumerateArray());
         Assert.Single(root.GetProperty("OwnedTexts").EnumerateArray());
         Assert.Single(root.GetProperty("OwnedCollections").EnumerateArray());
         Assert.Single(root.GetProperty("OwnedCollectionItems").EnumerateArray());
@@ -63,6 +65,7 @@ public sealed class ProfileExportServiceTests
         var expectedProperties = new[]
         {
             "Version", "GeneratedAt", "Range", "Profile", "Attempts", "AttemptErrors", "RewardLedger",
+            "Seasons", "SeasonScores",
             "Missions", "Achievements", "GamificationEvents", "WeaknessObservations", "OwnedTexts",
             "OwnedCollections", "OwnedCollectionItems", "ContentModerationAuditEntries", "CreatedChallenges", "ChallengeRounds",
             "ChallengeParticipations", "ChallengeRoundResults", "ChallengeAttemptBindings",
@@ -87,6 +90,8 @@ public sealed class ProfileExportServiceTests
             nameof(KeyWarsDbContext.LiveRoomParticipantSummaries),
             nameof(KeyWarsDbContext.Missions),
             nameof(KeyWarsDbContext.RewardLedgerEntries),
+            nameof(KeyWarsDbContext.Seasons),
+            nameof(KeyWarsDbContext.SeasonScores),
             nameof(KeyWarsDbContext.Achievements),
             nameof(KeyWarsDbContext.GamificationEvents),
             nameof(KeyWarsDbContext.WeaknessObservations)
@@ -158,6 +163,8 @@ public sealed class ProfileExportServiceTests
         Assert.Single(root.GetProperty("Attempts").EnumerateArray());
         Assert.Single(root.GetProperty("AttemptErrors").EnumerateArray());
         Assert.Single(root.GetProperty("RewardLedger").EnumerateArray());
+        Assert.Empty(root.GetProperty("Seasons").EnumerateArray());
+        Assert.Empty(root.GetProperty("SeasonScores").EnumerateArray());
         Assert.Equal(ownedText.Id, root.GetProperty("OwnedTexts")[0].GetProperty("Id").GetGuid());
         Assert.Empty(context.Db.ChangeTracker.Entries());
     }
@@ -351,6 +358,14 @@ public sealed class ProfileExportServiceTests
                 CreatedAt = timestamp,
                 FinishedAt = timestamp.AddMinutes(1)
             };
+            var season = new Season
+            {
+                Key = "2026-06",
+                Name = "Juni 2026",
+                StartsAt = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero),
+                EndsAt = new DateTimeOffset(2026, 7, 1, 0, 0, 0, TimeSpan.Zero),
+                CreatedAt = timestamp
+            };
 
             Db.TypingAttempts.AddRange(attempts);
             Db.TypingAttemptErrors.Add(new TypingAttemptError
@@ -362,7 +377,17 @@ public sealed class ProfileExportServiceTests
                 Expected = "a",
                 Actual = "x"
             });
-            Db.RewardLedgerEntries.Add(new RewardLedgerEntry { UserProfileId = ProfileId, Source = "test", SourceId = "reward", AwardedAt = timestamp });
+            Db.Seasons.Add(season);
+            Db.SeasonScores.Add(new SeasonScore { SeasonId = season.Id, UserProfileId = ProfileId, Points = 12, UpdatedAt = timestamp });
+            Db.RewardLedgerEntries.Add(new RewardLedgerEntry
+            {
+                UserProfileId = ProfileId,
+                Source = "test",
+                SourceId = "reward",
+                SeasonId = season.Id,
+                SeasonPoints = 12,
+                AwardedAt = timestamp
+            });
             Db.Missions.Add(new Mission { UserProfileId = ProfileId, Key = "export", Title = "Export", Description = "Export", MissionDate = DateOnly.FromDateTime(timestamp.Date), TargetValue = 1 });
             Db.Achievements.Add(new Achievement { UserProfileId = ProfileId, Key = "export", Title = "Export", Description = "Export", UnlockedAt = timestamp });
             Db.GamificationEvents.Add(new GamificationEvent { UserProfileId = ProfileId, EventKey = "export", Title = "Export", Description = "Export", CreatedAt = timestamp });

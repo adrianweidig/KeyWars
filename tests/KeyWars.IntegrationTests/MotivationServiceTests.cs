@@ -3,6 +3,8 @@ using KeyWars.Domain;
 using KeyWars.Services;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using System.Data.Common;
 
 namespace KeyWars.IntegrationTests;
 
@@ -49,6 +51,56 @@ public sealed class MotivationServiceTests
     }
 
     [Fact]
+    public async Task AttemptAwardsCurrentSeasonPointsExactlyOnce()
+    {
+        await using var context = await MotivationTestContext.CreateAsync("2026-06-18T12:02:00Z");
+        var attempt = context.CreateAttempt(accuracy: 99, wpm: 73, totalCharacters: 300);
+        context.Db.TypingAttempts.Add(attempt);
+        await context.Db.SaveChangesAsync();
+
+        await context.Service.ApplyAttemptAsync(context.Profile.Id, attempt, [], CancellationToken.None);
+        await context.Db.SaveChangesAsync();
+        attempt.ExperienceAwarded = false;
+        await context.Service.ApplyAttemptAsync(context.Profile.Id, attempt, [], CancellationToken.None);
+        await context.Db.SaveChangesAsync();
+
+        var season = await context.Db.Seasons.SingleAsync();
+        var score = await context.Db.SeasonScores.SingleAsync();
+        var reward = await context.Db.RewardLedgerEntries.SingleAsync(item => item.Source == "attempt");
+        Assert.Equal("2026-06", season.Key);
+        Assert.Equal(7, score.Points);
+        Assert.Equal(7, context.Profile.SeasonPoints);
+        Assert.Equal(season.Id, reward.SeasonId);
+        Assert.Equal(7, reward.SeasonPoints);
+    }
+
+    [Fact]
+    public async Task DelayedAttemptAwardsTheSeasonOfItsFinishedAtWithoutReplacingCurrentCache()
+    {
+        await using var context = await MotivationTestContext.CreateAsync("2026-07-01T00:05:00Z");
+        context.Profile.SeasonPoints = 3;
+        var attempt = context.CreateAttempt(accuracy: 99, wpm: 73, totalCharacters: 300);
+        attempt.FinishedAt = DateTimeOffset.Parse("2026-06-30T23:59:00Z");
+        context.Db.TypingAttempts.Add(attempt);
+        await context.Db.SaveChangesAsync();
+
+        await context.Service.ApplyAttemptAsync(context.Profile.Id, attempt, [], CancellationToken.None);
+        await context.Db.SaveChangesAsync();
+        attempt.ExperienceAwarded = false;
+        await context.Service.ApplyAttemptAsync(context.Profile.Id, attempt, [], CancellationToken.None);
+        await context.Db.SaveChangesAsync();
+
+        var season = await context.Db.Seasons.SingleAsync();
+        var score = await context.Db.SeasonScores.SingleAsync();
+        var reward = await context.Db.RewardLedgerEntries.SingleAsync(item => item.Source == "attempt");
+        Assert.Equal("2026-06", season.Key);
+        Assert.Equal(attempt.FinishedAt, reward.AwardedAt);
+        Assert.Equal(season.Id, reward.SeasonId);
+        Assert.Equal(7, score.Points);
+        Assert.Equal(3, context.Profile.SeasonPoints);
+    }
+
+    [Fact]
     public async Task DailyAndWeeklyMissionsAreDeterministicForCurrentPeriods()
     {
         await using var context = await MotivationTestContext.CreateAsync("2026-06-17T12:00:00Z");
@@ -63,6 +115,85 @@ public sealed class MotivationServiceTests
         Assert.Equal(4, missions.Count(item => item.MissionDate == today && item.Key.StartsWith("daily-")));
         Assert.Equal(4, missions.Count(item => item.MissionDate == weekStart && item.Key.StartsWith("weekly-")));
         Assert.Equal(missions.Count, missions.Select(item => (item.MissionDate, item.Key)).Distinct().Count());
+    }
+
+    [Fact]
+    public async Task ConcurrentMissionEnsureIsIdempotentAcrossContexts()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"keywars-missions-{Guid.NewGuid():N}.db");
+        var connectionString = $"Data Source={databasePath};Default Timeout=30;Pooling=False";
+        var options = new DbContextOptionsBuilder<KeyWarsDbContext>()
+            .UseSqlite(connectionString)
+            .Options;
+        var profile = new UserProfile
+        {
+            DisplayName = "Mira Mission",
+            SamAccountName = "mmission",
+            DirectoryObjectGuid = Guid.NewGuid().ToString(),
+            DirectorySid = "S-mission-concurrency"
+        };
+        var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-06-17T12:00:00Z"));
+        var today = DateOnly.FromDateTime(time.GetUtcNow().Date);
+
+        try
+        {
+            await using (var setup = new KeyWarsDbContext(options))
+            {
+                await setup.Database.EnsureCreatedAsync();
+                setup.UserProfiles.Add(profile);
+                await setup.SaveChangesAsync();
+            }
+
+            await using (var firstDb = new KeyWarsDbContext(options))
+            await using (var secondDb = new KeyWarsDbContext(options))
+            {
+                var first = new MotivationService(firstDb, time);
+                var second = new MotivationService(secondDb, time);
+
+                await Task.WhenAll(
+                    first.EnsureCurrentMissionsAsync(profile.Id, today),
+                    second.EnsureCurrentMissionsAsync(profile.Id, today));
+            }
+
+            await using (var verification = new KeyWarsDbContext(options))
+            {
+                var missions = await verification.Missions
+                    .Where(item => item.UserProfileId == profile.Id)
+                    .ToListAsync();
+                Assert.Equal(8, missions.Count);
+                Assert.Equal(8, missions.Select(item => (item.MissionDate, item.Key)).Distinct().Count());
+            }
+        }
+        finally
+        {
+            File.Delete(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task RecommendationLimitsRecentAttemptsInTheDatabase()
+    {
+        var queryProbe = new RecommendationQueryProbe();
+        await using var context = await MotivationTestContext.CreateAsync(interceptor: queryProbe);
+        for (var index = 0; index < 11; index += 1)
+        {
+            var attempt = context.CreateAttempt(
+                accuracy: index == 10 ? 0 : 99,
+                wpm: 50,
+                totalCharacters: 300);
+            attempt.CreatedAt = context.Time.GetUtcNow().AddMinutes(-index);
+            context.Db.TypingAttempts.Add(attempt);
+        }
+
+        await context.Db.SaveChangesAsync();
+        queryProbe.Reset();
+
+        var recommendation = await context.Service.RecommendAsync(context.Profile.Id);
+
+        Assert.Equal(TrainingMode.Sprint60, recommendation.Mode);
+        var attemptQuery = Assert.Single(queryProbe.ReaderCommands, command =>
+            command.Contains("TypingAttempts", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("LIMIT 10", attemptQuery, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -276,11 +407,19 @@ public sealed class MotivationServiceTests
         public UserProfile Profile { get; }
         public MotivationService Service { get; }
 
-        public static async Task<MotivationTestContext> CreateAsync(string utcNow = "2026-06-18T12:02:00Z")
+        public static async Task<MotivationTestContext> CreateAsync(
+            string utcNow = "2026-06-18T12:02:00Z",
+            DbCommandInterceptor? interceptor = null)
         {
             var connection = new SqliteConnection("Data Source=:memory:");
             await connection.OpenAsync();
-            var options = new DbContextOptionsBuilder<KeyWarsDbContext>().UseSqlite(connection).Options;
+            var optionsBuilder = new DbContextOptionsBuilder<KeyWarsDbContext>().UseSqlite(connection);
+            if (interceptor is not null)
+            {
+                optionsBuilder.AddInterceptors(interceptor);
+            }
+
+            var options = optionsBuilder.Options;
             var db = new KeyWarsDbContext(options);
             await db.Database.EnsureCreatedAsync();
             var profile = new UserProfile
@@ -323,5 +462,24 @@ public sealed class MotivationServiceTests
     private sealed class ManualTimeProvider(DateTimeOffset utcNow) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => utcNow;
+    }
+
+    private sealed class RecommendationQueryProbe : DbCommandInterceptor
+    {
+        private readonly List<string> readerCommands = [];
+
+        public IReadOnlyList<string> ReaderCommands => readerCommands;
+
+        public void Reset() => readerCommands.Clear();
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            readerCommands.Add(command.CommandText);
+            return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+        }
     }
 }

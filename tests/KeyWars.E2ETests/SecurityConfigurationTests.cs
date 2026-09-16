@@ -29,6 +29,7 @@ public sealed class SecurityConfigurationTests
                 "__Host-KeyWars.Auth",
                 authentication.ExpireTimeSpan,
                 TimeSpan.FromHours(8));
+            Assert.False(authentication.SlidingExpiration);
             AssertCookie(antiforgery.Cookie, "__Host-KeyWars.AntiForgery");
         }
         finally

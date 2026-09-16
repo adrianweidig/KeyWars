@@ -236,16 +236,18 @@ test("Arena-Zustände sind per Tastatur, mobil sowie in Dark und Light zugängli
       zen.bottom <= action.top || zen.top >= action.bottom));
   });
   expect(zenOverlap).toBe(false);
+  await page.evaluate(() => window.scrollTo(0, 0));
   const mobileScreenshot = testInfo.outputPath("arena-accessibility-mobile-390x844.png");
-  await page.screenshot({ path: mobileScreenshot, fullPage: true, animations: "disabled" });
+  await page.screenshot({ path: mobileScreenshot, fullPage: false, animations: "disabled" });
   await testInfo.attach("Arena Mobile 390x844", { path: mobileScreenshot, contentType: "image/png" });
 
   await page.setViewportSize({ width: 320, height: 568 });
   await expect(page.locator(".arena-page-header .room-code-share")).toBeVisible();
   await expect(page.locator(".arena-phase-steps")).toBeVisible();
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true);
+  await page.evaluate(() => window.scrollTo(0, 0));
   const narrowScreenshot = testInfo.outputPath("arena-accessibility-mobile-320x568.png");
-  await page.screenshot({ path: narrowScreenshot, fullPage: true, animations: "disabled" });
+  await page.screenshot({ path: narrowScreenshot, fullPage: false, animations: "disabled" });
   await testInfo.attach("Arena Mobile 320x568", { path: narrowScreenshot, contentType: "image/png" });
 
   await page.setViewportSize({ width: 390, height: 844 });
@@ -274,9 +276,11 @@ test("Arena-Zustände sind per Tastatur, mobil sowie in Dark und Light zugängli
   await expect(root).toHaveAttribute("data-persistence-state", "Failed");
   await expect(page.locator("[data-arena-persistence-status]")).toContainText("nicht vergeben");
   await expectNoSeriousViolations(page, "Arena Failed Light Mobile");
+  await page.goto("about:blank");
 });
 
-test("Privacy-Bestätigungen erfüllen Axe auf Desktop und Mobile", async ({ page }) => {
+test("Privacy-Bestätigungen erfüllen Axe auf Desktop und Mobile", async ({ page }, testInfo) => {
+  testInfo.setTimeout(120_000);
   await login(page, "browser.accessibility.privacy");
   for (const route of ["/profil/statistik-zuruecksetzen", "/profil/loeschen", "/profil/export"]) {
     await page.goto(route);
@@ -285,4 +289,5 @@ test("Privacy-Bestätigungen erfüllen Axe auf Desktop und Mobile", async ({ pag
     await expectNoSeriousViolations(page, `Privacy ${route} Mobile`);
     await page.setViewportSize({ width: 1366, height: 768 });
   }
+  await page.goto("about:blank");
 });

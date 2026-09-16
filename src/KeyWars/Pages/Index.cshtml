@@ -10,8 +10,8 @@
     var podium = topSprint.Take(3).ToList();
     var leaderboardRows = topSprint.Skip(3).ToList();
     var missions = Model.Missions.Take(3).ToList();
-    var recentResults = Model.Insights.History.Take(4).ToList();
-    var lastAttempt = Model.Insights.History.FirstOrDefault();
+    var recentResults = Model.RecentResults.Take(4).ToList();
+    var lastAttempt = Model.RecentResults.FirstOrDefault();
     var ownSprint = Model.DailySprintBoard.OwnEntry;
 }
 

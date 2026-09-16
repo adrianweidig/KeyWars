@@ -15,6 +15,12 @@ gedeckelte WPM-Basis, Genauigkeitsboni, optional einen Bonus für persönliche
 Verbesserung und einen Bonus für anspruchsvollere gespeicherte Texte. Arena-
 Ergebnisse nutzen denselben Buchungspfad mit eigener Quelle.
 
+Saisonpunkte liegen getrennt von XP in `SeasonScores`. Eine Saison hat feste
+UTC-Grenzen und wird standardmäßig monatlich angelegt. Der Rollover erzeugt
+nur den nächsten Zeitraum; frühere Ranglisten bleiben erhalten. Jede Wertung
+ist mit genau einem Reward-Ledger-Eintrag verknüpft und damit bei wiederholten
+Finish- oder Completion-Aufrufen idempotent.
+
 Arena- und Challenge-Rating nutzen eine paarweise Elo-Berechnung für 2 bis n
 Teilnehmende. Die Platzierung entsteht aus Status, Dauer, Genauigkeit,
 Fehlerzahl, Konsistenz und Roh-WPM; echte Gleichstände erhalten denselben

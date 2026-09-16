@@ -3,7 +3,6 @@ using System.Globalization;
 using System.Security.Claims;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Threading.RateLimiting;
 using KeyWars.Auth;
 using KeyWars.Data;
 using KeyWars.Domain;
@@ -17,7 +16,6 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Localization;
-using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -65,6 +63,7 @@ string? dataDirectory = null;
 string? databasePath = null;
 ConnectionMultiplexer? clusterRedis = null;
 ConfigurationOptions? redisConfiguration = null;
+RedisClusterProtocolCutoverResult? clusterProtocolCutoverResult = null;
 if (topology.IsCluster)
 {
     redisConfiguration = ConfigurationOptions.Parse(topology.RedisConnectionString!, true);
@@ -76,29 +75,11 @@ if (topology.IsCluster)
     {
         if (clusterProtocolCutover)
         {
-            var legacyPendingJobs = await protocolDatabase.SortedSetLengthAsync(
-                RuntimeTopology.LegacyCompletionPendingKey);
-            var legacyFailedRecords = await protocolDatabase.SortedSetLengthAsync(
-                RuntimeTopology.LegacyCompletionFailedKey);
-            var legacyRecordCount = await CountLegacyCompletionRecordsAsync(
+            clusterProtocolCutoverResult = await RedisClusterProtocolCutover.ExecuteAsync(
                 clusterRedis,
-                protocolDatabase.Database);
-            RuntimeTopology.RequireLegacyCompletionQueueDrained(
-                legacyPendingJobs,
-                legacyFailedRecords,
-                legacyRecordCount);
-
-            var cutoverResult = (long)await protocolDatabase.ScriptEvaluateAsync(
-                RuntimeTopology.ClusterProtocolCutoverScript,
-                [RuntimeTopology.ClusterProtocolVersionKey],
-                [RuntimeTopology.ClusterProtocolVersion]);
-            if (cutoverResult < 0)
-            {
-                var incompatibleProtocol = await protocolDatabase.StringGetAsync(
-                    RuntimeTopology.ClusterProtocolVersionKey);
-                RuntimeTopology.RequireActiveClusterProtocol(
-                    incompatibleProtocol.IsNull ? null : incompatibleProtocol.ToString());
-            }
+                protocolDatabase.Database,
+                topology.DatabaseConnectionString!,
+                TimeProvider.System);
         }
 
         var activeClusterProtocol = await protocolDatabase.StringGetAsync(RuntimeTopology.ClusterProtocolVersionKey);
@@ -113,7 +94,11 @@ if (topology.IsCluster)
 
     if (clusterProtocolCutover)
     {
-        Console.WriteLine($"Cluster-Protokoll {RuntimeTopology.ClusterProtocolVersion} ist aktiv.");
+        Console.WriteLine(
+            $"Cluster-Protokoll {RuntimeTopology.ClusterProtocolVersion} ist aktiv; " +
+            $"{clusterProtocolCutoverResult!.MigratedDeletedMarkers} Löschmarker migriert, " +
+            $"{clusterProtocolCutoverResult.PurgedTransientKeys} transiente Schlüssel entfernt" +
+            (clusterProtocolCutoverResult.AlreadyCurrent ? " (bereits vorbereitet)." : "."));
         await clusterRedis.DisposeAsync();
         return 0;
     }
@@ -140,6 +125,7 @@ builder.Services.Configure<LiveOptions>(options => ConfigurationAliases.BindLive
 builder.Services.Configure<ChallengeOptions>(options => ConfigurationAliases.BindChallenges(builder.Configuration, options));
 builder.Services.Configure<ContentOptions>(options => ConfigurationAliases.BindContent(builder.Configuration, options));
 builder.Services.Configure<RetentionOptions>(options => ConfigurationAliases.BindRetention(builder.Configuration, options));
+builder.Services.Configure<SeasonOptions>(builder.Configuration.GetSection("KEYWARS:SEASONS"));
 ConfigurationAliases.GetRetention(builder.Configuration);
 builder.Services.Configure<RequestLocalizationOptions>(options =>
 {
@@ -187,7 +173,9 @@ builder.Services.AddSingleton<DatabaseRuntimeLock>();
 if (topology.IsCluster)
 {
     builder.Services.AddSingleton<IProfileAccessGate, RedisProfileAccessGate>();
+    builder.Services.AddSingleton<IProfileHubConnectionStateStore, RedisProfileHubConnectionStateStore>();
     builder.Services.AddSingleton<ISharedRateLimiter, RedisSharedRateLimiter>();
+    builder.Services.AddSingleton<IProfileExportConcurrencyGate, RedisProfileExportConcurrencyGate>();
     builder.Services.AddSingleton<IChallengeLockProvider, RedisChallengeLockProvider>();
 }
 else
@@ -195,19 +183,38 @@ else
     builder.Services.AddSingleton<ProfileAccessGate>();
     builder.Services.AddSingleton<IProfileAccessGate>(services =>
         services.GetRequiredService<ProfileAccessGate>());
+    builder.Services.AddSingleton<IProfileHubConnectionStateStore, LocalProfileHubConnectionStateStore>();
     builder.Services.AddSingleton<ISharedRateLimiter, SingleNodeSharedRateLimiter>();
+    builder.Services.AddSingleton<IProfileExportConcurrencyGate, SingleNodeProfileExportConcurrencyGate>();
     builder.Services.AddSingleton<IChallengeLockProvider, LocalChallengeLockProvider>();
 }
 builder.Services.AddSingleton<ProfileAccessHubFilter>();
+builder.Services.AddSingleton<ProfileHubConnectionRegistry>();
+builder.Services.AddSingleton<IProfileHubConnectionRevoker>(services =>
+    services.GetRequiredService<ProfileHubConnectionRegistry>());
+if (topology.HostsArena)
+{
+    builder.Services.AddSingleton<IHostedService>(services =>
+        services.GetRequiredService<ProfileHubConnectionRegistry>());
+    if (topology.IsCluster)
+    {
+        builder.Services.AddHostedService<RedisProfileHubRevocationListener>();
+    }
+}
+builder.Services.AddScoped<ProfileRequestContext>();
 builder.Services.AddScoped<CurrentUser>();
 builder.Services.AddScoped<ProfileProvisioner>();
 builder.Services.AddScoped<TextLibraryService>();
 builder.Services.AddScoped<AttemptService>();
 builder.Services.AddScoped<ChallengeService>();
 builder.Services.AddScoped<GamificationEventWriter>();
+builder.Services.AddScoped<SeasonService>();
 builder.Services.AddScoped<MotivationService>();
+builder.Services.AddScoped<AchievementProgressService>();
 builder.Services.AddScoped<ProfileInsightsService>();
 builder.Services.AddScoped<CompetitionLeaderboardService>();
+builder.Services.AddScoped<ArenaPersonalBestService>();
+builder.Services.AddScoped<RivalGhostService>();
 builder.Services.AddScoped<ProfilePrivacyService>();
 builder.Services.AddScoped<ProfileExportService>();
 builder.Services.AddScoped<ContentModerationService>();
@@ -226,6 +233,7 @@ else
 }
 
 builder.Services.AddSingleton<ILiveRoomCompletionWriter, RelationalLiveRoomCompletionWriter>();
+builder.Services.AddSingleton<LiveRoomCompletionOutbox>();
 if (topology.IsCluster)
 {
     builder.Services.AddSingleton<RedisLiveRoomCompletionQueue>();
@@ -275,6 +283,7 @@ if (topology.IsCluster)
     {
         builder.Services.AddSingleton<IHostedService>(services =>
             services.GetRequiredService<RedisLiveProgressRelay>());
+        builder.Services.AddHostedService<RedisLiveRoomRetirementListener>();
     }
 }
 else
@@ -290,7 +299,15 @@ if (topology.HostsArena)
 
 if (topology.IsCluster)
 {
-    builder.Services.AddSingleton<ILivePresenceStateStore, RedisLivePresenceStateStore>();
+    builder.Services.AddSingleton<RedisLivePresenceStateStore>();
+    builder.Services.AddSingleton<ILivePresenceStateStore>(services =>
+        services.GetRequiredService<RedisLivePresenceStateStore>());
+    builder.Services.AddSingleton<ILivePresenceExpiryStore>(services =>
+        services.GetRequiredService<RedisLivePresenceStateStore>());
+    if (topology.RunsWorkers)
+    {
+        builder.Services.AddHostedService<RedisLivePresenceExpiryService>();
+    }
 }
 else
 {
@@ -310,6 +327,7 @@ if (!topology.IsCluster && topology.Role == RuntimeRole.All ||
 {
     builder.Services.AddHostedService<AttemptSessionReconciliationService>();
     builder.Services.AddHostedService<DataRetentionHostedService>();
+    builder.Services.AddHostedService<SeasonRolloverHostedService>();
 }
 
 var configuredAuthOptions = ConfigurationAliases.GetAuth(builder.Configuration);
@@ -327,13 +345,14 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
     .AddCookie(options =>
     {
         var authOptions = ConfigurationAliases.GetAuth(builder.Configuration);
+        var absoluteLifetime = ProfileCookieValidation.GetAbsoluteLifetime(authOptions.CookieLifetimeHours);
         options.Cookie.Name = builder.Environment.IsProduction() ? "__Host-KeyWars.Auth" : "KeyWars.Dev.Auth";
         options.Cookie.HttpOnly = true;
         options.Cookie.SameSite = SameSiteMode.Lax;
         options.Cookie.SecurePolicy = builder.Environment.IsProduction() ? CookieSecurePolicy.Always : CookieSecurePolicy.SameAsRequest;
         options.Cookie.Path = "/";
-        options.ExpireTimeSpan = TimeSpan.FromHours(Math.Clamp(authOptions.CookieLifetimeHours, 1, 12));
-        options.SlidingExpiration = true;
+        options.ExpireTimeSpan = absoluteLifetime;
+        options.SlidingExpiration = false;
         options.LoginPath = "/anmelden";
         options.LogoutPath = "/abmelden";
         options.AccessDeniedPath = "/anmelden";
@@ -341,6 +360,20 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         {
             OnValidatePrincipal = async context =>
             {
+                var timeProvider = context.HttpContext.RequestServices.GetRequiredService<TimeProvider>();
+                var now = timeProvider.GetUtcNow();
+                if (!ProfileCookieValidation.IsWithinAbsoluteLifetime(context.Principal, now, absoluteLifetime))
+                {
+                    context.RejectPrincipal();
+                    await context.HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+                    return;
+                }
+
+                if (!ProfileCookieValidation.IsDue(context.Principal, now))
+                {
+                    return;
+                }
+
                 var profileIdValue = context.Principal?.FindFirstValue(KeyWarsClaims.ProfileId);
                 if (!Guid.TryParse(profileIdValue, out var profileId))
                 {
@@ -365,7 +398,23 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
                 {
                     context.RejectPrincipal();
                     await context.HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+                    return;
                 }
+
+
+                ProfileCookieValidation.MarkValidated(context.Principal!, now);
+                if (!ProfileCookieValidation.PrepareRenewal(
+                        context.Principal,
+                        context.Properties,
+                        now,
+                        absoluteLifetime))
+                {
+                    context.RejectPrincipal();
+                    await context.HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+                    return;
+                }
+
+                context.ShouldRenew = true;
             },
             OnRedirectToLogin = context =>
             {
@@ -398,45 +447,6 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy(KeyWarsPolicies.ContentModerator, policy => policy
         .RequireAuthenticatedUser()
         .RequireClaim(KeyWarsClaims.ContentModerator, "true"));
-});
-builder.Services.AddRateLimiter(options =>
-{
-    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-    options.AddPolicy("keywars-api", httpContext =>
-    {
-        var key = httpContext.User.FindFirstValue(KeyWarsClaims.ProfileId)
-            ?? httpContext.Connection.RemoteIpAddress?.ToString()
-            ?? "unknown";
-        return RateLimitPartition.GetFixedWindowLimiter(key, _ => new FixedWindowRateLimiterOptions
-        {
-            PermitLimit = 180,
-            QueueLimit = 0,
-            Window = TimeSpan.FromMinutes(1),
-            AutoReplenishment = true
-        });
-    });
-    options.AddPolicy("keywars-login", httpContext =>
-    {
-        if (!HttpMethods.IsPost(httpContext.Request.Method))
-        {
-            return RateLimitPartition.GetFixedWindowLimiter("login-page", _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = 10_000,
-                QueueLimit = 0,
-                Window = TimeSpan.FromMinutes(1),
-                AutoReplenishment = true
-            });
-        }
-
-        var key = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-        return RateLimitPartition.GetFixedWindowLimiter(key, _ => new FixedWindowRateLimiterOptions
-        {
-            PermitLimit = developmentLogin ? 200 : 10,
-            QueueLimit = 0,
-            Window = TimeSpan.FromMinutes(1),
-            AutoReplenishment = true
-        });
-    });
 });
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
@@ -577,12 +587,12 @@ if (!app.Environment.IsDevelopment())
 app.UseForwardedHeaders();
 app.UseRequestLocalization();
 app.UseMiddleware<SecurityHeadersMiddleware>();
+app.UseMiddleware<TextUploadRequestLimitMiddleware>();
 app.UseStaticFiles();
 app.UseRouting();
 app.UseAuthentication();
 app.UseMiddleware<ClusterRateLimitMiddleware>();
 app.UseMiddleware<ProfileAccessMiddleware>();
-app.UseRateLimiter();
 app.UseAuthorization();
 
 if (topology.Role == RuntimeRole.Web)
@@ -708,31 +718,6 @@ if (topology.RunsMigrations)
 }
 await app.RunAsync();
 return 0;
-
-static async Task<long> CountLegacyCompletionRecordsAsync(
-    IConnectionMultiplexer redis,
-    int database)
-{
-    var count = 0L;
-    foreach (var endpoint in redis.GetEndPoints())
-    {
-        var server = redis.GetServer(endpoint);
-        if (server.IsReplica)
-        {
-            continue;
-        }
-
-        await foreach (var _ in server.KeysAsync(
-            database,
-            RuntimeTopology.LegacyCompletionRecordPattern,
-            pageSize: 250))
-        {
-            count = checked(count + 1);
-        }
-    }
-
-    return count;
-}
 
 public partial class Program
 {

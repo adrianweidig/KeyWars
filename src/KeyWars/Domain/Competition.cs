@@ -6,7 +6,8 @@ public enum CompetitionBoardKind
     Sprint,
     Text,
     Challenge,
-    Xp
+    Xp,
+    Season
 }
 
 public enum CompetitionPeriod
@@ -20,6 +21,7 @@ public enum CompetitionPeriod
 public static class CompetitionEligibility
 {
     public const double MinimumAccuracy = 90d;
+    public const int MaximumPlausibleGraphemesPerSecond = 30;
 
     public static readonly TrainingMode[] StandardizedModes =
     [
@@ -39,8 +41,23 @@ public static class CompetitionEligibility
     public static bool CanEnterLeaderboardAtStart(TrainingMode mode, TrainingText? text) =>
         IsStandardizedMode(mode) || (mode == TrainingMode.Text && text?.RatingEligible == true);
 
+    public static TimeSpan MinimumPlausibleDuration(int correctGraphemes)
+    {
+        if (correctGraphemes <= 0)
+        {
+            return TimeSpan.Zero;
+        }
+
+        return TimeSpan.FromSeconds(Math.Ceiling(correctGraphemes / (double)MaximumPlausibleGraphemesPerSecond));
+    }
+
+    public static bool HasPlausibleServerPace(int correctGraphemes, TimeSpan serverDuration) =>
+        correctGraphemes <= 0 ||
+        (serverDuration > TimeSpan.Zero && serverDuration >= MinimumPlausibleDuration(correctGraphemes));
+
     public static bool IsAttemptEligible(TypingAttempt attempt) =>
         attempt.LeaderboardEligible &&
+        attempt.CompetitionIntegrityEligible &&
         attempt.Official &&
         attempt.Completed &&
         attempt.Phase == AttemptPhase.Finished &&

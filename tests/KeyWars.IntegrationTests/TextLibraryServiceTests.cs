@@ -143,6 +143,103 @@ public sealed class TextLibraryServiceTests
     }
 
     [Fact]
+    public async Task CollectionUpdateRequiresOwnerAndControlsOrganizationVisibility()
+    {
+        await using var context = await TextLibraryTestContext.CreateAsync();
+        var other = TextLibraryTestContext.CreateProfile("collection-other");
+        context.Db.UserProfiles.Add(other);
+        var first = await context.Service.CreateAsync(
+            context.Profile.Id,
+            "Erster Text",
+            "Organisationsweit sichtbarer Inhalt.",
+            TrainingTextVisibility.Organization);
+        var second = await context.Service.CreateAsync(
+            context.Profile.Id,
+            "Zweiter Text",
+            "Ein weiterer organisationsweiter Inhalt.",
+            TrainingTextVisibility.Organization);
+        var privateText = await context.Service.CreateAsync(
+            context.Profile.Id,
+            "Privater Text",
+            "Dieser Inhalt bleibt privat.",
+            TrainingTextVisibility.Private);
+        var collection = await context.Service.CreateCollectionAsync(
+            context.Profile.Id,
+            "Freigegeben",
+            null,
+            TrainingTextVisibility.Organization,
+            [first.Id]);
+
+        var visibleToOther = await context.Service.GetVisibleCollectionAsync(other.Id, collection.Id);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            context.Service.UpdateCollectionAsync(
+                other.Id,
+                collection.Id,
+                "Manipuliert",
+                null,
+                TrainingTextVisibility.Organization,
+                [first.Id]));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            context.Service.UpdateCollectionAsync(
+                context.Profile.Id,
+                collection.Id,
+                "Unzulässige Freigabe",
+                null,
+                TrainingTextVisibility.Organization,
+                [privateText.Id]));
+
+        var updated = await context.Service.UpdateCollectionAsync(
+            context.Profile.Id,
+            collection.Id,
+            "Neu sortiert",
+            "Kurze Beschreibung",
+            TrainingTextVisibility.Private,
+            [second.Id, first.Id]);
+        var orderedTextIds = await context.Db.TextCollectionItems
+            .Where(item => item.TextCollectionId == collection.Id)
+            .OrderBy(item => item.SortOrder)
+            .Select(item => item.TrainingTextId)
+            .ToListAsync();
+
+        Assert.Equal("Freigegeben", visibleToOther.Name);
+        Assert.Equal("Neu sortiert", updated.Name);
+        Assert.Equal("Kurze Beschreibung", updated.Description);
+        Assert.Equal(TrainingTextVisibility.Private, updated.Visibility);
+        Assert.Equal([second.Id, first.Id], orderedTextIds);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            context.Service.GetVisibleCollectionAsync(other.Id, collection.Id));
+    }
+
+    [Fact]
+    public async Task CollectionDeleteIsOwnerOnlyIdempotentAndPreservesTexts()
+    {
+        await using var context = await TextLibraryTestContext.CreateAsync();
+        var other = TextLibraryTestContext.CreateProfile("collection-delete-other");
+        context.Db.UserProfiles.Add(other);
+        var text = await context.Service.CreateAsync(
+            context.Profile.Id,
+            "Bleibt erhalten",
+            "Nur die Sammlung soll gelöscht werden.",
+            TrainingTextVisibility.Private);
+        var collection = await context.Service.CreateCollectionAsync(
+            context.Profile.Id,
+            "Kurzlebig",
+            null,
+            TrainingTextVisibility.Private,
+            [text.Id]);
+
+        Assert.False(await context.Service.DeleteCollectionAsync(other.Id, collection.Id));
+        Assert.True(await context.Db.TextCollections.AnyAsync(item => item.Id == collection.Id));
+
+        Assert.True(await context.Service.DeleteCollectionAsync(context.Profile.Id, collection.Id));
+        Assert.False(await context.Service.DeleteCollectionAsync(context.Profile.Id, collection.Id));
+
+        Assert.False(await context.Db.TextCollections.AnyAsync(item => item.Id == collection.Id));
+        Assert.False(await context.Db.TextCollectionItems.AnyAsync(item => item.TextCollectionId == collection.Id));
+        Assert.True(await context.Db.TrainingTexts.AnyAsync(item => item.Id == text.Id));
+    }
+
+    [Fact]
     public async Task CopyPageGetDoesNotMutateAndPostCreatesPrivateCopy()
     {
         await using var context = await TextLibraryTestContext.CreateAsync();

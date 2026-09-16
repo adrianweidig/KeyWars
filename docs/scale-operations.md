@@ -5,12 +5,16 @@ SQLite. Der Scale-Modus trennt Web, Arena und Hintergrundarbeit und nutzt
 PostgreSQL sowie Redis.
 
 Alle Replikate eines Rollouts müssen dasselbe Cluster-Protokoll verwenden. Ein
-normaler Start prüft `KEYWARS__CLUSTER__PROTOCOL_VERSION=1` gegen den stabilen
+normaler Start prüft `KEYWARS__CLUSTER__PROTOCOL_VERSION=3` gegen den stabilen
 Redis-Marker `keywars:cluster:protocol-version` und bricht bei fehlendem oder
 abweichendem Marker ab. Nur der explizite Cutover-Befehl setzt einen fehlenden
-Marker; einen abweichenden vorhandenen Wert überschreibt er nie. Dafür zuerst
-die Abschlussqueue des bisherigen Releases vollständig leerlaufen lassen und
-erst danach **alle** KeyWars-Anwendungsreplikate stoppen. Der Cutover lehnt den
+Marker oder migriert den Marker von Version `2`; andere vorhandene Werte
+überschreibt er nie. Installationen mit Marker `1` müssen zuerst mit dem
+vorherigen Release auf Version `2` vorbereitet werden. Dafür zuerst die
+Abschlussqueue des bisherigen Releases
+vollständig leerlaufen lassen und erst danach **alle**
+KeyWars-Anwendungsreplikate stoppen. Während Cutover und Datenbankmigration
+darf keine Anwendungsreplik laufen. Der Cutover lehnt den
 alten Redis-Namespace ab, solange `keywars:completion:pending` oder
 `keywars:completion:failed` Einträge oder `keywars:completion:record:*`-Payloads
 enthält; dabei bleibt der Protokollmarker unverändert. Abgelaufene
@@ -19,7 +23,10 @@ löschen: Das bisherige Release erneut starten und drainen.
 Erst dann Cutover, Datenbankmigration und neues Image starten. Bei späteren
 Protokollwechseln zusätzlich die in den Release Notes genannten flüchtigen
 Namespaces migrieren oder leeren. PostgreSQL-Daten und
-`keywars:dataprotection:keys` bleiben unberührt.
+`keywars:dataprotection:keys` bleiben unberührt. Eine Rückkehr von Protokoll
+`3` auf ein Image mit Protokoll `2` ist kein normaler Rollback: Dafür müssen
+Image, PostgreSQL-Backup und der zum alten Release gehörende Redis-Zustand
+gemeinsam wiederhergestellt werden.
 
 | Betrieb | Geeignet für | Einstieg |
 | --- | --- | --- |
@@ -27,6 +34,11 @@ Namespaces migrieren oder leeren. PostgreSQL-Daten und
 | Scale-Compose | Funktionsprüfung der verteilten Rollen | `compose.scale.yaml` |
 | Swarm | mehrere Docker-Knoten, kleine Administration | `deploy/swarm/stack.yaml` |
 | Kubernetes | Orchestrierung, HPA und NetworkPolicy | `deploy/k8s/` |
+
+Scale-Compose und der mitgelieferte Swarm-Stack skalieren die
+Anwendungsrollen, enthalten aber jeweils nur eine PostgreSQL- und eine
+Redis-Instanz. Für hochverfügbaren Betrieb diese Datenebene extern oder
+verwaltet bereitstellen; die Kubernetes-Basis setzt das bereits voraus.
 
 Web, Arena und Worker dürfen mehrere Replikate haben. Caddy leitet `/arena*`,
 `/hubs/arena*`, `/api/arena*` und profil-löschende Vorgänge zum Arena-Service;
@@ -38,11 +50,17 @@ Negotiation, sodass Verbindungsaufbau und Socket nicht auf derselben Replik
 landen müssen.
 Beim Update verbinden sich Clients nach kurzer Unterbrechung neu.
 
-Release v0.5 behandelt Redis als einen logischen Primary mit optionaler
-Replikation. Ein Redis-Cluster verteilt den Raumzustand, aber noch nicht alle
-Attempt-, Presence-, Progress-, Completion- und Profilzugriffs-Namespaces auf
-mehrere Slots. Diese Grenze gehört vor großen Lastabnahmen in die
+Jeder Raumzustand nutzt einen eigenen Redis-Hash-Tag `{room:<id>}`. Attempt-,
+Presence-, Progress-, Completion- und Profilzugriffszustand wird dagegen
+deterministisch auf 256 Buckets von `b00` bis `bff` verteilt. Globale
+Verzeichnisse und Admission-Metadaten bleiben bewusst Kontrollebene; deren
+Last und Wiederaufbau gehören vor großen Lastabnahmen in die
 Kapazitätsplanung.
+
+Bis zum erfolgreichen PostgreSQL-Commit ist der Redis-Completion-Datensatz die
+Autorität. Das mitgelieferte AOF-`everysec` ist keine Zusage für RPO 0; für
+strengere Ziele Replikation, Persistenz und Wiederherstellung des externen
+Redis-Dienstes passend auslegen und testen.
 
 Der mitgelieferte Arena-HPA nutzt CPU als überall verfügbaren Startwert und
 skaliert langsam zurück. Mit Prometheus Adapter können zusätzlich
@@ -59,6 +77,11 @@ Keine feste Replikazahl garantiert eine Nutzerzahl. Vor einer Freigabe Last,
 LDAP, Datenbank, Redis, Netzwerk und Ausfallverhalten mit der eigenen
 Raumgröße messen; siehe [Lasttests](load-testing.md).
 
+Den isolierten Drei-Master-/Drei-Replikat-Testaufbau lokal mit
+`pwsh .\tests\cluster\Invoke-ClusterHarness.ps1` ausführen. Der Harness nutzt
+`compose.test-cluster.yaml` und temporäre Test-Volumes; er ist kein
+Produktionsmanifest.
+
 ## Gemeinsamer Vertrag
 
 - Rollen: `all`, `web`, `arena`, `worker`, `migrate` über
@@ -68,7 +91,8 @@ Raumgröße messen; siehe [Lasttests](load-testing.md).
 - Redis: `KEYWARS__REDIS__CONNECTION_STRING`.
 - Nur `migrate` ändert das PostgreSQL-Schema und beendet sich danach.
 - `maintenance cluster-protocol cutover --confirm-apps-stopped` setzt den
-  Redis-Protokollmarker idempotent; die Bestätigung ist bewusst verpflichtend.
+  Redis-Protokollmarker idempotent; die Bestätigung und der vollständige
+  Stillstand aller Anwendungsreplikate sind verpflichtend.
 - `/health/live` prüft den Prozess, `/health/ready` zusätzlich PostgreSQL und
   Redis.
 - Der öffentliche Weg muss TLS terminieren. Port `8080` ist nur das Backend
@@ -85,10 +109,10 @@ Mirror-Referenzen über `CADDY_IMAGE`, `POSTGRES_IMAGE` und `REDIS_IMAGE`
 erhalten. In Kubernetes die `images`-Einträge per Site-Overlay auf den internen
 Namen und dessen Digest setzen. Ein Tag allein ist kein Air-Gap-Nachweis.
 
-Nach Veröffentlichung von v0.5.0 den GHCR-Digest des KeyWars-Images erfassen
-und im produktiven Overlay beziehungsweise in der Swarm-Umgebung festhalten.
-Das Repository kann diesen Digest nicht vor dem tatsächlichen Image-Publish
-vorwegnehmen.
+Nach Veröffentlichung jedes neuen Releases den GHCR-Digest des
+KeyWars-Images erfassen und im produktiven Overlay beziehungsweise in der
+Swarm-Umgebung festhalten. Das Repository kann diesen Digest nicht vor dem
+tatsächlichen Image-Publish vorwegnehmen.
 
 ## Compose: kleinster Scale-Aufbau
 
@@ -200,8 +224,9 @@ docker service rollback keywars_keywars-web
 ```
 
 `rollback` ist nur bei gleichem Cluster-Protokoll und rückwärtskompatiblem
-Schema sicher. Sonst Image, PostgreSQL-Backup und den in den Release Notes
-beschriebenen Redis-Protokollzustand gemeinsam wiederherstellen. Das
+Schema sicher. Über eine Protokollgrenze hinweg Image, PostgreSQL-Backup und
+den zum alten Release gehörenden Redis-Protokollzustand zwingend gemeinsam
+wiederherstellen. Das
 Routing-Mesh veröffentlicht `8080` auf Swarm-Knoten; Firewallzugriff auf den
 TLS-Proxy begrenzen.
 
@@ -234,10 +259,10 @@ kubectl -n keywars create configmap keywars-ldap-ca \
   --from-file=ca.crt="$KEYWARS_LDAP_CA_FILE" --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-Moderation wird optional mit semikolongetrennten
-`KEYWARS__MODERATION__MODERATOR_GROUP_DNS` und
-`KEYWARS__MODERATION__MODERATOR_GROUP_VALUES` freigeschaltet. Beide leeren
-Werte lassen sie fail-closed deaktiviert.
+Moderation wird optional mit vollständigen, semikolongetrennten `memberOf`-DNs
+in `KEYWARS__MODERATION__MODERATOR_GROUP_DNS` freigeschaltet.
+`KEYWARS__MODERATION__MODERATOR_GROUP_VALUES` muss außerhalb von Development
+leer bleiben. Leere Werte lassen Moderation fail-closed deaktiviert.
 
 Secrets ohne Klartextdatei im Repository anwenden:
 
@@ -289,8 +314,9 @@ kubectl -n keywars rollout undo deployment/keywars-web
 ```
 
 Auch `rollout undo` ist nur innerhalb derselben Cluster-Protokollversion sicher.
-Bei einem Protokollwechsel gilt die gemeinsame Wiederherstellung von Image,
-PostgreSQL und dem dokumentierten Redis-Protokollzustand.
+Über eine Protokollgrenze hinweg müssen Image, PostgreSQL-Backup und der zum
+alten Release gehörende Redis-Protokollzustand gemeinsam wiederhergestellt
+werden.
 
 Kubernetes setzt CPU-/Speichergrenzen, aber keine portable Pod-Option für
 `nofile`. Den Wert auf den Knoten beziehungsweise in der Container-Runtime

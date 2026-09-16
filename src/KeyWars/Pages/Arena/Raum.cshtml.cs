@@ -65,7 +65,7 @@ public sealed class RaumModel(CurrentUser currentUser, ILiveRoomDispatcher rooms
         ApplyProfile(profile);
         try
         {
-            var snapshot = await rooms.SnapshotAsync(id, cancellationToken);
+            var snapshot = await rooms.SnapshotForViewerAsync(id, profile.Id, cancellationToken);
             var participant = snapshot.Participants.FirstOrDefault(item => item.ProfileId == profile.Id);
             await rooms.SetReadyAsync(id, profile.Id, participant?.Ready != true, cancellationToken);
             return RedirectToPage(new { id });
@@ -87,11 +87,36 @@ public sealed class RaumModel(CurrentUser currentUser, ILiveRoomDispatcher rooms
         catch (InvalidOperationException ex)
         {
             ModelState.AddModelError(string.Empty, ex.Message);
-            Snapshot = await rooms.SnapshotAsync(id, cancellationToken);
+            Snapshot = await rooms.SnapshotForViewerAsync(id, profile.Id, cancellationToken);
             return Page();
         }
 
         return RedirectToPage(new { id });
+    }
+
+    public async Task<IActionResult> OnPostRematchAsync(Guid id, CancellationToken cancellationToken)
+    {
+        var profile = await currentUser.RequireProfileAsync(User, cancellationToken);
+        ApplyProfile(profile);
+        try
+        {
+            var rematch = await rooms.CreateRematchAsync(id, profile.Id, cancellationToken);
+            return RedirectToPage(new { id = rematch.RoomId });
+        }
+        catch (InvalidOperationException exception)
+        {
+            ModelState.AddModelError(string.Empty, exception.Message);
+            try
+            {
+                Snapshot = await rooms.SnapshotForViewerAsync(id, profile.Id, cancellationToken);
+            }
+            catch (InvalidOperationException snapshotException)
+            {
+                return ArenaError(snapshotException);
+            }
+
+            return Page();
+        }
     }
 
     private void ApplyProfile(UserProfile profile)

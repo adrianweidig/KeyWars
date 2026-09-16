@@ -868,7 +868,10 @@ test("Challenge-Spiel bleibt nach vorbereiteter Runde und Reload spielbar", asyn
 
     const target = (await page.locator("[data-target]").textContent()).trim();
     await page.setViewportSize({ width: 462, height: 720 });
-    await page.locator("[data-input]").fill(target);
+    const input = page.locator("[data-input]");
+    await input.fill(firstGraphemes(target, 1));
+    await page.waitForTimeout((Math.ceil(Array.from(target).length / 30) * 1000) + 150);
+    await input.fill(target);
     await expect(page.locator(".finish-panel")).toBeVisible({ timeout: 15_000 });
     await expect(page.locator(".xp-reveal")).toBeVisible();
     await expect(page.locator(".typing-analysis")).toBeVisible();
@@ -1140,7 +1143,7 @@ test("Wettbewerbsseite bleibt responsiv und respektiert Ranglisten-Sichtbarkeit"
   await page.goto("/ranglisten?board=sprint&period=day&mode=sprint60");
   await expect(page.getByRole("heading", { name: "Wettbewerb" })).toBeVisible();
   await expect(page.locator(".competition-chase-line")).toBeVisible();
-  await expect(page.locator(".competition-tabs a")).toHaveCount(5);
+  await expect(page.locator(".competition-tabs a")).toHaveCount(6);
   await expect(page.getByRole("link", { name: "Selbst antreten" })).toHaveAttribute("href", /\/spielen\/sprint$/);
   await expectNoHorizontalOverflow(page);
   const desktopHero = await page.evaluate(() => {
@@ -1169,7 +1172,7 @@ test("Wettbewerbsseite bleibt responsiv und respektiert Ranglisten-Sichtbarkeit"
   await page.goto("/ranglisten?board=sprint&period=day&mode=sprint60");
   await expectCompactMobileHeader(page);
   await expectResponsiveAppShell(page, 390);
-  await expect(page.locator(".competition-tabs a")).toHaveCount(5);
+  await expect(page.locator(".competition-tabs a")).toHaveCount(6);
   await expect(page.locator(".competition-layout")).toBeVisible();
   await expectNoHorizontalOverflow(page);
   const mobileTabs = await page.evaluate(() => [...document.querySelectorAll(".competition-tabs a")].map((tab) => {
@@ -1181,7 +1184,7 @@ test("Wettbewerbsseite bleibt responsiv und respektiert Ranglisten-Sichtbarkeit"
       viewportWidth: window.innerWidth
     };
   }));
-  expect(mobileTabs.map((tab) => tab.text)).toEqual(["Arena", "Sprint", "Texte", "Challenges", "XP"]);
+  expect(mobileTabs.map((tab) => tab.text)).toEqual(["Arena", "Sprint", "Texte", "Challenges", "XP", "Saison"]);
   const mobileTabRail = await page.locator(".competition-tabs").evaluate((tabs) => ({
     clientWidth: tabs.clientWidth,
     scrollWidth: tabs.scrollWidth,
@@ -1211,13 +1214,17 @@ test("Wettbewerbsseite bleibt responsiv und respektiert Ranglisten-Sichtbarkeit"
   const tabletCompetition = await page.evaluate(() => {
     const hero = document.querySelector(".competition-hero")?.getBoundingClientRect();
     const board = document.querySelector(".competition-main")?.getBoundingClientRect();
+    const tabRows = new Set([...document.querySelectorAll(".competition-tabs a")]
+      .map((tab) => Math.round(tab.getBoundingClientRect().top))).size;
     return {
       heroBottom: Math.round(hero?.bottom ?? 9999),
       boardTop: Math.round(board?.top ?? 9999),
+      tabRows,
       viewportHeight: window.innerHeight
     };
   });
   expect(tabletCompetition.heroBottom).toBeLessThan(tabletCompetition.viewportHeight * 0.72);
+  expect(tabletCompetition.tabRows).toBe(1);
   expect(tabletCompetition.boardTop).toBeLessThan(tabletCompetition.viewportHeight);
 
   await page.goto("/profil/einstellungen");
@@ -1228,6 +1235,7 @@ test("Wettbewerbsseite bleibt responsiv und respektiert Ranglisten-Sichtbarkeit"
 });
 
 test("Tippabschluss wiederholt eine verlorene Finish-Antwort kanonisch", async ({ page }, testInfo) => {
+  testInfo.setTimeout(90_000);
   await login(page, `browser.motivation.${testInfo.workerIndex}`);
   await hideProfileFromLeaderboards(page);
   let finishRequests = 0;
@@ -1254,7 +1262,7 @@ test("Tippabschluss wiederholt eine verlorene Finish-Antwort kanonisch", async (
   expect(target.length).toBeGreaterThan(80);
 
   await input.fill(firstGraphemes(target, 1));
-  await page.waitForTimeout(5_200);
+  await page.waitForTimeout(Math.max(5_200, (Math.ceil(Array.from(target).length / 30) * 1000) + 150));
   await input.fill(target);
   await expect(page.locator(".motivation-panel")).toBeVisible({ timeout: 15_000 });
   await expect(page.locator(".finish-panel")).toBeVisible();
@@ -1412,6 +1420,7 @@ test("Texttraining zeigt Absatzwechsel als Enter-Stelle", async ({ page }, testI
 });
 
 test("Arena läuft mit zwei getrennten Browserkontexten über SignalR", async ({ browser, baseURL }, testInfo) => {
+  testInfo.setTimeout(150_000);
   const hostContext = await browser.newContext({ baseURL, colorScheme: "dark", reducedMotion: "reduce" });
   const guestContext = await browser.newContext({ baseURL, colorScheme: "dark", reducedMotion: "reduce" });
   await hostContext.grantPermissions(["clipboard-read", "clipboard-write"], { origin: baseURL });
@@ -1509,7 +1518,16 @@ test("Arena läuft mit zwei getrennten Browserkontexten über SignalR", async ({
     const nearFinishLength = Array.from(nearFinishInput).length;
     await host.locator("[data-arena-input]").fill(nearFinishInput);
     await expectTypingTargetFollowsCurrent(host.locator("[data-arena-target]"), "Arena-Zieltext");
-    await expect(hostPreviewOnGuest.locator(".correct")).toHaveCount(nearFinishLength, { timeout: 12_000 });
+    await expect(guest.locator(`[data-arena-participants] [data-participant-id]`).filter({ hasText: displayName(hostName) }))
+      .toContainText(`${nearFinishLength} /`);
+    await expect(hostPreviewOnGuest).toHaveAttribute("data-detail-length", "32");
+    await expect(hostPreviewOnGuest.locator(".correct")).toHaveCount(32, { timeout: 12_000 });
+    const previewWindow = await hostPreviewOnGuest.evaluate((element) => ({
+      offset: Number(element.dataset.detailOffset),
+      length: Number(element.dataset.detailLength)
+    }));
+    expect(previewWindow.length).toBe(32);
+    expect(previewWindow.offset).toBe(nearFinishLength - previewWindow.length);
     await expectTypingTargetFollowsCurrent(hostPreviewOnGuest, "Arena-Live-Preview");
 
     await host.setViewportSize({ width: 1366, height: 768 });
@@ -1556,7 +1574,6 @@ test("Arena läuft mit zwei getrennten Browserkontexten über SignalR", async ({
     await expect(host.locator("[data-arena-podium]")).toContainText(displayName(hostName));
     await expect(guest.locator("[data-arena-podium]")).toContainText(displayName(guestName));
   } finally {
-    await guestContext.close();
-    await hostContext.close();
+    await Promise.allSettled([guestContext.close(), hostContext.close()]);
   }
 });

@@ -38,7 +38,16 @@ public sealed class LiveRoomConcurrencyTests
         var manager = CreateManager(timeProvider: time);
         var first = Guid.CreateVersion7();
         var second = Guid.CreateVersion7();
-        var room = manager.CreateRoom(new CreateLiveRoomRequest(first, "A", "Raum", "Text", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 8));
+        var room = manager.CreateRoom(new CreateLiveRoomRequest(
+            first,
+            "A",
+            "Raum",
+            "Text",
+            LiveRoomMode.Classic,
+            LiveRoomVisibility.InternalOpen,
+            1,
+            8,
+            TargetCompetitionEligible: true));
         manager.Join(room.RoomId, second, "B");
         manager.SetReady(room.RoomId, first, true);
         manager.SetReady(room.RoomId, second, true);
@@ -157,7 +166,11 @@ public sealed class LiveRoomConcurrencyTests
         manager.Finish(room.RoomId, first, "Text", 0, 0);
         var duplicate = manager.Finish(room.RoomId, first, "Text", 0, 0);
 
-        Assert.Equal(1, duplicate.Participants.Single(item => item.ProfileId == first).Placement);
+        var finished = duplicate.Participants.Single(item => item.ProfileId == first);
+        Assert.Equal(1, finished.Placement);
+        Assert.Equal("cccc", finished.TypedTextPreview);
+        Assert.Equal(0, finished.TypedStateOffset);
+        Assert.Equal(4, finished.TypedCharacters);
         Assert.Null(duplicate.Participants.Single(item => item.ProfileId == second).Placement);
     }
 
@@ -193,6 +206,86 @@ public sealed class LiveRoomConcurrencyTests
 
         sink.States[room.RoomId] = CompletionState.Persisted;
         Assert.Equal(CompletionState.Persisted, manager.Snapshot(room.RoomId).PersistenceState);
+    }
+
+    [Fact]
+    public void InstantArenaFinishRemainsVisibleButCompletionRecordIsCompetitionIneligible()
+    {
+        var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-06-18T12:00:00Z"));
+        var sink = new RecordingCompletionSink();
+        var manager = CreateManager(new LiveOptions { CountdownSeconds = 1 }, time, sink);
+        var first = Guid.CreateVersion7();
+        var second = Guid.CreateVersion7();
+        var target = new string('a', 61);
+        var room = manager.CreateRoom(new CreateLiveRoomRequest(first, "A", "Raum", target, LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 8));
+        manager.Join(room.RoomId, second, "B");
+        manager.SetReady(room.RoomId, first, true);
+        manager.SetReady(room.RoomId, second, true);
+        manager.Start(room.RoomId, first);
+        time.Advance(TimeSpan.FromSeconds(1));
+
+        manager.Finish(room.RoomId, first, target, 0, 0);
+        var completed = manager.Finish(room.RoomId, second, target, 0, 0);
+
+        Assert.True(completed.Finished);
+        Assert.All(completed.Participants, participant => Assert.Equal(ParticipantStatus.Finished, participant.Status));
+        var record = Assert.Single(sink.Records);
+        Assert.All(record.Participants, participant =>
+        {
+            Assert.Equal(ParticipantStatus.Finished, participant.Status);
+            Assert.Equal(61, participant.CorrectCharacters);
+            Assert.False(participant.CompetitionEligible);
+        });
+    }
+
+    [Fact]
+    public void PlausibleArenaFinishKeepsCompetitionEligibility()
+    {
+        var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-06-18T12:00:00Z"));
+        var sink = new RecordingCompletionSink();
+        var manager = CreateManager(new LiveOptions { CountdownSeconds = 1 }, time, sink);
+        var first = Guid.CreateVersion7();
+        var second = Guid.CreateVersion7();
+        var target = new string('a', 61);
+        var room = manager.CreateRoom(new CreateLiveRoomRequest(first, "A", "Raum", target, LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 8));
+        manager.Join(room.RoomId, second, "B");
+        manager.SetReady(room.RoomId, first, true);
+        manager.SetReady(room.RoomId, second, true);
+        manager.Start(room.RoomId, first);
+        time.Advance(TimeSpan.FromSeconds(4));
+
+        manager.Finish(room.RoomId, first, target, 0, 0);
+        manager.Finish(room.RoomId, second, target, 0, 0);
+
+        Assert.All(Assert.Single(sink.Records).Participants, participant => Assert.True(participant.CompetitionEligible));
+    }
+
+    [Fact]
+    public void ClusterMementoReplayPreservesFailClosedArenaEligibility()
+    {
+        var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-06-18T12:00:00Z"));
+        var source = CreateManager(new LiveOptions { CountdownSeconds = 1 }, time);
+        var first = Guid.CreateVersion7();
+        var second = Guid.CreateVersion7();
+        var target = new string('a', 61);
+        var room = source.CreateRoom(new CreateLiveRoomRequest(first, "A", "Raum", target, LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 8));
+        source.Join(room.RoomId, second, "B");
+        source.SetReady(room.RoomId, first, true);
+        source.SetReady(room.RoomId, second, true);
+        source.Start(room.RoomId, first);
+        time.Advance(TimeSpan.FromSeconds(1));
+        source.Finish(room.RoomId, first, target, 0, 0);
+
+        var memento = source.ExportRoomState(room.RoomId);
+        var sink = new RecordingCompletionSink();
+        var replica = CreateManager(new LiveOptions { CountdownSeconds = 1 }, time, sink);
+        Assert.True(replica.ImportRoomState(memento));
+        time.Advance(TimeSpan.FromSeconds(3));
+        replica.Finish(room.RoomId, second, target, 0, 0);
+
+        var participants = Assert.Single(sink.Records).Participants.ToDictionary(item => item.UserProfileId);
+        Assert.False(participants[first].CompetitionEligible);
+        Assert.True(participants[second].CompetitionEligible);
     }
 
     [Fact]
@@ -233,7 +326,16 @@ public sealed class LiveRoomConcurrencyTests
         var manager = CreateManager(new LiveOptions { CountdownSeconds = 1 }, time, sink);
         var first = Guid.CreateVersion7();
         var second = Guid.CreateVersion7();
-        var room = manager.CreateRoom(new CreateLiveRoomRequest(first, "A", "Raum", "Text", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 8));
+        var room = manager.CreateRoom(new CreateLiveRoomRequest(
+            first,
+            "A",
+            "Raum",
+            "Text",
+            LiveRoomMode.Classic,
+            LiveRoomVisibility.InternalOpen,
+            1,
+            8,
+            TargetCompetitionEligible: true));
         manager.Join(room.RoomId, second, "B");
         manager.SetReady(room.RoomId, first, true);
         manager.SetReady(room.RoomId, second, true);
@@ -242,10 +344,18 @@ public sealed class LiveRoomConcurrencyTests
         manager.Snapshot(room.RoomId);
 
         manager.RemoveProfile(first);
-        var completed = manager.Finish(room.RoomId, second, "Text", 0, 0);
+        var redactedMemento = manager.ExportRoomState(room.RoomId);
+        Assert.True(redactedMemento.TargetCompetitionEligible);
+        Assert.False(redactedMemento.RatingEligible);
+        var replica = CreateManager(new LiveOptions { CountdownSeconds = 1 }, time, sink);
+        Assert.True(replica.ImportRoomState(redactedMemento));
+        var completed = replica.Finish(room.RoomId, second, "Text", 0, 0);
 
         Assert.True(completed.Finished);
         var record = Assert.Single(sink.Records);
+        Assert.True(record.TargetCompetitionEligible);
+        Assert.False(record.RatingEligible);
+        Assert.Equal(second, record.CreatorProfileId);
         Assert.DoesNotContain(record.Participants, item => item.UserProfileId == first);
         Assert.Single(record.Participants, item => item.UserProfileId == second);
     }
@@ -260,7 +370,8 @@ public sealed class LiveRoomConcurrencyTests
         manager.RemoveProfile(profileId);
 
         Assert.Throws<InvalidOperationException>(() => manager.SetReady(room.RoomId, profileId, true));
-        Assert.Equal(ParticipantStatus.LeftBeforeStart, manager.Snapshot(room.RoomId).Participants.Single().Status);
+        Assert.Empty(manager.Snapshot(room.RoomId).Participants);
+        Assert.DoesNotContain(profileId, manager.ExportRoomState(room.RoomId).ExcludedProfileIds);
     }
 
     [Fact]
@@ -274,7 +385,7 @@ public sealed class LiveRoomConcurrencyTests
 
         manager.RemoveProfileFromRoom(first.RoomId, profileId);
 
-        Assert.Equal(ParticipantStatus.LeftBeforeStart, manager.Snapshot(first.RoomId).Participants.Single().Status);
+        Assert.Empty(manager.Snapshot(first.RoomId).Participants);
         var untouched = manager.Snapshot(second.RoomId);
         Assert.Equal(ParticipantStatus.Joined, untouched.Participants.Single().Status);
         Assert.Equal(secondVersion, untouched.StateVersion);
@@ -489,6 +600,48 @@ public sealed class LiveRoomConcurrencyTests
             8);
     }
 
+    [Fact]
+    public void CreatorQuotaIsBoundedAndCannotBeEvadedByHostTransfer()
+    {
+        var manager = CreateManager(new LiveOptions
+        {
+            MaxConcurrentRooms = 8,
+            MaxActiveRoomsPerCreator = 1
+        });
+        var creator = Guid.CreateVersion7();
+        var successor = Guid.CreateVersion7();
+        var room = manager.CreateRoom(CreateRequest(creator, "Erster Raum"));
+        manager.Join(room.RoomId, successor, "Nachfolge");
+        manager.TransferHost(room.RoomId, creator, successor);
+        var transferredMemento = manager.ExportRoomState(room.RoomId);
+
+        var blocked = Assert.Throws<InvalidOperationException>(() =>
+            manager.CreateRoom(CreateRequest(creator, "Zweiter Raum")));
+        var otherCreatorRoom = manager.CreateRoom(CreateRequest(successor, "Eigener Raum"));
+
+        Assert.Contains("maximal zulässige Anzahl", blocked.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.NotEqual(room.RoomId, otherCreatorRoom.RoomId);
+        Assert.Equal(creator, transferredMemento.QuotaOwnerProfileId);
+
+        var replica = CreateManager(new LiveOptions
+        {
+            MaxConcurrentRooms = 8,
+            MaxActiveRoomsPerCreator = 1
+        });
+        Assert.True(replica.ImportRoomState(transferredMemento));
+        Assert.Equal(creator, replica.ExportRoomState(room.RoomId).QuotaOwnerProfileId);
+
+        static CreateLiveRoomRequest CreateRequest(Guid creatorProfileId, string title) => new(
+            creatorProfileId,
+            title,
+            title,
+            "Text",
+            LiveRoomMode.Classic,
+            LiveRoomVisibility.InternalOpen,
+            1,
+            8);
+    }
+
 
     [Fact]
     public void ClusterCreateIgnoresTransientLocalRoomCapacity()
@@ -531,6 +684,45 @@ public sealed class LiveRoomConcurrencyTests
         Assert.Equal(0, manager.MetricsSnapshot().Participants);
         Assert.Equal(0, manager.AbortActiveRooms());
         Assert.Single(sink.Records);
+    }
+
+    [Fact]
+    public void HostCannotCloseRunningRoomButServerAbortStillCompletesIt()
+    {
+        var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-06-18T12:00:00Z"));
+        var sink = new RecordingCompletionSink();
+        var manager = CreateManager(new LiveOptions { CountdownSeconds = 1 }, time, sink);
+        var host = Guid.CreateVersion7();
+        var rival = Guid.CreateVersion7();
+        var room = manager.CreateRoom(new CreateLiveRoomRequest(
+            host,
+            "Host",
+            "Raum",
+            "Text",
+            LiveRoomMode.Classic,
+            LiveRoomVisibility.InternalOpen,
+            1,
+            8));
+        manager.Join(room.RoomId, rival, "Rivale");
+        manager.SetReady(room.RoomId, host, true);
+        manager.SetReady(room.RoomId, rival, true);
+        manager.Start(room.RoomId, host);
+        time.Advance(TimeSpan.FromSeconds(1));
+        var running = manager.Snapshot(room.RoomId);
+
+        var error = Assert.Throws<InvalidOperationException>(() => manager.Close(room.RoomId, host));
+        var unchanged = manager.Snapshot(room.RoomId);
+
+        Assert.Contains("vor dem Rennstart", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(LiveRoomPhase.Running, unchanged.Phase);
+        Assert.Equal(running.StateVersion, unchanged.StateVersion);
+        Assert.Equal(running.Participants, unchanged.Participants);
+        Assert.Empty(sink.Records);
+
+        Assert.Equal(1, manager.AbortActiveRoom(room.RoomId));
+        var aborted = Assert.Single(sink.Records);
+        Assert.All(aborted.Participants, participant =>
+            Assert.Equal(ParticipantStatus.AbortedByServer, participant.Status));
     }
 
     [Fact]
@@ -705,7 +897,16 @@ public sealed class LiveRoomConcurrencyTests
         var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-07-14T12:00:00Z"));
         var manager = CreateManager(new LiveOptions { CountdownSeconds = 1 }, time);
         var players = Enumerable.Range(0, 4).Select(_ => Guid.CreateVersion7()).ToArray();
-        var room = manager.CreateRoom(new CreateLiveRoomRequest(players[0], "A", "Teams", "Text", LiveRoomMode.Team, LiveRoomVisibility.InternalOpen, 1, 8));
+        var room = manager.CreateRoom(new CreateLiveRoomRequest(
+            players[0],
+            "A",
+            "Teams",
+            "Text",
+            LiveRoomMode.Team,
+            LiveRoomVisibility.InternalOpen,
+            1,
+            8,
+            TargetCompetitionEligible: true));
         for (var index = 1; index < players.Length; index++)
         {
             manager.Join(room.RoomId, players[index], ((char)('A' + index)).ToString());
@@ -738,6 +939,38 @@ public sealed class LiveRoomConcurrencyTests
     }
 
     [Fact]
+    public void RatedTeamRaceRejectsUnequalTeamsWithoutStateMutation()
+    {
+        var manager = CreateManager();
+        var players = Enumerable.Range(0, 3).Select(_ => Guid.CreateVersion7()).ToArray();
+        var room = manager.CreateRoom(new CreateLiveRoomRequest(
+            players[0],
+            "A",
+            "Teams",
+            "Text",
+            LiveRoomMode.Team,
+            LiveRoomVisibility.InternalOpen,
+            1,
+            8,
+            TargetCompetitionEligible: true));
+        manager.Join(room.RoomId, players[1], "B");
+        manager.Join(room.RoomId, players[2], "C");
+        foreach (var player in players)
+        {
+            manager.SetReady(room.RoomId, player, true);
+        }
+
+        var before = manager.Snapshot(room.RoomId);
+        var error = Assert.Throws<InvalidOperationException>(() => manager.Start(room.RoomId, players[0]));
+        var after = manager.Snapshot(room.RoomId);
+
+        Assert.Contains("gleich große Teams", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(LiveRoomPhase.Lobby, after.Phase);
+        Assert.Equal(before.StateVersion, after.StateVersion);
+        Assert.Equal(before.Participants, after.Participants);
+    }
+
+    [Fact]
     public void ProgressBeforeRaceStartIsIgnored()
     {
         var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-06-18T12:00:00Z"));
@@ -750,7 +983,7 @@ public sealed class LiveRoomConcurrencyTests
         manager.SetReady(room.RoomId, second, true);
         manager.Start(room.RoomId, first);
 
-        var beforeStart = manager.SubmitProgress(room.RoomId, first, 1, "Text");
+        var beforeStart = manager.SubmitProgress(room.RoomId, first, InputDelta(0, "Text"));
 
         Assert.Equal(LiveRoomPhase.Countdown, beforeStart.Phase);
         Assert.Equal(0, beforeStart.Participants.Single(item => item.ProfileId == first).CorrectCharacters);
@@ -771,8 +1004,8 @@ public sealed class LiveRoomConcurrencyTests
         manager.Start(room.RoomId, first);
         time.Advance(TimeSpan.FromSeconds(1));
 
-        manager.SubmitProgress(room.RoomId, first, 1, "Tex");
-        var corrected = manager.SubmitProgress(room.RoomId, first, 2, "Te");
+        manager.SubmitProgress(room.RoomId, first, InputDelta(0, "Tex"));
+        var corrected = manager.SubmitProgress(room.RoomId, first, InputDelta(1, "", backspaces: 1));
 
         Assert.Equal(LiveRoomPhase.Running, corrected.Phase);
         Assert.Equal(2, corrected.Participants.Single(item => item.ProfileId == first).CorrectCharacters);
@@ -793,7 +1026,7 @@ public sealed class LiveRoomConcurrencyTests
         manager.Start(room.RoomId, first);
         time.Advance(TimeSpan.FromSeconds(1));
 
-        var result = manager.SubmitProgressDelta(room.RoomId, first, 1, "Schl");
+        var result = manager.SubmitProgressDelta(room.RoomId, first, InputDelta(0, "Schl"));
 
         Assert.Null(result.Snapshot);
         Assert.NotNull(result.Delta);
@@ -802,6 +1035,9 @@ public sealed class LiveRoomConcurrencyTests
         Assert.Equal(4, result.Delta.CorrectCharacters);
         Assert.Equal(4, result.Delta.TypedCharacters);
         Assert.Equal("Dw==", result.Delta.TypedStateBits);
+        Assert.Equal(0, result.Delta.TypedStateOffset);
+        Assert.Equal(4, result.Delta.TypedStateLength);
+        Assert.Equal(LiveProgressInputStatus.Applied, result.Delta.InputStatus);
         Assert.Equal(100, result.Delta.Accuracy);
         Assert.Null(result.Delta.RankHint);
     }
@@ -811,12 +1047,72 @@ public sealed class LiveRoomConcurrencyTests
     {
         var (manager, room, first, _, _) = CreateRunningRoom();
 
-        var result = manager.SubmitProgressDelta(room.RoomId, first, 1, "Tert");
+        var result = manager.SubmitProgressDelta(room.RoomId, first, InputDelta(0, "Tert"));
 
         Assert.NotNull(result.Delta);
         Assert.Equal(2, result.Delta.CorrectCharacters);
         Assert.Equal(4, result.Delta.TypedCharacters);
         Assert.Equal("Cw==", result.Delta.TypedStateBits);
+    }
+
+    [Fact]
+    public void SnapshotAndMementoPreserveBoundedProgressCoordinatesWithoutInputText()
+    {
+        var target = new string('a', 160);
+        var input = $"{new string('a', 70)}#{new string('a', 29)}";
+        var (manager, room, first, _, _) = CreateRunningRoom(target);
+
+        var snapshot = manager.SubmitProgress(room.RoomId, first, InputDelta(0, input));
+        var participant = snapshot.Participants.Single(item => item.ProfileId == first);
+
+        Assert.Equal(70, participant.CorrectCharacters);
+        Assert.Equal(62, participant.TypedStateOffset);
+        Assert.Equal(100, participant.TypedCharacters);
+        Assert.Equal(32, participant.TypedTextPreview.Length);
+        Assert.Equal('w', participant.TypedTextPreview[8]);
+
+        var memento = manager.ExportRoomState(room.RoomId);
+        var persistedParticipant = memento.Participants.Single(item => item.ProfileId == first);
+        Assert.Equal(62, persistedParticipant.TypedStateOffset);
+        Assert.Equal(100, persistedParticipant.TypedCharacters);
+        Assert.DoesNotContain("#", persistedParticipant.TypedTextPreview, StringComparison.Ordinal);
+
+        var replica = CreateManager();
+        Assert.True(replica.ImportRoomState(memento));
+        var restored = replica.Snapshot(room.RoomId).Participants.Single(item => item.ProfileId == first);
+        Assert.Equal(62, restored.TypedStateOffset);
+        Assert.Equal(100, restored.TypedCharacters);
+        Assert.Equal(participant.TypedTextPreview, restored.TypedTextPreview);
+    }
+
+    [Fact]
+    public void LegacyScrubbedMementoUsesCorrectPrefixAsBoundedCurrentPosition()
+    {
+        var (source, room, first, _, _) = CreateRunningRoom(new string('a', 160));
+        source.SubmitProgress(room.RoomId, first, InputDelta(0, new string('a', 70)));
+        var current = source.ExportRoomState(room.RoomId);
+        var legacy = current with
+        {
+            Participants = current.Participants
+                .Select(participant => participant.ProfileId == first
+                    ? participant with
+                    {
+                        TypedTextPreview = "",
+                        TypedStateOffset = 0,
+                        TypedCharacters = 0
+                    }
+                    : participant)
+                .ToArray()
+        };
+
+        var replica = CreateManager();
+        Assert.True(replica.ImportRoomState(legacy));
+        var restored = replica.Snapshot(room.RoomId).Participants.Single(item => item.ProfileId == first);
+
+        Assert.Equal(70, restored.CorrectCharacters);
+        Assert.Equal(0, restored.TypedStateOffset);
+        Assert.Equal(70, restored.TypedCharacters);
+        Assert.Empty(restored.TypedTextPreview);
     }
 
     [Fact]
@@ -852,7 +1148,7 @@ public sealed class LiveRoomConcurrencyTests
     {
         var (manager, room, first, _, _) = CreateRunningRoom("Ärger");
 
-        var snapshot = manager.SubmitProgress(room.RoomId, first, 1, "A\u0308");
+        var snapshot = manager.SubmitProgress(room.RoomId, first, InputDelta(0, "A\u0308"));
         var participant = snapshot.Participants.Single(item => item.ProfileId == first);
 
         Assert.Equal(1, participant.CorrectCharacters);
@@ -864,9 +1160,12 @@ public sealed class LiveRoomConcurrencyTests
     public void SubmitProgressRejectsOversizedInputWithoutAdvancingSequence()
     {
         var (manager, room, first, _, _) = CreateRunningRoom();
-        manager.SubmitProgress(room.RoomId, first, 1, "Te");
+        manager.SubmitProgress(room.RoomId, first, InputDelta(0, "Te"));
 
-        Assert.Throws<InvalidOperationException>(() => manager.SubmitProgress(room.RoomId, first, 2, new string('x', 40)));
+        Assert.Throws<InvalidOperationException>(() => manager.SubmitProgress(
+            room.RoomId,
+            first,
+            InputDelta(1, new string('x', 40))));
         var participant = manager.Snapshot(room.RoomId).Participants.Single(item => item.ProfileId == first);
 
         Assert.Equal(1, participant.Sequence);
@@ -875,17 +1174,18 @@ public sealed class LiveRoomConcurrencyTests
     }
 
     [Fact]
-    public void OlderProgressSequenceDoesNotOverwriteCurrentProgress()
+    public void ReorderedProgressRequiresResyncAndDoesNotOverwriteCurrentProgress()
     {
         var (manager, room, first, _, _) = CreateRunningRoom();
 
-        manager.SubmitProgress(room.RoomId, first, 2, "Text");
-        var snapshot = manager.SubmitProgress(room.RoomId, first, 1, "T");
+        var reordered = manager.SubmitProgressDelta(room.RoomId, first, InputDelta(1, "Text"));
+        var snapshot = manager.SubmitProgress(room.RoomId, first, InputDelta(0, "T"));
         var participant = snapshot.Participants.Single(item => item.ProfileId == first);
 
-        Assert.Equal(2, participant.Sequence);
-        Assert.Equal(4, participant.CorrectCharacters);
-        Assert.Equal("cccc", participant.TypedTextPreview);
+        Assert.Equal(LiveProgressInputStatus.ResyncRequired, reordered.Delta?.InputStatus);
+        Assert.Equal(1, participant.Sequence);
+        Assert.Equal(1, participant.CorrectCharacters);
+        Assert.Equal("c", participant.TypedTextPreview);
     }
 
     [Fact]
@@ -1003,6 +1303,49 @@ public sealed class LiveRoomConcurrencyTests
         var nextRound = manager.Start(room.RoomId, successor);
         Assert.Equal(LiveRoomPhase.Countdown, nextRound.Phase);
         Assert.Equal(2, nextRound.CurrentRound);
+        Assert.All(nextRound.Participants, participant =>
+        {
+            Assert.Empty(participant.TypedTextPreview);
+            Assert.Equal(0, participant.TypedStateOffset);
+            Assert.Equal(0, participant.TypedCharacters);
+        });
+    }
+
+    [Fact]
+    public void HostCannotKickCompletedParticipantBetweenSeriesRounds()
+    {
+        var time = new ManualTimeProvider(DateTimeOffset.Parse("2026-06-18T12:00:00Z"));
+        var sink = new RecordingCompletionSink();
+        var manager = CreateManager(new LiveOptions { CountdownSeconds = 1 }, time, sink);
+        var host = Guid.CreateVersion7();
+        var rival = Guid.CreateVersion7();
+        var room = manager.CreateRoom(new CreateLiveRoomRequest(
+            host,
+            "Host",
+            "Serie",
+            "Text",
+            LiveRoomMode.Series,
+            LiveRoomVisibility.InternalOpen,
+            3,
+            8));
+        manager.Join(room.RoomId, rival, "Rivale");
+        manager.SetReady(room.RoomId, host, true);
+        manager.SetReady(room.RoomId, rival, true);
+        manager.Start(room.RoomId, host);
+        time.Advance(TimeSpan.FromSeconds(1));
+        manager.Finish(room.RoomId, rival, "Text", 0, 0);
+        var betweenRounds = manager.Finish(room.RoomId, host, "Text", 0, 0);
+
+        var error = Assert.Throws<InvalidOperationException>(() => manager.Kick(room.RoomId, host, rival));
+        var after = manager.Snapshot(room.RoomId);
+
+        Assert.Contains("vor dem Rennstart", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(LiveRoomPhase.RoundResults, after.Phase);
+        Assert.Equal(betweenRounds.StateVersion, after.StateVersion);
+        Assert.Equal(
+            betweenRounds.Participants.OrderBy(participant => participant.ProfileId),
+            after.Participants.OrderBy(participant => participant.ProfileId));
+        Assert.Empty(sink.Records);
     }
 
     [Fact]
@@ -1153,18 +1496,18 @@ public sealed class LiveRoomConcurrencyTests
         var (manager, room, first, _, _) = CreateRunningRoom();
         var before = manager.Snapshot(room.RoomId);
 
-        var progress = manager.SubmitProgressDelta(room.RoomId, first, 8, "Te");
+        var progress = manager.SubmitProgressDelta(room.RoomId, first, InputDelta(0, "Te"));
         var delta = Assert.IsType<LiveProgressDelta>(progress.Delta);
         var after = manager.Snapshot(room.RoomId);
 
         Assert.True(after.StateVersion > before.StateVersion);
         Assert.Equal(after.StateVersion, delta.StateVersion);
-        Assert.Equal(8, delta.ParticipantSequence);
+        Assert.Equal(1, delta.ParticipantSequence);
         Assert.Equal(2, delta.TypedCharacters);
         Assert.Equal("Aw==", delta.TypedStateBits);
 
-        var stale = manager.SubmitProgressDelta(room.RoomId, first, 7, "T");
-        Assert.Null(stale.Delta);
+        var stale = manager.SubmitProgressDelta(room.RoomId, first, InputDelta(0, "T"));
+        Assert.Equal(LiveProgressInputStatus.Duplicate, stale.Delta?.InputStatus);
         Assert.Equal(after.StateVersion, manager.Snapshot(room.RoomId).StateVersion);
     }
 
@@ -1209,6 +1552,112 @@ public sealed class LiveRoomConcurrencyTests
         var kicked = manager.Kick(room.RoomId, host, invited);
         Assert.Equal(ParticipantStatus.LeftBeforeStart, kicked.Participants.Single(item => item.ProfileId == invited).Status);
         Assert.Throws<InvalidOperationException>(() => manager.Join(room.RoomId, invited, "Gast"));
+    }
+
+    [Fact]
+    public async Task ArenaRematchIsHostOnlyTerminalAndIdempotentUnderConcurrentRetries()
+    {
+        var manager = CreateManager();
+        var host = Guid.CreateVersion7();
+        var guest = Guid.CreateVersion7();
+        var source = manager.CreateRoom(new CreateLiveRoomRequest(
+            host,
+            "Host",
+            "Drei Runden",
+            "Schlüssel",
+            LiveRoomMode.Series,
+            LiveRoomVisibility.InternalOpen,
+            3,
+            4));
+        manager.Join(source.RoomId, guest, "Gast");
+
+        var early = Assert.Throws<InvalidOperationException>(() => manager.CreateRematch(source.RoomId, host));
+        Assert.Contains("Abschluss", early.Message, StringComparison.OrdinalIgnoreCase);
+        manager.Close(source.RoomId, host);
+        var unauthorized = Assert.Throws<InvalidOperationException>(() => manager.CreateRematch(source.RoomId, guest));
+        Assert.Contains("Raumleitung", unauthorized.Message, StringComparison.OrdinalIgnoreCase);
+
+        var attempts = await Task.WhenAll(Enumerable.Range(0, 8)
+            .Select(_ => Task.Run(() => manager.CreateRematch(source.RoomId, host))));
+
+        var roomId = Assert.Single(attempts.Select(item => item.RoomId).Distinct());
+        var rematch = manager.Snapshot(roomId);
+        Assert.NotEqual(source.RoomId, rematch.RoomId);
+        Assert.Equal((LiveRoomMode.Series, 3, 4, LiveRoomVisibility.InternalOpen),
+            (rematch.Mode, rematch.RoundCount, rematch.MaxParticipants, rematch.Visibility));
+        Assert.Equal("Schlüssel", manager.ExportRoomState(rematch.RoomId).Text);
+        Assert.Equal("Drei Runden – Revanche", rematch.Title);
+        Assert.Equal(LiveRoomPhase.Lobby, rematch.Phase);
+        Assert.False(rematch.Finished);
+        Assert.Equal(ParticipantStatus.Joined, rematch.Participants.Single(item => item.ProfileId == host).Status);
+        Assert.Equal(ParticipantStatus.Invited, rematch.Participants.Single(item => item.ProfileId == guest).Status);
+        var unchangedSource = manager.Snapshot(source.RoomId);
+        Assert.True(unchangedSource.Finished);
+        Assert.Equal(LiveRoomPhase.Closed, unchangedSource.Phase);
+    }
+
+    [Fact]
+    public void ArenaRematchUsesAndReleasesTheSameCreatorQuota()
+    {
+        var manager = CreateManager(new LiveOptions
+        {
+            MaxConcurrentRooms = 8,
+            MaxActiveRoomsPerCreator = 1
+        });
+        var host = Guid.CreateVersion7();
+        var source = manager.CreateRoom(CreateRequest("Quelle"));
+        manager.Close(source.RoomId, host);
+        var active = manager.CreateRoom(CreateRequest("Aktiv"));
+
+        var blocked = Assert.Throws<InvalidOperationException>(() =>
+            manager.CreateRematch(source.RoomId, host));
+        manager.Close(active.RoomId, host);
+        var rematch = manager.CreateRematch(source.RoomId, host);
+
+        Assert.Contains("maximal zulässige Anzahl", blocked.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.NotEqual(source.RoomId, rematch.RoomId);
+
+        CreateLiveRoomRequest CreateRequest(string title) => new(
+            host,
+            "Host",
+            title,
+            "Text",
+            LiveRoomMode.Classic,
+            LiveRoomVisibility.InternalOpen,
+            1,
+            8);
+    }
+
+    [Fact]
+    public void ArenaRematchPreservesInvitationGroupAndTeamAssignments()
+    {
+        var manager = CreateManager();
+        var players = Enumerable.Range(0, 4).Select(_ => Guid.CreateVersion7()).ToArray();
+        var source = manager.CreateRoom(new CreateLiveRoomRequest(
+            players[0],
+            "Host",
+            "Teamduell",
+            "Text",
+            LiveRoomMode.Team,
+            LiveRoomVisibility.InvitationOnly,
+            1,
+            4,
+            players.Skip(1)
+                .Select((profileId, index) => new LiveRoomInvitation(profileId, $"Gast {index + 1}"))
+                .ToArray()));
+        var originalTeams = source.Participants.ToDictionary(item => item.ProfileId, item => item.TeamNumber);
+        manager.Close(source.RoomId, players[0]);
+
+        var rematch = manager.CreateRematch(source.RoomId, players[0]);
+
+        Assert.Equal((LiveRoomMode.Team, 1, 4, LiveRoomVisibility.InvitationOnly),
+            (rematch.Mode, rematch.RoundCount, rematch.MaxParticipants, rematch.Visibility));
+        Assert.Equal(players.Order(), rematch.Participants.Select(item => item.ProfileId).Order());
+        Assert.All(rematch.Participants, participant =>
+            Assert.Equal(originalTeams[participant.ProfileId], participant.TeamNumber));
+        Assert.All(
+            rematch.Participants.Where(item => item.ProfileId != players[0]),
+            participant => Assert.Equal(ParticipantStatus.Invited, participant.Status));
     }
 
     [Fact]
@@ -1294,6 +1743,13 @@ public sealed class LiveRoomConcurrencyTests
         Assert.False(replica.ImportRoomState(memento));
         Assert.Equal(advanced.StateVersion, replica.Snapshot(room.RoomId).StateVersion);
     }
+
+    private static LiveProgressInputDelta InputDelta(
+        int baseRevision,
+        string appendText,
+        int backspaces = 0,
+        string? resyncInput = null) =>
+        new(baseRevision, baseRevision + 1, backspaces, appendText, resyncInput);
 
     private static LiveRoomManager CreateManager(
         LiveOptions? options = null,

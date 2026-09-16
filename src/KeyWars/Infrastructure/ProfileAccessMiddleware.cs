@@ -2,12 +2,17 @@ using System.Security.Claims;
 using System.Text.Json;
 using KeyWars.Auth;
 using KeyWars.Services;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
 
 namespace KeyWars.Infrastructure;
 
 public sealed class ProfileAccessMiddleware(RequestDelegate next)
 {
-    public async Task InvokeAsync(HttpContext context, IProfileAccessGate accessGate)
+    public async Task InvokeAsync(
+        HttpContext context,
+        IProfileAccessGate accessGate,
+        ProfileRequestContext profileContext)
     {
         if (!ShouldLease(context) ||
             !Guid.TryParse(context.User.FindFirstValue(KeyWarsClaims.ProfileId), out var profileId))
@@ -20,6 +25,7 @@ public sealed class ProfileAccessMiddleware(RequestDelegate next)
         {
             var requestAborted = context.RequestAborted;
             await using var lease = await accessGate.AcquireAsync(profileId, requestAborted);
+            profileContext.Begin(profileId);
             using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
                 requestAborted,
                 lease.LeaseLost);
@@ -48,8 +54,17 @@ public sealed class ProfileAccessMiddleware(RequestDelegate next)
             }
             finally
             {
+                profileContext.Clear();
                 context.RequestAborted = requestAborted;
             }
+        }
+        catch (ProfileOperationException exception) when (
+            !context.Response.HasStarted &&
+            string.Equals(exception.Code, "profile_deleted", StringComparison.Ordinal))
+        {
+            await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+            context.User = new ClaimsPrincipal(new ClaimsIdentity());
+            await next(context);
         }
         catch (ProfileOperationException exception) when (!context.Response.HasStarted)
         {
@@ -90,9 +105,13 @@ public sealed class ProfileAccessMiddleware(RequestDelegate next)
             return true;
         }
 
-        var path = context.Request.Path.Value;
-        return !string.Equals(path, "/profil/loeschen", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(path, "/profil/statistik-zuruecksetzen", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(path, "/profil/statistikzuruecksetzen", StringComparison.OrdinalIgnoreCase);
+        var path = context.Request.Path;
+        return !MatchesPathOrTrailingSlash(path, "/profil/loeschen") &&
+            !MatchesPathOrTrailingSlash(path, "/profil/statistik-zuruecksetzen") &&
+            !MatchesPathOrTrailingSlash(path, "/profil/statistikzuruecksetzen");
     }
+
+    private static bool MatchesPathOrTrailingSlash(PathString path, string basePath) =>
+        path.Equals(basePath, StringComparison.OrdinalIgnoreCase) ||
+        path.Equals(basePath + "/", StringComparison.OrdinalIgnoreCase);
 }

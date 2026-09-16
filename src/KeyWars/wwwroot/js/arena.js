@@ -24,11 +24,41 @@ import {
   textSpan
 } from "./arena-view.js";
 import { SignalRConnection } from "./signalr-connection.js";
-import { renderTypingCharacters, splitGraphemes } from "./typing-text.js";
+import { buildTypingInputDelta, renderTypingCharacters, splitGraphemes } from "./typing-text.js";
 import { resetTypingScroll, scrollCurrentCharacterIntoView } from "./typing-scroll.js";
 
 const persistencePollDelays = [250, 500, 1000, 2000, 3000, 5000];
+const presenceHeartbeatIntervalMilliseconds = 15000;
 const terminalPersistenceStates = new Set(["Persisted", "Failed", "AbortedUnconfirmed"]);
+
+function typingClassChangeRange(previous, next, targetLength) {
+  const sharedLength = Math.min(previous.length, next.length);
+  let firstChanged = 0;
+  while (firstChanged < sharedLength && previous[firstChanged] === next[firstChanged]) {
+    firstChanged += 1;
+  }
+
+  if (firstChanged === previous.length && firstChanged === next.length) {
+    return { startIndex: 0, endIndex: 0 };
+  }
+
+  if (previous.length === next.length) {
+    let lastChanged = next.length - 1;
+    while (lastChanged > firstChanged && previous[lastChanged] === next[lastChanged]) {
+      lastChanged -= 1;
+    }
+
+    return {
+      startIndex: Math.min(firstChanged, targetLength),
+      endIndex: Math.min(lastChanged + 1, targetLength)
+    };
+  }
+
+  return {
+    startIndex: Math.min(firstChanged, targetLength),
+    endIndex: Math.min(Math.max(previous.length, next.length) + 1, targetLength)
+  };
+}
 
 export function attachArenaPages() {
   document.querySelectorAll("[data-arena-room]").forEach((root) => {
@@ -43,6 +73,9 @@ export function attachArenaPages() {
     const hud = root.querySelector("[data-arena-hud]");
     const liveBoard = root.querySelector("[data-arena-live-board]");
     const podium = root.querySelector("[data-arena-podium]");
+    const rematchActions = root.querySelector("[data-arena-rematch-actions]");
+    const rematchForm = root.querySelector("[data-arena-rematch-form]");
+    const rematchButton = rematchForm?.querySelector("button");
     const teamBoard = root.querySelector("[data-arena-team-board]");
     const teams = root.querySelector("[data-arena-teams]");
     const roundLabel = document.querySelector("[data-arena-round-label]");
@@ -52,6 +85,10 @@ export function attachArenaPages() {
     const rosterSummaryLabel = root.querySelector("[data-arena-roster-summary]");
     const connectionQuality = root.querySelector("[data-arena-connection-quality]");
     const persistenceStatus = root.querySelector("[data-arena-persistence-status]");
+    const personalBest = root.querySelector("[data-arena-personal-best]");
+    const personalBestValue = root.querySelector("[data-arena-personal-best-value]");
+    const personalBestContext = root.querySelector("[data-arena-personal-best-context]");
+    const newPersonalBest = root.querySelector("[data-arena-new-personal-best]");
     const hiddenCountLabel = root.querySelector("[data-arena-hidden-count]");
     const windowNote = root.querySelector("[data-arena-window-note]");
     const phaseSteps = [...root.querySelectorAll(".arena-phase-steps li")];
@@ -82,8 +119,21 @@ export function attachArenaPages() {
     root.dataset.motionReduced = reducedMotion ? "true" : "false";
 
     let snapshot = null;
+    let fullSnapshotVersion = 0;
+    const progressWatermarks = new Map();
     let sequence = 0;
     let progressTimer = 0;
+    let presenceHeartbeatTimer = 0;
+    let progressRenderFrame = 0;
+    let progressInFlight = false;
+    let progressPending = false;
+    let progressRequiresResync = false;
+    let acknowledgedInputElements = [];
+    let participantById = new Map();
+    const participantRows = new Map();
+    const trackLanes = new Map();
+    const liveTypingRows = new Map();
+    const changedProgressParticipants = new Set();
     let timerFrame = 0;
     let startRefreshTimer = 0;
     let timerKey = "";
@@ -101,11 +151,15 @@ export function attachArenaPages() {
     let startPending = false;
     let unavailable = false;
     let lastRenderedTargetText = null;
+    let targetElements = [];
+    let lastRenderedInputElements = [];
     let connectionStatus = "disconnected";
     let persistencePollTimer = 0;
     let persistencePollAttempt = 0;
     let persistencePollController = null;
     let persistencePollExhausted = false;
+    let personalBestLoaded = false;
+    let personalBestController = null;
     let disposed = false;
     let persistenceState = normalizePersistenceState(root.dataset.persistenceState) || "Inactive";
     let restoreInputFocusAfterReconnect = false;
@@ -115,6 +169,34 @@ export function attachArenaPages() {
       document.querySelector("[data-arena-error]")?.remove();
     };
     let hostActionPending = false;
+
+    const stopPresenceHeartbeat = () => {
+      window.clearTimeout(presenceHeartbeatTimer);
+      presenceHeartbeatTimer = 0;
+    };
+
+    const schedulePresenceHeartbeat = () => {
+      stopPresenceHeartbeat();
+      if (disposed || unavailable || !connection.isConnected()) {
+        return;
+      }
+
+      presenceHeartbeatTimer = window.setTimeout(async () => {
+        presenceHeartbeatTimer = 0;
+        try {
+          const active = await connection.invoke("Heartbeat", [roomId]);
+          if (active !== true && !disposed && !unavailable) {
+            applySnapshot(await connection.invoke("JoinRoom", [roomId]));
+          }
+        } catch (error) {
+          if (!disposed && connection.isConnected()) {
+            console.warn("Arena-Presence konnte nicht erneuert werden.", error);
+          }
+        } finally {
+          schedulePresenceHeartbeat();
+        }
+      }, presenceHeartbeatIntervalMilliseconds);
+    };
 
     const setInputDisabled = (disabled) => {
       if (!input) {
@@ -141,20 +223,30 @@ export function attachArenaPages() {
       const typed = splitGraphemes(input.value);
       const targetText = snapshot.targetText || "";
       const targetChanged = targetText !== lastRenderedTargetText;
-      const expected = splitGraphemes(targetText);
+      if (targetChanged) {
+        targetElements = splitGraphemes(targetText);
+      }
+      const expected = targetElements;
       if (expected.length === 0) {
         target.replaceChildren(textSpan("Der Text wird zum Start freigegeben.", "muted"));
         resetTypingScroll(target);
         lastRenderedTargetText = targetText;
+        lastRenderedInputElements = typed;
         return;
       }
 
+      const changedRange = targetChanged
+        ? { startIndex: 0, endIndex: expected.length }
+        : typingClassChangeRange(lastRenderedInputElements, typed, expected.length);
       renderTypingCharacters(target, expected, (char, index) => {
         if (index < typed.length) {
           return typed[index] === char ? "correct" : "wrong";
         }
-
         return index === typed.length ? "current" : "";
+      }, {
+        rebuild: targetChanged,
+        startIndex: changedRange.startIndex,
+        endIndex: changedRange.endIndex
       });
       if (targetChanged) {
         resetTypingScroll(target);
@@ -162,9 +254,10 @@ export function attachArenaPages() {
 
       scrollCurrentCharacterIntoView(target);
       lastRenderedTargetText = targetText;
+      lastRenderedInputElements = typed;
     };
 
-    const rankedParticipants = () => [...(snapshot?.participants || [])].sort((left, right) => {
+    const rankedParticipants = () => [...participantById.values()].sort((left, right) => {
       const leftPlacement = left.placement || Number.MAX_SAFE_INTEGER;
       const rightPlacement = right.placement || Number.MAX_SAFE_INTEGER;
       if (leftPlacement !== rightPlacement) {
@@ -178,9 +271,15 @@ export function attachArenaPages() {
       return String(left.displayName).localeCompare(String(right.displayName), "de");
     });
 
-    const rankFor = (participantId) => {
-      const index = rankedParticipants().findIndex((participant) => participant.profileId === participantId);
-      return index < 0 ? "-" : index + 1;
+    const participantView = () => {
+      const ranked = rankedParticipants();
+      const ranks = new Map(ranked.map((participant, index) => [participant.profileId, index + 1]));
+      return { ranked, ranks, visible: visibleParticipantWindow(ranked) };
+    };
+
+    const rankFor = (participantId, view) => {
+      const rank = view?.ranks.get(participantId);
+      return rank || "-";
     };
 
     const progressPercent = (participant) => {
@@ -362,7 +461,7 @@ export function attachArenaPages() {
       return row;
     };
 
-    const updateParticipantRow = (row, participant) => {
+    const updateParticipantRow = (row, participant, view) => {
       ["Name", "Team", "Status", "Fortschritt", "Punkte", "Platz"].forEach((label, index) => {
         row.cells[index].dataset.label = label;
       });
@@ -371,7 +470,7 @@ export function attachArenaPages() {
       row.cells[2].replaceChildren(statusPill(participant.status));
       row.cells[3].textContent = `${participant.correctCharacters} / ${snapshot.targetCharacterCount}`;
       row.cells[4].textContent = String(participant.seriesPoints || 0);
-      row.cells[5].textContent = participant.placement ? String(participant.placement) : participant.rankHint ? `~${participant.rankHint}` : String(rankFor(participant.profileId));
+      row.cells[5].textContent = participant.placement ? String(participant.placement) : participant.rankHint ? `~${participant.rankHint}` : String(rankFor(participant.profileId, view));
     };
 
     const renderTeams = () => {
@@ -537,27 +636,81 @@ export function attachArenaPages() {
     };
 
     const renderTypingPreview = (container, participant) => {
-      const expected = splitGraphemes(snapshot?.targetText || "");
-      const states = String(participant?.typedTextPreview || "");
-      if (expected.length === 0) {
+      if (targetElements.length === 0) {
         container.replaceChildren(textSpan("Der Text wird zum Start freigegeben.", "muted"));
         resetTypingScroll(container);
         return;
       }
 
-      const typedLength = Math.min(states.length, expected.length);
+      const offset = Math.max(0, Math.min(
+        Number(participant?.typedStateOffset) || 0,
+        Math.max(0, targetElements.length - 1)));
+      const reportedTypedCharacters = Number(participant?.typedCharacters);
+      const typedCharacters = Number.isSafeInteger(reportedTypedCharacters) && reportedTypedCharacters >= 0
+        ? reportedTypedCharacters
+        : offset + String(participant?.typedTextPreview || "").length;
+      let states = String(participant?.typedTextPreview || "").slice(0, 32);
+      states = states.slice(0, Math.max(0, Math.min(
+        states.length,
+        targetElements.length - offset,
+        typedCharacters - offset)));
+      const stateEnd = offset + states.length;
+      const currentIndex = Math.min(targetElements.length, typedCharacters);
+      const hasCurrent = currentIndex < targetElements.length;
+      const expected = targetElements.slice(offset, stateEnd);
+      if (hasCurrent) {
+        expected.push(targetElements[currentIndex]);
+        container.dataset.currentIndex = String(currentIndex);
+      } else {
+        delete container.dataset.currentIndex;
+      }
+
+      container.dataset.detailOffset = String(offset);
+      container.dataset.detailLength = String(states.length);
+      const detailDescription = states.length > 0
+        ? `Detailausschnitt ${offset + 1} bis ${stateEnd}`
+        : "kein Zustandsausschnitt";
+      const currentDescription = hasCurrent
+        ? `nächstes Zeichen ${currentIndex + 1}`
+        : "Ziel erreicht";
+      container.setAttribute(
+        "aria-label",
+        `${participant.displayName}: Live-Textfortschritt, ${participant.correctCharacters || 0} Zeichen korrekt, ${detailDescription}, ${currentDescription}.`);
+      if (expected.length === 0) {
+        container.replaceChildren(textSpan(`${participant?.correctCharacters || 0} Zeichen korrekt`, "muted"));
+        return;
+      }
+
       renderTypingCharacters(container, expected, (char, index) => {
+        if (hasCurrent && index === expected.length - 1) {
+          return "current";
+        }
+
         const state = states[index];
         if (state === "c") {
           return "correct";
         } else if (state === "w") {
           return "wrong";
-        } else if (index === typedLength && participant?.status === "Running") {
-          return "current";
         }
 
         return "pending";
-      });
+      }, { rebuild: true });
+      const ellipsis = () => {
+        const marker = textSpan("…", "muted");
+        marker.dataset.previewGap = "";
+        marker.setAttribute("aria-label", "Ausgelassene Zeichen");
+        return marker;
+      };
+      if (offset > 0 || (states.length === 0 && hasCurrent && currentIndex > 0)) {
+        container.prepend(ellipsis());
+      }
+      if (hasCurrent && states.length > 0 && currentIndex > stateEnd) {
+        container.querySelector(".current")?.before(ellipsis());
+      }
+      const lastShownIndex = hasCurrent ? currentIndex : stateEnd - 1;
+      if (lastShownIndex + 1 < targetElements.length) {
+        container.append(ellipsis());
+      }
       scrollCurrentCharacterIntoView(container);
     };
 
@@ -598,85 +751,97 @@ export function attachArenaPages() {
       previousCurrentRank = rank;
     };
 
-    const renderParticipants = () => {
+    const renderParticipants = (view = participantView()) => {
       if (!snapshot || !participants) {
         return;
       }
 
       const expectedIds = new Set();
-      const ranked = rankedParticipants();
-      const visible = visibleParticipantWindow(ranked);
+      const { ranked, visible } = view;
       renderRosterMode(ranked, visible);
       visible.forEach((participant) => {
         expectedIds.add(participant.profileId);
-        const row = participants.querySelector(`[data-participant-id="${participant.profileId}"]`) || participantRow(participant);
-        updateParticipantRow(row, participant);
+        let row = participantRows.get(participant.profileId);
+        if (!row) {
+          row = participants.querySelector(`[data-participant-id="${participant.profileId}"]`) || participantRow(participant);
+          participantRows.set(participant.profileId, row);
+        }
+        updateParticipantRow(row, participant, view);
         participants.append(row);
       });
 
-      participants.querySelectorAll("[data-participant-id]").forEach((row) => {
-        if (!expectedIds.has(row.dataset.participantId)) {
+      participantRows.forEach((row, participantId) => {
+        if (!expectedIds.has(participantId)) {
           row.remove();
+          participantRows.delete(participantId);
         }
       });
     };
 
-    const renderTrack = () => {
+    const renderTrack = (view = participantView()) => {
       if (!snapshot || !track) {
         return;
       }
 
       const expectedIds = new Set();
-      const ranked = rankedParticipants();
-      const visible = visibleParticipantWindow(ranked);
+      const { visible } = view;
       visible.forEach((participant) => {
         expectedIds.add(participant.profileId);
-        const lane = track.querySelector(`[data-track-participant-id="${participant.profileId}"]`) || trackLane(participant);
+        let lane = trackLanes.get(participant.profileId);
+        if (!lane) {
+          lane = track.querySelector(`[data-track-participant-id="${participant.profileId}"]`) || trackLane(participant);
+          trackLanes.set(participant.profileId, lane);
+        }
         updateTrackLane(lane, participant);
         track.insertBefore(lane, windowNote || null);
       });
 
-      track.querySelectorAll("[data-track-participant-id]").forEach((lane) => {
-        if (!expectedIds.has(lane.dataset.trackParticipantId)) {
+      trackLanes.forEach((lane, participantId) => {
+        if (!expectedIds.has(participantId)) {
           lane.remove();
+          trackLanes.delete(participantId);
         }
       });
     };
 
-    const renderLiveTypingBoard = (changedParticipantIds = null) => {
+    const renderLiveTypingBoard = (changedParticipantIds = null, view = participantView()) => {
       if (!snapshot || !liveBoard) {
         return;
       }
 
       const expectedIds = new Set();
-      const ranked = rankedParticipants();
-      const visible = visibleParticipantWindow(ranked);
+      const { ranked, visible } = view;
       renderRosterMode(ranked, visible);
       visible.forEach((participant) => {
         expectedIds.add(participant.profileId);
-        const existingRow = liveBoard.querySelector(`[data-live-participant-id="${participant.profileId}"]`);
-        const row = existingRow || liveTypingRow(participant);
-        if (!existingRow || changedParticipantIds === null || changedParticipantIds.has(participant.profileId)) {
+        let row = liveTypingRows.get(participant.profileId);
+        const isNew = !row;
+        if (!row) {
+          row = liveBoard.querySelector(`[data-live-participant-id="${participant.profileId}"]`) || liveTypingRow(participant);
+          liveTypingRows.set(participant.profileId, row);
+        }
+        if (isNew || changedParticipantIds === null || changedParticipantIds.has(participant.profileId)) {
           updateLiveTypingRow(row, participant);
         }
 
         liveBoard.append(row);
       });
 
-      liveBoard.querySelectorAll("[data-live-participant-id]").forEach((row) => {
-        if (!expectedIds.has(row.dataset.liveParticipantId)) {
+      liveTypingRows.forEach((row, participantId) => {
+        if (!expectedIds.has(participantId)) {
           row.remove();
+          liveTypingRows.delete(participantId);
         }
       });
     };
 
-    const renderHud = () => {
+    const renderHud = (view = participantView()) => {
       if (!snapshot || !hud) {
         return;
       }
 
-      const current = snapshot.participants?.find((participant) => participant.profileId === currentProfileId);
-      setText(hud.querySelector("[data-hud-rank]"), current ? String(rankFor(current.profileId)) : "-");
+      const current = participantById.get(currentProfileId);
+      setText(hud.querySelector("[data-hud-rank]"), current ? String(rankFor(current.profileId, view)) : "-");
       if (showLiveWpm) {
         setText(hud.querySelector("[data-hud-wpm]"), formatNumber(current?.wpm));
       }
@@ -685,7 +850,7 @@ export function attachArenaPages() {
       setText(hud.querySelector("[data-hud-progress]"), `${Math.round(progressPercent(current))} %`);
 
       if (current) {
-        announceRankChange(rankFor(current.profileId));
+        announceRankChange(rankFor(current.profileId, view));
       }
     };
 
@@ -777,6 +942,7 @@ export function attachArenaPages() {
       const running = snapshot.phase === "Running";
       const lobby = snapshot.phase === "Lobby";
       const betweenRounds = snapshot.phase === "RoundResults" && !snapshot.finished;
+      const canRematch = snapshot.finished && snapshot.creatorProfileId === currentProfileId;
       renderPhaseSteps();
       if (state) {
         state.textContent = phaseLabel(snapshot.phase);
@@ -789,7 +955,7 @@ export function attachArenaPages() {
         setHidden(dnfButton, !running);
       }
 
-      const current = snapshot.participants?.find((participant) => participant.profileId === currentProfileId);
+      const current = participantById.get(currentProfileId);
       const canStart = (lobby || betweenRounds) && snapshot.creatorProfileId === currentProfileId;
       setHidden(readyForm, !lobby);
       if (readyButton) {
@@ -805,6 +971,11 @@ export function attachArenaPages() {
 
       if (leaveButton) {
         leaveButton.disabled = !connected;
+      }
+
+      setHidden(rematchActions, !canRematch);
+      if (rematchButton && rematchForm?.dataset.submitting !== "true") {
+        rematchButton.disabled = !canRematch;
       }
 
       reactionPanel?.querySelectorAll("button").forEach((button) => {
@@ -923,6 +1094,77 @@ export function attachArenaPages() {
 
     const currentPersistenceState = () => snapshot ? persistenceStateFor(snapshot) : persistenceState;
 
+    const clearPersonalBest = () => {
+      setHidden(personalBest, true);
+      setHidden(newPersonalBest, true);
+      setText(personalBestValue, "");
+      setText(personalBestContext, "");
+      root.dataset.personalBestState = "hidden";
+    };
+
+    const renderPersonalBest = (value) => {
+      if (currentPersistenceState() !== "Persisted" || !value) {
+        clearPersonalBest();
+        return;
+      }
+
+      const bestWpm = Number(value.bestWpm);
+      const currentWpm = Number(value.currentWpm);
+      const previousBestWpm = value.previousBestWpm === null || value.previousBestWpm === undefined
+        ? null
+        : Number(value.previousBestWpm);
+      if (!Number.isFinite(bestWpm) || !Number.isFinite(currentWpm)) {
+        clearPersonalBest();
+        return;
+      }
+
+      setText(personalBestValue, `Bestwert: ${formatNumber(bestWpm)} WPM`);
+      const previous = previousBestWpm === null || !Number.isFinite(previousBestWpm)
+        ? "Bisher: noch kein bestätigter Wert"
+        : `Bisher: ${formatNumber(previousBestWpm)} WPM`;
+      const scope = String(value.scopeLabel || "Arena · gleicher Zieltext");
+      setText(personalBestContext, `Dieses Rennen: ${formatNumber(currentWpm)} WPM · ${previous} · ${scope}`);
+      setHidden(newPersonalBest, value.isNewBest !== true);
+      setHidden(personalBest, false);
+      root.dataset.personalBestState = value.isNewBest === true ? "new" : "confirmed";
+    };
+
+    const loadConfirmedPersonalBest = async () => {
+      if (disposed || unavailable || personalBestLoaded || personalBestController ||
+          currentPersistenceState() !== "Persisted") {
+        return;
+      }
+
+      personalBestController = new AbortController();
+      const requestController = personalBestController;
+      const requestTimeout = window.setTimeout(() => requestController.abort(), 4000);
+      try {
+        const response = await window.fetch(`/api/arena/${encodeURIComponent(roomId)}/speicherstatus`, {
+          credentials: "same-origin",
+          headers: { Accept: "application/json" },
+          signal: requestController.signal
+        });
+        if (!response.ok) {
+          throw new Error(`Arena-Bestwert nicht verfügbar (${response.status}).`);
+        }
+
+        const payload = camelize(await response.json());
+        if (normalizePersistenceState(payload.state) === "Persisted") {
+          personalBestLoaded = true;
+          renderPersonalBest(payload.personalBest);
+        }
+      } catch (error) {
+        if (error?.name !== "AbortError") {
+          console.warn("Arena-Bestwert konnte nicht abgefragt werden.", error);
+        }
+      } finally {
+        window.clearTimeout(requestTimeout);
+        if (personalBestController === requestController) {
+          personalBestController = null;
+        }
+      }
+    };
+
     const renderPersistenceStatus = (schedulePoll = true) => {
       if (snapshot) {
         persistenceState = persistenceStateFor(snapshot);
@@ -937,8 +1179,17 @@ export function attachArenaPages() {
 
       if (terminalPersistenceStates.has(persistenceState)) {
         stopPersistencePolling();
+        if (persistenceState === "Persisted") {
+          void loadConfirmedPersonalBest();
+        } else {
+          personalBestLoaded = false;
+          clearPersonalBest();
+        }
       } else if (schedulePoll && isPendingPersistenceState(persistenceState)) {
+        clearPersonalBest();
         schedulePersistencePoll();
+      } else {
+        clearPersonalBest();
       }
     };
 
@@ -969,6 +1220,10 @@ export function attachArenaPages() {
           if (snapshot?.finished) {
             snapshot.persistenceState = persistenceState;
           }
+        }
+        if (nextState === "Persisted") {
+          personalBestLoaded = true;
+          renderPersonalBest(payload.personalBest);
         }
       } catch (error) {
         if (error?.name !== "AbortError") {
@@ -1019,9 +1274,7 @@ export function attachArenaPages() {
       }
 
       const incomingStateVersion = Number(incoming.stateVersion);
-      const currentStateVersion = Number(snapshot?.stateVersion);
-      if (Number.isSafeInteger(incomingStateVersion) && Number.isSafeInteger(currentStateVersion) &&
-          incomingStateVersion < currentStateVersion) {
+      if (Number.isSafeInteger(incomingStateVersion) && incomingStateVersion < fullSnapshotVersion) {
         return;
       }
       if (incoming.finished && terminalPersistenceStates.has(previousPersistenceState) &&
@@ -1030,32 +1283,83 @@ export function attachArenaPages() {
       }
 
       const roundChanged = snapshot && Number(snapshot.currentRound) !== Number(incoming.currentRound);
+      const sameRoundVersion = snapshot && Number(snapshot.roundVersion) === Number(incoming.roundVersion);
+      if (snapshot && (!sameRoundVersion || roundChanged)) {
+        progressWatermarks.clear();
+      } else if (sameRoundVersion) {
+        (incoming.participants || []).forEach((participant) => {
+          const watermark = progressWatermarks.get(participant.profileId);
+          if (!watermark) {
+            return;
+          }
+          if (watermark.roundVersion !== Number(incoming.roundVersion)) {
+            progressWatermarks.delete(participant.profileId);
+            return;
+          }
+
+          const participantSequence = Number(participant.sequence);
+          const snapshotCaughtUp = (Number.isSafeInteger(incomingStateVersion) &&
+              incomingStateVersion >= watermark.stateVersion) ||
+            (Number.isSafeInteger(participantSequence) &&
+              participantSequence >= watermark.participantSequence);
+          if (snapshotCaughtUp) {
+            progressWatermarks.delete(participant.profileId);
+            return;
+          }
+
+          Object.assign(participant, watermark.progress);
+        });
+      }
+      if (Number.isSafeInteger(incomingStateVersion)) {
+        fullSnapshotVersion = Math.max(fullSnapshotVersion, incomingStateVersion);
+        const overlayStateVersion = Math.max(0, ...[...progressWatermarks.values()]
+          .map((watermark) => watermark.stateVersion));
+        incoming.stateVersion = Math.max(incomingStateVersion, overlayStateVersion);
+      }
       snapshot = incoming;
+      participantById = new Map((snapshot.participants || []).map((participant) => [participant.profileId, participant]));
       if (roundChanged) {
         sequence = 0;
+        acknowledgedInputElements = [];
+        progressRequiresResync = false;
+        progressPending = false;
         backspaces = 0;
         focusLosses = 0;
         finishedLocally = false;
         previousCurrentRank = null;
+        personalBestLoaded = false;
+        personalBestController?.abort();
+        personalBestController = null;
+        clearPersonalBest();
         lastRenderedTargetText = null;
         if (input) {
           input.value = "";
         }
       }
       persistenceState = persistenceStateFor(snapshot);
-      const currentParticipant = snapshot.participants?.find((participant) => participant.profileId === currentProfileId);
+      const currentParticipant = participantById.get(currentProfileId);
       const serverSequence = Number(currentParticipant?.sequence);
       if (Number.isSafeInteger(serverSequence) && serverSequence >= 0) {
+        if (serverSequence > sequence) {
+          acknowledgedInputElements = [];
+          progressRequiresResync = serverSequence > 0;
+        }
         sequence = Math.max(sequence, serverSequence);
       }
 
+      if (progressRenderFrame) {
+        cancelAnimationFrame(progressRenderFrame);
+        progressRenderFrame = 0;
+        changedProgressParticipants.clear();
+      }
       updateClockOffset(snapshot.serverNow);
       renderPhaseFeedback();
       renderTarget();
-      renderLiveTypingBoard();
-      renderParticipants();
-      renderTrack();
-      renderHud();
+      const view = participantView();
+      renderLiveTypingBoard(null, view);
+      renderParticipants(view);
+      renderTrack(view);
+      renderHud(view);
       renderTeams();
       renderPodium();
       renderHostControls();
@@ -1074,7 +1378,11 @@ export function attachArenaPages() {
       progressTimer = 0;
       clearTimeout(startRefreshTimer);
       stopPersistencePolling();
+      personalBestController?.abort();
+      personalBestController = null;
       cancelAnimationFrame(timerFrame);
+      cancelAnimationFrame(progressRenderFrame);
+      progressRenderFrame = 0;
       setInputDisabled(true);
 
       readyForm?.querySelector("button")?.setAttribute("disabled", "disabled");
@@ -1105,9 +1413,8 @@ export function attachArenaPages() {
 
       updateClockOffset(batch.serverNow);
       snapshot.roundVersion = Math.max(snapshot.roundVersion, batch.roomVersion);
-      const changedParticipantIds = new Set();
       batch.deltas.forEach((delta) => {
-        const participant = snapshot.participants?.find((item) => item.profileId === delta.participantId);
+        const participant = participantById.get(delta.participantId);
         if (!participant) {
           return;
         }
@@ -1120,8 +1427,12 @@ export function attachArenaPages() {
         }
 
         participant.correctCharacters = delta.correctCharacters;
-        participant.typedTextPreview = decodeTypedStateBits(delta.typedStateBits, delta.typedCharacters) ||
-          delta.typedTextPreview || "";
+        participant.typedCharacters = delta.typedCharacters;
+        const typedState = decodeTypedStateBits(delta.typedStateBits, delta.typedStateLength);
+        if (typedState !== null) {
+          participant.typedTextPreview = typedState;
+          participant.typedStateOffset = Math.max(0, Number(delta.typedStateOffset) || 0);
+        }
         participant.wpm = delta.wpm;
         participant.accuracy = delta.accuracy;
         participant.rankHint = delta.rankHint;
@@ -1131,33 +1442,123 @@ export function attachArenaPages() {
 
         const deltaStateVersion = Number(delta.stateVersion);
         if (Number.isSafeInteger(deltaStateVersion)) {
+          progressWatermarks.set(participant.profileId, {
+            roundVersion: Number(batch.roomVersion),
+            stateVersion: deltaStateVersion,
+            participantSequence,
+            progress: {
+              sequence: participant.sequence,
+              correctCharacters: participant.correctCharacters,
+              typedCharacters: participant.typedCharacters,
+              typedTextPreview: participant.typedTextPreview,
+              typedStateOffset: participant.typedStateOffset,
+              wpm: participant.wpm,
+              accuracy: participant.accuracy,
+              rankHint: participant.rankHint
+            }
+          });
           snapshot.stateVersion = Math.max(Number(snapshot.stateVersion) || 0, deltaStateVersion);
         }
-        changedParticipantIds.add(participant.profileId);
+        changedProgressParticipants.add(participant.profileId);
       });
-      renderLiveTypingBoard(changedParticipantIds);
-      renderParticipants();
-      renderTrack();
-      renderHud();
-      renderState();
+      scheduleProgressRender();
     };
 
-    const decodeTypedStateBits = (encoded, typedCharacters) => {
-      const length = Math.max(0, Math.min(
-        Number.isSafeInteger(Number(typedCharacters)) ? Number(typedCharacters) : 0,
-        Number(snapshot?.targetCharacterCount) || 0));
-      if (length === 0 || !encoded) {
+    const scheduleProgressRender = () => {
+      if (progressRenderFrame || changedProgressParticipants.size === 0) {
+        return;
+      }
+
+      progressRenderFrame = requestAnimationFrame(() => {
+        progressRenderFrame = 0;
+        const changed = new Set(changedProgressParticipants);
+        changedProgressParticipants.clear();
+        const view = participantView();
+        renderLiveTypingBoard(changed, view);
+        renderParticipants(view);
+        renderTrack(view);
+        renderHud(view);
+        root.dataset.progressRenderCount = String((Number(root.dataset.progressRenderCount) || 0) + 1);
+      });
+    };
+
+    const decodeTypedStateBits = (encoded, detailLength) => {
+      const numericLength = Number(detailLength);
+      const length = Number.isSafeInteger(numericLength) ? Math.max(0, Math.min(numericLength, 32)) : 0;
+      if (length === 0) {
         return "";
+      }
+      if (!encoded) {
+        return null;
       }
 
       try {
         const binary = window.atob(encoded);
+        if (binary.length < Math.ceil(length / 8)) {
+          return null;
+        }
         return Array.from({ length }, (_, index) => {
-          const value = binary.charCodeAt(Math.floor(index / 8)) || 0;
+          const value = binary.charCodeAt(Math.floor(index / 8));
           return (value & (1 << (index % 8))) !== 0 ? "c" : "w";
         }).join("");
       } catch {
-        return "";
+        return null;
+      }
+    };
+
+    const sameInput = (left, right) => left.length === right.length &&
+      left.every((element, index) => element === right[index]);
+
+    const flushProgress = async () => {
+      if (!snapshot || snapshot.phase !== "Running" || snapshot.finished || finishedLocally) {
+        return;
+      }
+      if (progressInFlight) {
+        progressPending = true;
+        return;
+      }
+
+      const built = buildTypingInputDelta(
+        acknowledgedInputElements,
+        input.value,
+        sequence,
+        progressRequiresResync);
+      if (!progressRequiresResync && sameInput(acknowledgedInputElements, built.elements)) {
+        progressPending = false;
+        return;
+      }
+
+      progressPending = false;
+      progressInFlight = true;
+      try {
+        const ack = camelize(await connection.invoke("SubmitProgress", [roomId, built.payload]));
+        const serverRevision = Number(ack?.revision);
+        if (!Number.isSafeInteger(serverRevision) || serverRevision < 0) {
+          throw new Error("Der Arena-Server hat keine gültige Eingaberevision bestätigt.");
+        }
+
+        sequence = Math.max(sequence, serverRevision);
+        if (ack.requiresResync === true || ack.accepted !== true) {
+          acknowledgedInputElements = [];
+          progressRequiresResync = true;
+          progressPending = true;
+        } else {
+          acknowledgedInputElements = built.elements;
+          progressRequiresResync = false;
+          progressPending = !sameInput(acknowledgedInputElements, splitGraphemes(input.value));
+        }
+      } catch (error) {
+        acknowledgedInputElements = [];
+        progressRequiresResync = true;
+        showConnectionError(error);
+      } finally {
+        progressInFlight = false;
+        if (progressPending && !finishedLocally) {
+          progressTimer = window.setTimeout(() => {
+            progressTimer = 0;
+            void flushProgress();
+          }, 0);
+        }
       }
     };
 
@@ -1166,10 +1567,11 @@ export function attachArenaPages() {
         return;
       }
 
+      progressPending = true;
       clearTimeout(progressTimer);
-      progressTimer = setTimeout(() => {
-        sequence += 1;
-        connection.invoke("SubmitProgress", [roomId, sequence, input.value]).catch(showConnectionError);
+      progressTimer = window.setTimeout(() => {
+        progressTimer = 0;
+        void flushProgress();
       }, 90);
     };
 
@@ -1178,6 +1580,9 @@ export function attachArenaPages() {
         return;
       }
 
+      clearTimeout(progressTimer);
+      progressTimer = 0;
+      progressPending = false;
       finishedLocally = true;
       setInputDisabled(true);
 
@@ -1218,7 +1623,7 @@ export function attachArenaPages() {
       readyPending = true;
       renderState();
       try {
-        const current = snapshot?.participants?.find((participant) => participant.profileId === currentProfileId);
+        const current = participantById.get(currentProfileId);
         applySnapshot(await connection.invoke("SetReady", [roomId, current?.ready !== true]));
       } catch (error) {
         showConnectionError(error);
@@ -1358,9 +1763,14 @@ export function attachArenaPages() {
     connection.on("progressChanged", applyProgressBatch);
     connection.on("reactionReceived", renderReaction);
     connection.on("roomUnavailable", handleRoomUnavailable);
+    connection.on("profileRevoked", handleRoomUnavailable);
     connection.onReconnecting(() => {
+      stopPresenceHeartbeat();
       window.clearTimeout(progressTimer);
       progressTimer = 0;
+      acknowledgedInputElements = [];
+      progressRequiresResync = true;
+      progressPending = true;
       restoreInputFocusAfterReconnect = restoreInputFocusAfterReconnect || document.activeElement === input;
       setConnectionStatus("reconnecting");
     });
@@ -1369,6 +1779,8 @@ export function attachArenaPages() {
         applySnapshot(await connection.invoke("JoinRoom", [roomId]));
         clearConnectionError();
         setConnectionStatus("connected");
+        schedulePresenceHeartbeat();
+        submitProgress();
         if (restoreInputFocusAfterReconnect && input && !input.disabled) {
           input.focus({ preventScroll: true });
         }
@@ -1381,6 +1793,7 @@ export function attachArenaPages() {
       }
     });
     connection.onDisconnected((error) => {
+      stopPresenceHeartbeat();
       if (disposed || unavailable) {
         return;
       }
@@ -1393,9 +1806,10 @@ export function attachArenaPages() {
     });
 
     root.addEventListener("keywars:arena-roster-display-change", () => {
-      renderLiveTypingBoard();
-      renderParticipants();
-      renderTrack();
+      const view = participantView();
+      renderLiveTypingBoard(null, view);
+      renderParticipants(view);
+      renderTrack(view);
     });
 
     renderState();
@@ -1409,6 +1823,7 @@ export function attachArenaPages() {
       .then((next) => {
         applySnapshot(next);
         clearConnectionError();
+        schedulePresenceHeartbeat();
       })
       .catch((error) => {
         setConnectionStatus("disconnected");
@@ -1417,7 +1832,12 @@ export function attachArenaPages() {
 
     window.addEventListener("pagehide", () => {
       disposed = true;
+      stopPresenceHeartbeat();
+      window.clearTimeout(progressTimer);
+      cancelAnimationFrame(progressRenderFrame);
       stopPersistencePolling();
+      personalBestController?.abort();
+      personalBestController = null;
       if (connection.isConnected()) {
         connection.invoke("LeaveRoom", [roomId])
           .catch(() => {})

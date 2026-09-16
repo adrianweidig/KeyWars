@@ -50,6 +50,19 @@ function fakeSignalRSource() {
 
     async invoke(target, ...args) {
       this.invocations.push({ target, args });
+      if (target === "SubmitProgress") {
+        const input = args[1] || {};
+        return {
+          revision: Number(input.revision) || 0,
+          accepted: true,
+          requiresResync: false
+        };
+      }
+
+      if (target === "Heartbeat") {
+        return true;
+      }
+
       return this.snapshot();
     }
 
@@ -90,7 +103,9 @@ function fakeSignalRSource() {
           ready: true,
           sequence: 7,
           correctCharacters: running ? 4 : Array.from(targetText).length,
-          typedTextPreview: running ? "cccc" : "c".repeat(Array.from(targetText).length),
+          typedTextPreview: running ? "cccc" : "c".repeat(Math.min(32, Array.from(targetText).length)),
+          typedStateOffset: running ? 0 : Math.max(0, Array.from(targetText).length - 32),
+          typedCharacters: running ? 4 : Array.from(targetText).length,
           wpm: 42.5,
           placement: running ? null : 1,
           durationMilliseconds: running ? null : 8500,

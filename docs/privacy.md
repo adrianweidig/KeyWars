@@ -20,7 +20,9 @@ Der Profilexport enthält nur Daten des angemeldeten Profils:
   gehört.
 
 Der Export enthält eine Versionsnummer und einen Erstellzeitpunkt. Das aktuelle
-Format ist Version 3. Interne Wiederholungs- und Idempotenzwerte wie
+Format ist Version 4. Gegenüber Version 3 ergänzt es die profilbezogenen
+`SeasonScores` sowie ausschließlich die dadurch referenzierten `Seasons`.
+Interne Wiederholungs- und Idempotenzwerte wie
 `TypingAttempt.Nonce`, `ChallengeAttemptBinding.BindingToken` und
 `LiveRoomSummary.IdempotencyKey` werden nicht ausgegeben. Ein automatisierter
 Inventartest erzwingt bei neuen Datenbanktabellen eine bewusste

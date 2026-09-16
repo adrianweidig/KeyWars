@@ -3,7 +3,6 @@ using KeyWars.Data;
 using KeyWars.Domain;
 using KeyWars.Services;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.AspNetCore.RateLimiting;
 
 namespace KeyWars.Infrastructure;
 
@@ -12,8 +11,7 @@ public static class ApiEndpoints
     public static void MapKeyWarsApi(this IEndpointRouteBuilder endpoints)
     {
         var api = endpoints.MapGroup("/api")
-            .RequireAuthorization()
-            .RequireRateLimiting("keywars-api");
+            .RequireAuthorization();
         api.AddEndpointFilter(async (context, next) =>
         {
             try
@@ -217,12 +215,20 @@ public static class ApiEndpoints
             return Results.Ok(new { profile.DisplayName, profile.Level, profile.ExperiencePoints, profile.ArenaRating, LastAttempts = last });
         });
 
-        api.MapGet("/arena/{roomId:guid}/speicherstatus", async (Guid roomId, CurrentUser currentUser, HttpContext httpContext, KeyWarsDbContext db, ILiveRoomCompletionSink completions, CancellationToken cancellationToken) =>
+        api.MapGet("/arena/{roomId:guid}/speicherstatus", async (Guid roomId, CurrentUser currentUser, HttpContext httpContext, KeyWarsDbContext db, ILiveRoomCompletionSink completions, ArenaPersonalBestService personalBests, CancellationToken cancellationToken) =>
         {
-            await currentUser.RequireProfileAsync(httpContext.User, cancellationToken);
+            var profile = await currentUser.RequireProfileAsync(httpContext.User, cancellationToken);
             var persisted = await db.LiveRoomSummaries.AsNoTracking().AnyAsync(room => room.Id == roomId, cancellationToken);
             var state = persisted ? CompletionState.Persisted : completions.GetStatus(roomId).State;
-            return Results.Ok(new { State = state.ToString() });
+            if (state != CompletionState.Persisted)
+            {
+                return Results.Ok(new { State = state.ToString() });
+            }
+
+            var personalBest = await personalBests.GetConfirmedAsync(roomId, profile.Id, cancellationToken);
+            return personalBest is null
+                ? Results.Ok(new { State = state.ToString() })
+                : Results.Ok(new { State = state.ToString(), PersonalBest = personalBest });
         });
     }
 

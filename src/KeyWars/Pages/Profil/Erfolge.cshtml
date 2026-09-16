@@ -50,6 +50,13 @@
         else
         {
             <p class="muted locked-line">@UiIcons.Svg("lock", "kw-icon") Noch gesperrt</p>
+            <p>
+                <progress class="progress xp-progress small"
+                          value="@achievement.Current.ToString("0.#", CultureInfo.InvariantCulture)"
+                          max="@achievement.Target.ToString("0.#", CultureInfo.InvariantCulture)"
+                          aria-label="Fortschritt für @achievement.Title">@achievement.Current.ToString("0.#", culture) von @achievement.Target.ToString("0.#", culture) @achievement.Unit</progress>
+                <span class="muted">@achievement.Current.ToString("0.#", culture) von @achievement.Target.ToString("0.#", culture) @achievement.Unit</span>
+            </p>
         }
     </article>
 }

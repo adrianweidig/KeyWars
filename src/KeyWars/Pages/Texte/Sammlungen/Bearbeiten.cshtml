@@ -1,0 +1,54 @@
+@page "/texte/sammlungen/{id:guid}/bearbeiten"
+@model KeyWars.Pages.Texte.Sammlungen.BearbeitenModel
+@{
+    ViewData["Title"] = "Sammlung bearbeiten";
+}
+
+<section class="page-header">
+    <div>
+        <h1>Sammlung bearbeiten</h1>
+        <p class="lead">Passe Inhalt und Sichtbarkeit deiner Sammlung an. Die enthaltenen Texte bleiben unverändert.</p>
+    </div>
+</section>
+
+<section class="card">
+    <form method="post" class="form-grid">
+        <div asp-validation-summary="ModelOnly"></div>
+        <label>
+            Name
+            <input asp-for="Input.Name" />
+        </label>
+        <label>
+            Beschreibung
+            <input asp-for="Input.Description" />
+        </label>
+        <label>
+            Sichtbarkeit
+            <select asp-for="Input.Visibility">
+                <option value="Private">Privat</option>
+                <option value="Organization">Organisationsweit freigeben</option>
+            </select>
+        </label>
+        <fieldset>
+            <legend>Texte</legend>
+            @foreach (var text in Model.Texts)
+            {
+                <label class="checkbox-label">
+                    @if (Model.Input.TextIds.Contains(text.Id))
+                    {
+                        <input type="checkbox" name="Input.TextIds" value="@text.Id" checked />
+                    }
+                    else
+                    {
+                        <input type="checkbox" name="Input.TextIds" value="@text.Id" />
+                    }
+                    @text.Title
+                </label>
+            }
+        </fieldset>
+        <div class="form-actions">
+            <button type="submit">Änderungen speichern</button>
+            <a class="button secondary" asp-page="/Texte/Sammlungen/Details" asp-route-id="@Model.CollectionId">Abbrechen</a>
+        </div>
+    </form>
+</section>

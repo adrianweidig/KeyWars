@@ -8,7 +8,19 @@
     <div>
         <h1>@Model.Collection.Name</h1>
         <p class="lead">@Model.Collection.Description</p>
+        <div class="metadata-row">
+            <span class="meta-badge">@DisplayNames.For(Model.Collection.Visibility)</span>
+        </div>
     </div>
+    @if (Model.CanManage)
+    {
+        <div class="page-actions">
+            <a class="button secondary" asp-page="/Texte/Sammlungen/Bearbeiten" asp-route-id="@Model.Collection.Id">Bearbeiten</a>
+            <form method="post" asp-page-handler="Delete" asp-route-id="@Model.Collection.Id">
+                <button class="warning" type="submit">Sammlung löschen</button>
+            </form>
+        </div>
+    }
 </section>
 
 <section class="grid text-library-grid collection-text-grid">

@@ -86,6 +86,11 @@ internal static class LiveRoomCompletionRules
                 item.CompletedRounds > 0 ? item.TotalDurationMilliseconds : item.DurationMilliseconds,
                 item.CompletedRounds > 0 ? item.AverageWpm : item.Wpm,
                 item.CompletedRounds > 0 ? item.AverageAccuracy : item.Accuracy,
-                item.TeamNumber))
-            .ToArray());
+                item.TeamNumber,
+                item.FinishedRounds * room.TargetCharacterCount,
+                item.CompetitionEligible))
+            .ToArray(),
+        TextHash.Compute(room.Text),
+        room.RatingEligible,
+        room.TargetCompetitionEligible);
 }

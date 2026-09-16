@@ -22,20 +22,27 @@ public sealed record RuntimeTopology(
     string? RedisConnectionString,
     string DataProtectionApplicationName)
 {
-    public const string ClusterProtocolVersion = "1";
+    public const string ClusterProtocolVersion = "3";
+    public const string PreviousClusterProtocolVersion = "2";
+    public const string LegacyClusterProtocolVersion = "1";
     public const string ClusterProtocolVersionKey = "keywars:cluster:protocol-version";
-    public const string LegacyCompletionPendingKey = "keywars:completion:pending";
-    public const string LegacyCompletionFailedKey = "keywars:completion:failed";
-    public const string LegacyCompletionRecordPattern = "keywars:completion:record:*";
+    public const string LegacyCompletionPendingKey = "keywars:{completion}:pending";
+    public const string LegacyCompletionFailedKey = "keywars:{completion}:failed";
+    public const string LegacyCompletionEnqueuedKey = "keywars:{completion}:enqueued";
+    public const string LegacyCompletionRecordPattern = "keywars:{completion}:record:*";
+    public const string HistoricalCompletionPendingKey = "keywars:completion:pending";
+    public const string HistoricalCompletionFailedKey = "keywars:completion:failed";
+    public const string HistoricalCompletionEnqueuedKey = "keywars:completion:enqueued";
+    public const string HistoricalCompletionRecordPattern = "keywars:completion:record:*";
     public const string ClusterProtocolCutoverCommand =
         "maintenance cluster-protocol cutover --confirm-apps-stopped";
     public const string ClusterProtocolCutoverScript = """
         local active = redis.call('GET', KEYS[1])
-        if not active then
-            redis.call('SET', KEYS[1], ARGV[1])
+        if not active or active == ARGV[1] then
+            redis.call('SET', KEYS[1], ARGV[2])
             return 1
         end
-        if active == ARGV[1] then
+        if active == ARGV[2] then
             return 0
         end
         return -1
@@ -75,22 +82,71 @@ public sealed record RuntimeTopology(
         }
     }
 
-    public static void RequireLegacyCompletionQueueDrained(
-        long pendingJobs,
-        long failedRecords,
-        long legacyRecordCount)
+    internal static ClusterProtocolCutoverMarkerState ClassifyClusterProtocolCutoverMarker(
+        string? activeVersion)
     {
-        if (pendingJobs == 0 && failedRecords == 0 && legacyRecordCount == 0)
+        if (activeVersion is null)
+        {
+            return ClusterProtocolCutoverMarkerState.RequiresLegacyPreparation;
+        }
+
+        if (string.Equals(activeVersion, PreviousClusterProtocolVersion, StringComparison.Ordinal))
+        {
+            return ClusterProtocolCutoverMarkerState.RequiresMarkerUpgrade;
+        }
+
+        if (string.Equals(activeVersion, ClusterProtocolVersion, StringComparison.Ordinal))
+        {
+            return ClusterProtocolCutoverMarkerState.AlreadyCurrent;
+        }
+
+        if (string.Equals(activeVersion, LegacyClusterProtocolVersion, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Dieser Redis-Keyspace verwendet noch Cluster-Protokoll {LegacyClusterProtocolVersion}. " +
+                $"Führe zuerst mit dem vorherigen Release den Cutover auf {PreviousClusterProtocolVersion} aus, " +
+                "stoppe danach erneut alle Anwendungsreplikate und starte erst dann diesen Cutover. " +
+                "Der Cluster-Protokollmarker blieb unverändert.");
+        }
+
+        throw new InvalidOperationException(
+            $"Dieser Redis-Keyspace verwendet Cluster-Protokoll {activeVersion}; " +
+            $"der Cutover auf {ClusterProtocolVersion} ist ausschließlich von einem fehlenden Marker oder " +
+            $"von Version {PreviousClusterProtocolVersion} erlaubt. Der Cluster-Protokollmarker blieb unverändert.");
+    }
+
+    internal static void RequireLegacyCompletionAuthorityDrained(
+        LegacyCompletionAuthority tagged,
+        LegacyCompletionAuthority historical)
+    {
+        if (tagged.Total == 0 && historical.Total == 0)
         {
             return;
         }
 
         throw new InvalidOperationException(
-            "Der alte Redis-Completion-Namespace enthält noch " +
-            $"{pendingJobs} offene, {failedRecords} fehlgeschlagene und " +
-            $"{legacyRecordCount} gespeicherte Abschlussaufträge. " +
+            "Die alten Redis-Completion-Namespaces enthalten noch autoritative Arbeit: " +
+            $"getaggt {tagged} und historisch {historical}. " +
             "Starte das bisherige Release erneut, lasse die Abschlussqueue vollständig leerlaufen und " +
             "stoppe danach alle Anwendungsreplikate. Der Cluster-Protokollmarker blieb unverändert.");
+    }
+
+    internal static void RequireNoActiveTypingAttempts(long activeAttemptCount)
+    {
+        if (activeAttemptCount == 0)
+        {
+            return;
+        }
+
+        if (activeAttemptCount < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(activeAttemptCount));
+        }
+
+        throw new InvalidOperationException(
+            $"PostgreSQL enthält noch {activeAttemptCount} vorbereitete oder gestartete TypingAttempts. " +
+            "Diese Versuche müssen mit dem bisherigen Release regulär terminalisiert werden, bevor der " +
+            "v1-Attempt-Keyspace entfernt wird. Der Cluster-Protokollmarker blieb unverändert.");
     }
 
     public static RuntimeTopology Resolve(IConfiguration configuration)
@@ -183,4 +239,23 @@ public sealed record RuntimeTopology(
 
     private static string? FirstNonEmpty(params string?[] values) =>
         values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
+}
+
+internal enum ClusterProtocolCutoverMarkerState
+{
+    RequiresLegacyPreparation,
+    RequiresMarkerUpgrade,
+    AlreadyCurrent
+}
+
+internal sealed record LegacyCompletionAuthority(
+    long Pending,
+    long Failed,
+    long Enqueued,
+    long Records)
+{
+    internal long Total => checked(Pending + Failed + Enqueued + Records);
+
+    public override string ToString() =>
+        $"pending={Pending}, failed={Failed}, enqueued={Enqueued}, records={Records}";
 }

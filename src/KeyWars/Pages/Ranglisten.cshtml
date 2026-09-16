@@ -99,15 +99,22 @@
 <section class="competition-controls" aria-label="Ranglistenfilter">
     <form method="get" class="competition-filter-grid @(query.Board == CompetitionBoardKind.Text ? "text-filter" : "")">
         <input type="hidden" name="board" value="@Model.BoardValue(query.Board)" />
-        <label>
-            Zeitraum
-            <select name="period">
-                @foreach (var item in Model.Periods)
-                {
-                    <option value="@item.Value" selected="@(query.Period == item.Period)">@item.Label</option>
-                }
-            </select>
-        </label>
+        @if (query.Board == CompetitionBoardKind.Season)
+        {
+            <input type="hidden" name="period" value="all" />
+        }
+        else
+        {
+            <label>
+                Zeitraum
+                <select name="period">
+                    @foreach (var item in Model.Periods)
+                    {
+                        <option value="@item.Value" selected="@(query.Period == item.Period)">@item.Label</option>
+                    }
+                </select>
+            </label>
+        }
         @if (query.Board == CompetitionBoardKind.Sprint)
         {
             <label>
@@ -277,7 +284,7 @@
             <h2>Wertung</h2>
             <ul class="competition-rules">
                 <li>Nur offizielle Runden ab 90 % Genauigkeit.</li>
-                <li>Im Zeitraum zählt pro Person das beste Ergebnis.</li>
+                <li>@(query.Board == CompetitionBoardKind.Season ? "Saisonpunkte werden je gültigem Abschluss genau einmal vergeben." : "Im Zeitraum zählt pro Person das beste Ergebnis.")</li>
                 <li>Ausgeblendete Profile erscheinen nicht öffentlich.</li>
             </ul>
         </section>
@@ -304,6 +311,7 @@
                 Html.Raw($"""<a class="button" href="/spielen/text/{textId}">{(label == "Selbst antreten" ? "Text trainieren" : encodedLabel)}</a>"""),
             CompetitionBoardKind.Challenge => Html.Raw($"""<a class="button" href="/herausforderungen">{(label == "Selbst antreten" ? "Challenge öffnen" : encodedLabel)}</a>"""),
             CompetitionBoardKind.Xp => Html.Raw($"""<a class="button" href="/spielen">{(label == "Selbst antreten" ? "XP sammeln" : encodedLabel)}</a>"""),
+            CompetitionBoardKind.Season => Html.Raw($"""<a class="button" href="/arena">{(label == "Selbst antreten" ? "Saisonpunkte sammeln" : encodedLabel)}</a>"""),
             _ => Html.Raw($"""<a class="button" href="/arena">{(label == "Selbst antreten" ? "Arena öffnen" : encodedLabel)}</a>""")
         };
     }

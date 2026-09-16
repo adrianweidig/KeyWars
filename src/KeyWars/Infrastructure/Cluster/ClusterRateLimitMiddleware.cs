@@ -10,22 +10,17 @@ public sealed class ClusterRateLimitMiddleware(RequestDelegate next)
 {
     public async Task InvokeAsync(
         HttpContext context,
-        RuntimeTopology topology,
         IHostEnvironment environment,
         IOptions<AuthOptions> authOptions,
         ISharedRateLimiter limiter)
     {
-        if (!topology.IsCluster)
-        {
-            await next(context);
-            return;
-        }
-
         var request = context.Request;
         string? partition = null;
         string? key = null;
         var limit = 0;
-        if (HttpMethods.IsPost(request.Method) && request.Path.Equals("/anmelden"))
+        if (HttpMethods.IsPost(request.Method) &&
+            (request.Path.Equals("/anmelden", StringComparison.OrdinalIgnoreCase) ||
+             request.Path.Equals("/anmelden/", StringComparison.OrdinalIgnoreCase)))
         {
             partition = "login";
             key = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";

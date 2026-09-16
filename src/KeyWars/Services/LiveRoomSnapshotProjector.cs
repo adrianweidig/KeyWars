@@ -41,21 +41,45 @@ internal static class LiveRoomSnapshotProjector
                 .OrderBy(item => item.Placement ?? int.MaxValue)
                 .ThenByDescending(item => item.CorrectCharacters)
                 .ThenBy(item => item.DisplayName)
-                .Select(item => new LiveParticipantSnapshot(
-                    item.ProfileId,
-                    item.DisplayName,
-                    item.Status,
-                    item.Ready,
-                    item.Sequence,
-                    item.CorrectCharacters,
-                    exposeTargetText ? item.TypedTextPreview : "",
-                    item.Wpm,
-                    item.Placement,
-                    item.DurationMilliseconds,
-                    item.Accuracy,
-                    item.TeamNumber,
-                    item.SeriesPoints,
-                    item.RoundWins))
+                .Select(item =>
+                {
+                    var preview = exposeTargetText
+                        ? item.TypedTextPreview[..Math.Min(
+                            item.TypedTextPreview.Length,
+                            LiveRoomProgress.MaxTypedStateDetailCharacters)]
+                        : "";
+                    var offset = exposeTargetText
+                        ? Math.Clamp(
+                            item.TypedStateOffset,
+                            0,
+                            Math.Max(0, room.TargetCharacterCount - preview.Length))
+                        : 0;
+                    var typedCharacters = exposeTargetText
+                        ? Math.Clamp(
+                            Math.Max(
+                                item.CorrectCharacters,
+                                Math.Max(item.TypedCharacters, offset + preview.Length)),
+                            0,
+                            room.TargetCharacterCount + LiveRoomProgress.MaxInputOverrunCharacters)
+                        : 0;
+                    return new LiveParticipantSnapshot(
+                        item.ProfileId,
+                        item.DisplayName,
+                        item.Status,
+                        item.Ready,
+                        item.Sequence,
+                        item.CorrectCharacters,
+                        preview,
+                        item.Wpm,
+                        item.Placement,
+                        item.DurationMilliseconds,
+                        item.Accuracy,
+                        item.TeamNumber,
+                        item.SeriesPoints,
+                        item.RoundWins,
+                        offset,
+                        typedCharacters);
+                })
                 .ToArray(),
             persistenceState,
             LiveRoomScoring.BuildTeamSnapshots(room),

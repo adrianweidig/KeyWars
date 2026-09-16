@@ -5,7 +5,11 @@ using Microsoft.AspNetCore.Mvc.RazorPages;
 
 namespace KeyWars.Pages.Profil;
 
-public sealed class ExportModel(CurrentUser currentUser, ProfileExportService exports) : PageModel
+public sealed class ExportModel(
+    CurrentUser currentUser,
+    ProfileExportService exports,
+    ISharedRateLimiter rateLimiter,
+    IProfileExportConcurrencyGate concurrencyGate) : PageModel
 {
     [BindProperty(SupportsGet = true)]
     public DateOnly? Von { get; set; }
@@ -31,7 +35,25 @@ public sealed class ExportModel(CurrentUser currentUser, ProfileExportService ex
         }
 
         var profile = await currentUser.RequireProfileAsync(User, cancellationToken);
-        return exports.CreateDownload(profile.Id, range!);
+        if (!await rateLimiter.TryAcquireAsync(
+                "profile-export",
+                profile.Id.ToString("N"),
+                1,
+                TimeSpan.FromMinutes(1),
+                cancellationToken))
+        {
+            Response.Headers.RetryAfter = "60";
+            return StatusCode(StatusCodes.Status429TooManyRequests);
+        }
+
+        var exportLease = await concurrencyGate.TryAcquireAsync(profile.Id, cancellationToken);
+        if (exportLease is null)
+        {
+            Response.Headers.RetryAfter = "5";
+            return StatusCode(StatusCodes.Status429TooManyRequests);
+        }
+
+        return exports.CreateDownload(profile.Id, range!, exportLease);
     }
 
     private async Task<ProfileExportRange?> LoadPreviewAsync(CancellationToken cancellationToken)

@@ -29,6 +29,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="KeyWars.UnitTests" />
+    <InternalsVisibleTo Include="KeyWars.ClusterProbe" />
   </ItemGroup>
 
 </Project>

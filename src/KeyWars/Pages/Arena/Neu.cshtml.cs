@@ -134,7 +134,8 @@ public sealed class NeuModel(
                 Input.Visibility,
                 Input.RoundCount,
                 Input.MaxParticipants,
-                invitations), cancellationToken);
+                invitations,
+                TargetCompetitionEligible: text.RatingEligible), cancellationToken);
             return RedirectToPage("/Arena/Raum", new { id = snapshot.RoomId });
         }
         catch (InvalidOperationException exception) when (IsCapacityError(exception.Message))

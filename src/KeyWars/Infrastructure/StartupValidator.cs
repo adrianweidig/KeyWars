@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using KeyWars.Auth;
 using KeyWars.Data;
 
 namespace KeyWars.Infrastructure;
@@ -20,6 +21,8 @@ public static class StartupValidator
 
         var ldapOptions = ConfigurationAliases.GetLdap(configuration);
         var authOptions = ConfigurationAliases.GetAuth(configuration);
+        var moderationOptions = new ContentModerationOptions();
+        ConfigurationAliases.BindModeration(configuration, moderationOptions);
         if (environment.IsDevelopment())
         {
             return;
@@ -50,6 +53,13 @@ public static class StartupValidator
         if (developmentAuth)
         {
             throw new InvalidOperationException("Development-Auth darf außerhalb von Development nicht aktiviert sein.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(moderationOptions.ModeratorGroupValues))
+        {
+            throw new InvalidOperationException(
+                "KEYWARS__MODERATION__MODERATOR_GROUP_VALUES ist außerhalb von Development nicht erlaubt. " +
+                "Migriere die Gruppen auf vollständige memberOf-DNs in KEYWARS__MODERATION__MODERATOR_GROUP_DNS.");
         }
 
         if (ldapOptions.ConnectTimeoutSeconds is < 1 or > 60)

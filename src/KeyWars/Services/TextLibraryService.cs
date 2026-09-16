@@ -173,35 +173,13 @@ public sealed class TextLibraryService(
         IReadOnlyCollection<Guid> textIds,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(name))
-        {
-            throw new InvalidOperationException("Der Sammlungsname darf nicht leer sein.");
-        }
-
-        var distinctTextIds = textIds.Distinct().ToArray();
-        if (distinctTextIds.Length == 0)
-        {
-            throw new InvalidOperationException("Eine Sammlung braucht mindestens einen Text.");
-        }
-
-        if (distinctTextIds.Length != textIds.Count)
-        {
-            throw new InvalidOperationException("Ein Text darf nur einmal in derselben Sammlung enthalten sein.");
-        }
-
-        var visibleTexts = await db.TrainingTexts
-            .Where(text => distinctTextIds.Contains(text.Id) && !text.IsQuarantined &&
-                (text.IsStandard || text.Visibility == TrainingTextVisibility.Organization || text.OwnerProfileId == ownerProfileId))
-            .ToListAsync(cancellationToken);
-        if (visibleTexts.Count != distinctTextIds.Length)
-        {
-            throw new InvalidOperationException("Mindestens ein ausgewählter Text ist nicht sichtbar.");
-        }
-
-        if (visibility == TrainingTextVisibility.Organization && visibleTexts.Any(text => !text.IsStandard && text.Visibility != TrainingTextVisibility.Organization))
-        {
-            throw new InvalidOperationException("Organisationsweite Sammlungen dürfen keine privaten Texte enthalten.");
-        }
+        var orderedTextIds = await ValidateCollectionInputAsync(
+            ownerProfileId,
+            name,
+            description,
+            visibility,
+            textIds,
+            cancellationToken);
 
         var collection = new TextCollection
         {
@@ -213,7 +191,7 @@ public sealed class TextLibraryService(
         db.TextCollections.Add(collection);
 
         var order = 0;
-        foreach (var textId in distinctTextIds)
+        foreach (var textId in orderedTextIds)
         {
             db.TextCollectionItems.Add(new TextCollectionItem
             {
@@ -225,6 +203,113 @@ public sealed class TextLibraryService(
 
         await db.SaveChangesAsync(cancellationToken);
         return collection;
+    }
+
+    public async Task<TextCollection> GetVisibleCollectionAsync(
+        Guid ownerProfileId,
+        Guid collectionId,
+        CancellationToken cancellationToken = default)
+    {
+        var collection = await db.TextCollections
+            .AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == collectionId && !item.IsQuarantined &&
+                (item.OwnerProfileId == ownerProfileId || item.Visibility == TrainingTextVisibility.Organization), cancellationToken);
+        return collection ?? throw new InvalidOperationException("Diese Sammlung ist nicht verfügbar.");
+    }
+
+    public async Task<TextCollection> GetOwnedCollectionAsync(
+        Guid ownerProfileId,
+        Guid collectionId,
+        CancellationToken cancellationToken = default)
+    {
+        var collection = await db.TextCollections
+            .SingleOrDefaultAsync(item => item.Id == collectionId && item.OwnerProfileId == ownerProfileId && !item.IsQuarantined, cancellationToken);
+        return collection ?? throw new InvalidOperationException("Diese Sammlung wurde nicht gefunden oder kann nicht bearbeitet werden.");
+    }
+
+    public async Task<List<Guid>> GetOwnedCollectionTextIdsAsync(
+        Guid ownerProfileId,
+        Guid collectionId,
+        CancellationToken cancellationToken = default)
+    {
+        await GetOwnedCollectionAsync(ownerProfileId, collectionId, cancellationToken);
+        return await db.TextCollectionItems
+            .Where(item => item.TextCollectionId == collectionId)
+            .OrderBy(item => item.SortOrder)
+            .Select(item => item.TrainingTextId)
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<TextCollection> UpdateCollectionAsync(
+        Guid ownerProfileId,
+        Guid collectionId,
+        string name,
+        string? description,
+        TrainingTextVisibility visibility,
+        IReadOnlyCollection<Guid> textIds,
+        CancellationToken cancellationToken = default)
+    {
+        var collection = await GetOwnedCollectionAsync(ownerProfileId, collectionId, cancellationToken);
+        var orderedTextIds = await ValidateCollectionInputAsync(
+            ownerProfileId,
+            name,
+            description,
+            visibility,
+            textIds,
+            cancellationToken);
+
+        collection.Name = name.Trim();
+        collection.Description = string.IsNullOrWhiteSpace(description) ? null : description.Trim();
+        collection.Visibility = visibility;
+
+        var existingItems = await db.TextCollectionItems
+            .Where(item => item.TextCollectionId == collection.Id)
+            .ToListAsync(cancellationToken);
+        var desiredIds = orderedTextIds.ToHashSet();
+        db.TextCollectionItems.RemoveRange(existingItems.Where(item => !desiredIds.Contains(item.TrainingTextId)));
+
+        var existingByTextId = existingItems.ToDictionary(item => item.TrainingTextId);
+        for (var order = 0; order < orderedTextIds.Length; order++)
+        {
+            var textId = orderedTextIds[order];
+            if (existingByTextId.TryGetValue(textId, out var existingItem))
+            {
+                existingItem.SortOrder = order;
+            }
+            else
+            {
+                db.TextCollectionItems.Add(new TextCollectionItem
+                {
+                    TextCollectionId = collection.Id,
+                    TrainingTextId = textId,
+                    SortOrder = order
+                });
+            }
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+        return collection;
+    }
+
+    public async Task<bool> DeleteCollectionAsync(
+        Guid ownerProfileId,
+        Guid collectionId,
+        CancellationToken cancellationToken = default)
+    {
+        var collection = await db.TextCollections
+            .SingleOrDefaultAsync(item => item.Id == collectionId && item.OwnerProfileId == ownerProfileId && !item.IsQuarantined, cancellationToken);
+        if (collection is null)
+        {
+            return false;
+        }
+
+        var links = await db.TextCollectionItems
+            .Where(item => item.TextCollectionId == collection.Id)
+            .ToListAsync(cancellationToken);
+        db.TextCollectionItems.RemoveRange(links);
+        db.TextCollections.Remove(collection);
+        await db.SaveChangesAsync(cancellationToken);
+        return true;
     }
 
     public async Task<IReadOnlyList<UserProfile>> SearchPeopleAsync(Guid currentProfileId, string? query, int take = 20, CancellationToken cancellationToken = default)
@@ -285,6 +370,57 @@ public sealed class TextLibraryService(
         {
             throw new InvalidOperationException("Dieser Text wurde bereits verwendet. Erstelle eine Kopie, damit bestehende Ergebnisse und Herausforderungen unverändert bleiben.");
         }
+    }
+
+    private async Task<Guid[]> ValidateCollectionInputAsync(
+        Guid ownerProfileId,
+        string name,
+        string? description,
+        TrainingTextVisibility visibility,
+        IReadOnlyCollection<Guid> textIds,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            throw new InvalidOperationException("Der Sammlungsname darf nicht leer sein.");
+        }
+
+        if (name.Trim().Length > 160)
+        {
+            throw new InvalidOperationException("Der Sammlungsname darf maximal 160 Zeichen lang sein.");
+        }
+
+        if (description?.Trim().Length > 400)
+        {
+            throw new InvalidOperationException("Die Sammlungsbeschreibung darf maximal 400 Zeichen lang sein.");
+        }
+
+        var orderedTextIds = textIds.ToArray();
+        if (orderedTextIds.Length == 0)
+        {
+            throw new InvalidOperationException("Eine Sammlung braucht mindestens einen Text.");
+        }
+
+        if (orderedTextIds.Distinct().Count() != orderedTextIds.Length)
+        {
+            throw new InvalidOperationException("Ein Text darf nur einmal in derselben Sammlung enthalten sein.");
+        }
+
+        var visibleTexts = await db.TrainingTexts
+            .Where(text => orderedTextIds.Contains(text.Id) && !text.IsQuarantined &&
+                (text.IsStandard || text.Visibility == TrainingTextVisibility.Organization || text.OwnerProfileId == ownerProfileId))
+            .ToListAsync(cancellationToken);
+        if (visibleTexts.Count != orderedTextIds.Length)
+        {
+            throw new InvalidOperationException("Mindestens ein ausgewählter Text ist nicht sichtbar.");
+        }
+
+        if (visibility == TrainingTextVisibility.Organization && visibleTexts.Any(text => !text.IsStandard && text.Visibility != TrainingTextVisibility.Organization))
+        {
+            throw new InvalidOperationException("Organisationsweite Sammlungen dürfen keine privaten Texte enthalten.");
+        }
+
+        return orderedTextIds;
     }
 
     private string NormalizeAndValidateText(string title, string body)

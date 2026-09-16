@@ -106,7 +106,7 @@ test("Arena trennt Verbindungs-, Vorab- und Persistenzstatus barrierearm", async
   await arenaInput.focus();
   await arenaInput.fill("Front");
   await expect.poll(() => page.evaluate(() => window.__arenaFakeConnection.invocations
-    .find((invocation) => invocation.target === "SubmitProgress")?.args[1])).toBe(8);
+    .find((invocation) => invocation.target === "SubmitProgress")?.args[1]?.revision)).toBe(8);
 
   await page.evaluate(() => window.__arenaFakeConnection.emitReconnecting());
   await expect(root).toHaveAttribute("data-connection-state", "reconnecting");

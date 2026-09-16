@@ -68,6 +68,16 @@
             <li class="@(showResultsPhase ? "active" : "")" aria-current="@(showResultsPhase ? "step" : null)">Ergebnis</li>
         </ol>
         <p class="arena-persistence-status @(showPersistenceState ? "" : "is-hidden")" data-arena-persistence-status role="status" aria-live="polite" aria-atomic="true">@InitialPersistenceStatus(Model.Snapshot)</p>
+        <section class="arena-personal-best is-hidden" data-arena-personal-best role="status" aria-live="polite" aria-atomic="true" aria-label="Persönlicher Arena-Bestwert">
+            <div>
+                <span class="eyebrow">Persönliche Leistung</span>
+                <strong data-arena-personal-best-value></strong>
+            </div>
+            <div class="arena-personal-best-detail">
+                <span class="badge is-hidden" data-arena-new-personal-best>Neuer Bestwert</span>
+                <span class="muted" data-arena-personal-best-context></span>
+            </div>
+        </section>
         <div class="typing-target" data-arena-target tabindex="0" role="region" aria-label="Zieltext des Arena-Rennens">
             @if (string.IsNullOrEmpty(Model.Snapshot.TargetText))
             {
@@ -83,7 +93,7 @@
             <textarea asp-for="Input" class="typing-input" data-arena-input autocapitalize="off" autocomplete="off" spellcheck="false" disabled></textarea>
             <button type="button" class="secondary compact-button arena-running-action @(isRunning ? "" : "is-hidden")" data-arena-dnf disabled>Runde aufgeben</button>
         </div>
-        <section class="live-typing-board @displayMode" data-arena-live-board aria-label="Live-Texte der Teilnehmenden">
+        <section class="live-typing-board @displayMode" data-arena-live-board aria-label="Live-Texte der Teilnehmenden" tabindex="0">
             <div class="live-typing-board-header">
                 <div>
                     <h2>Live-Text</h2>
@@ -179,7 +189,7 @@
                 <span data-arena-roster-summary>@RosterSummary(rankedParticipants.Count, visibleParticipants.Count, Model.Snapshot.MaxParticipants)</span>
                 <span data-arena-connection-quality role="status" aria-live="polite" aria-atomic="true">Verbindung: wird aufgebaut</span>
             </div>
-            <div class="race-track @displayMode" data-arena-track aria-label="Rennstrecke mit bestätigtem Fortschritt">
+            <div class="race-track @displayMode" data-arena-track role="region" aria-label="Rennstrecke mit bestätigtem Fortschritt" tabindex="0">
                 <div class="race-milestones" aria-hidden="true">
                     <span class="race-milestone-25">25</span>
                     <span class="race-milestone-50">50</span>
@@ -235,7 +245,7 @@
                 }
             </div>
             <p class="muted arena-roster-status" data-arena-roster-status role="status" aria-live="polite" aria-atomic="true"></p>
-            <div class="arena-roster-table-wrap">
+            <div class="arena-roster-table-wrap" role="region" aria-label="Tabelle der Teilnehmenden" tabindex="0">
             <table id="arena-participant-table" class="table participant-list @displayMode">
                 <caption class="visually-hidden">Teilnehmende mit Team, Status, Fortschritt, Punkten und Platzierung</caption>
                 <thead><tr><th>Name</th><th>Team</th><th>Status</th><th>Fortschritt</th><th>Punkte</th><th>Platz</th></tr></thead>
@@ -263,6 +273,12 @@
                          <span>@participant.SeriesPoints Punkte · @FormatNumber(participant.Wpm) WPM · @FormatNumber(participant.Accuracy) %</span>
                     </div>
                 }
+            </div>
+            <div class="page-actions arena-result-actions @((isHost && Model.Snapshot.Finished) ? "" : "is-hidden")" data-arena-rematch-actions>
+                <form method="post" asp-page-handler="Rematch" data-arena-rematch-form data-submit-guard data-submit-busy-text="Revanche wird erstellt...">
+                    <button type="submit" aria-describedby="arena-rematch-description" disabled="@(!isHost || !Model.Snapshot.Finished)">Revanche mit gleicher Gruppe</button>
+                </form>
+                <p id="arena-rematch-description" class="muted">Erstellt einen neuen Raum mit denselben Einstellungen, Teams und Teilnehmenden. Dieses Ergebnis bleibt unverändert.</p>
             </div>
         </div>
     </aside>

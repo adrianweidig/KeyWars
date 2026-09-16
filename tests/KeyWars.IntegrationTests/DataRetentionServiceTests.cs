@@ -79,6 +79,8 @@ public sealed class DataRetentionServiceTests : IAsyncLifetime
         Assert.True(await db.GamificationEvents.AsNoTracking().AnyAsync(item => item.Id == seeded.UnseenEventId));
         Assert.Single(await db.RewardLedgerEntries.AsNoTracking().ToListAsync());
         Assert.Contains(nameof(KeyWarsDbContext.RewardLedgerEntries), applied.ProtectedDataSets);
+        Assert.Contains(nameof(KeyWarsDbContext.Seasons), applied.ProtectedDataSets);
+        Assert.Contains(nameof(KeyWarsDbContext.SeasonScores), applied.ProtectedDataSets);
         Assert.Equal([seeded.DueChallengeId], challengeLocks.AcquiredChallengeIds);
         Assert.Contains(seeded.StaleAttemptId, attemptSessions.AcquiredAttemptIds);
     }
@@ -129,6 +131,87 @@ public sealed class DataRetentionServiceTests : IAsyncLifetime
             .SingleAsync(item => item.Id == seeded.DueChallengeId);
         Assert.Equal(ChallengeStatus.Open, challenge.Status);
         Assert.Null(challenge.FinishedAt);
+    }
+
+    [Fact]
+    public async Task RetentionFinalizesCommittedBestOfForfeitIdempotently()
+    {
+        var now = new DateTimeOffset(2026, 8, 11, 12, 0, 0, TimeSpan.Zero);
+        await using var db = await CreateDatabaseAsync();
+        var creator = new UserProfile
+        {
+            DirectoryObjectGuid = Guid.NewGuid().ToString("D"),
+            SamAccountName = "retention-creator",
+            DisplayName = "Retention Creator"
+        };
+        var opponent = new UserProfile
+        {
+            DirectoryObjectGuid = Guid.NewGuid().ToString("D"),
+            SamAccountName = "retention-opponent",
+            DisplayName = "Retention Opponent"
+        };
+        var text = new TrainingText
+        {
+            Title = "Forfeit-Text",
+            SourceKey = "retention-forfeit",
+            Body = "Ein fester Forfeit-Testtext.",
+            IsStandard = true,
+            RatingEligible = true,
+            Visibility = TrainingTextVisibility.Organization,
+            CharacterCount = 29
+        };
+        var challenge = new Challenge
+        {
+            CreatorProfileId = creator.Id,
+            TrainingTextId = text.Id,
+            TargetTextSnapshot = text.Body,
+            TargetTextHash = TextHash.Compute(text.Body),
+            Title = "Retention Forfeit",
+            Mode = ChallengeMode.BestOf,
+            Status = ChallengeStatus.Running,
+            RoundCount = 3,
+            RatingEligible = true,
+            CreatedAt = now.AddDays(-2),
+            ExpiresAt = now.AddDays(-1)
+        };
+        var rounds = Enumerable.Range(1, 3).Select(number => new ChallengeRound
+        {
+            ChallengeId = challenge.Id,
+            RoundNumber = number,
+            CreatedAt = challenge.CreatedAt
+        }).ToArray();
+        db.AddRange(creator, opponent, text, challenge);
+        db.ChallengeRounds.AddRange(rounds);
+        db.ChallengeParticipants.AddRange(
+            new ChallengeParticipant { ChallengeId = challenge.Id, UserProfileId = creator.Id, Status = ParticipantStatus.Joined, InvitedAt = challenge.CreatedAt },
+            new ChallengeParticipant { ChallengeId = challenge.Id, UserProfileId = opponent.Id, Status = ParticipantStatus.Joined, InvitedAt = challenge.CreatedAt });
+        db.ChallengeRoundResults.Add(new ChallengeRoundResult
+        {
+            ChallengeRoundId = rounds[0].Id,
+            UserProfileId = creator.Id,
+            Status = ParticipantStatus.Finished,
+            DurationMilliseconds = 10_000,
+            Wpm = 60,
+            Accuracy = 100,
+            Consistency = 100,
+            CompetitionEligible = true,
+            FinishedAt = challenge.CreatedAt.AddMinutes(1)
+        });
+        await db.SaveChangesAsync();
+        var service = CreateService(db, new RetentionOptions(), now);
+
+        var first = await service.RunAsync(dryRun: false);
+        var replay = await service.RunAsync(dryRun: false);
+
+        Assert.Equal(1, first.ExpiredChallenges.Affected);
+        Assert.Equal(0, replay.ExpiredChallenges.Affected);
+        Assert.Equal(ChallengeStatus.Finished, await ReadChallengeStatusAsync(db, challenge.Id));
+        Assert.Equal(6, await db.ChallengeRoundResults.AsNoTracking().CountAsync(item => rounds.Select(round => round.Id).Contains(item.ChallengeRoundId)));
+        Assert.Equal(5, await db.ChallengeRoundResults.AsNoTracking().CountAsync(item => item.TypingAttemptId == null && item.Status == ParticipantStatus.Dnf));
+        Assert.Empty(await db.RewardLedgerEntries.AsNoTracking().ToListAsync());
+        Assert.All(
+            await db.UserProfiles.AsNoTracking().Where(item => item.Id == creator.Id || item.Id == opponent.Id).ToListAsync(),
+            profile => Assert.Equal(1, profile.RatedMatchCount));
     }
 
     [PostgreSqlFact]

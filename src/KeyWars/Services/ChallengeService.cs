@@ -68,6 +68,8 @@ public sealed class ChallengeService(
     private const int ConflictStatus = 409;
     private const int GoneStatus = 410;
 
+    private sealed record ChallengeTarget(string Snapshot, string Hash, bool RatingEligible);
+
     public async Task<Challenge> CreateAsync(Guid creatorProfileId, CreateChallengeRequest request, CancellationToken cancellationToken = default)
     {
         var challengeId = request.RequestId is { } requestId && requestId != Guid.Empty
@@ -87,7 +89,7 @@ public sealed class ChallengeService(
 
         try
         {
-            return await CreateCoreAsync(challengeId, creatorProfileId, request, null, cancellationToken);
+            return await CreateCoreAsync(challengeId, creatorProfileId, request, null, null, cancellationToken);
         }
         catch (DbUpdateException) when (request.RequestId is not null)
         {
@@ -130,10 +132,7 @@ public sealed class ChallengeService(
             .Order()
             .ToArray();
         var expectedTitle = string.IsNullOrWhiteSpace(request.Title)
-            ? await db.TrainingTexts
-                .Where(item => item.Id == request.TrainingTextId)
-                .Select(item => item.Title)
-                .SingleOrDefaultAsync(cancellationToken) ?? ""
+            ? challenge.Title
             : request.Title.Trim();
         var expectedExpiryDays = Math.Clamp(request.ExpiryDays, 1, 30);
 
@@ -142,6 +141,9 @@ public sealed class ChallengeService(
             challenge.Mode != request.Mode ||
             challenge.RoundCount != request.RoundCount ||
             challenge.ExpiresAt != challenge.CreatedAt.AddDays(expectedExpiryDays) ||
+            challenge.TargetTextSnapshot is null ||
+            challenge.TargetTextHash is null ||
+            TextHash.Compute(challenge.TargetTextSnapshot) != challenge.TargetTextHash ||
             !storedParticipants.SequenceEqual(expectedParticipants))
         {
             throw ChallengeError(
@@ -156,6 +158,7 @@ public sealed class ChallengeService(
         Guid creatorProfileId,
         CreateChallengeRequest request,
         Guid? rematchOfChallengeId,
+        ChallengeTarget? targetOverride,
         CancellationToken cancellationToken)
     {
         if (request.Mode is not (ChallengeMode.Classic or ChallengeMode.BestOf))
@@ -212,6 +215,12 @@ public sealed class ChallengeService(
             ?? throw ChallengeError(ChallengeErrorCodes.InvalidRequest, BadRequestStatus, "Der Trainingstext ist für diese Herausforderung nicht verfügbar.");
         var now = timeProvider.GetUtcNow();
         var title = string.IsNullOrWhiteSpace(request.Title) ? text.Title : request.Title.Trim();
+        var targetTextSnapshot = targetOverride?.Snapshot ?? TypingEngine.NormalizeText(text.Body);
+        var targetTextHash = targetOverride?.Hash ?? TextHash.Compute(targetTextSnapshot);
+        if (TextHash.Compute(targetTextSnapshot) != targetTextHash)
+        {
+            throw ChallengeError(ChallengeErrorCodes.Conflict, ConflictStatus, "Der gespeicherte Challenge-Text ist inkonsistent.");
+        }
         if (title.Length > 160)
         {
             throw ChallengeError(ChallengeErrorCodes.InvalidRequest, BadRequestStatus, "Der Titel darf höchstens 160 Zeichen lang sein.");
@@ -223,10 +232,12 @@ public sealed class ChallengeService(
             RematchOfChallengeId = rematchOfChallengeId,
             CreatorProfileId = creatorProfileId,
             TrainingTextId = text.Id,
+            TargetTextSnapshot = targetTextSnapshot,
+            TargetTextHash = targetTextHash,
             Title = title,
             Mode = request.Mode,
             RoundCount = request.RoundCount,
-            RatingEligible = text.RatingEligible && request.Mode is ChallengeMode.Classic or ChallengeMode.BestOf,
+            RatingEligible = (targetOverride?.RatingEligible ?? text.RatingEligible) && request.Mode is ChallengeMode.Classic or ChallengeMode.BestOf,
             CreatedAt = now,
             ExpiresAt = now.AddDays(Math.Clamp(request.ExpiryDays, 1, 30))
         };
@@ -295,12 +306,19 @@ public sealed class ChallengeService(
         }
 
         var round = await RequireNextRoundAsync(challengeId, profileId, cancellationToken);
+        var targetTextSnapshot = await EnsureTargetSnapshotAsync(challenge, cancellationToken);
 
         var existingBinding = await db.ChallengeAttemptBindings.SingleOrDefaultAsync(item => item.ChallengeRoundId == round.Id && item.UserProfileId == profileId, cancellationToken);
         if (existingBinding is not null)
         {
             if (!existingBinding.Consumed && await attempts.TryGetActiveSessionWithoutExpirationSweepAsync(profileId, existingBinding.TypingAttemptId, cancellationToken) is { } existingSession)
             {
+                if (existingBinding.TextSnapshotHash != challenge.TargetTextHash ||
+                    TextHash.Compute(existingSession.Text) != challenge.TargetTextHash)
+                {
+                    throw ChallengeError(ChallengeErrorCodes.Conflict, ConflictStatus, "Der gebundene Challenge-Versuch verwendet einen anderen Zieltext.");
+                }
+
                 if (challenge.Status == ChallengeStatus.Open)
                 {
                     challenge.Status = ChallengeStatus.Running;
@@ -342,14 +360,19 @@ public sealed class ChallengeService(
         AttemptSession? session = null;
         try
         {
-            session = await attempts.StartWithoutExpirationSweepAsync(profileId, new StartAttemptRequest(TrainingMode.Text, challenge.TrainingTextId, null, null), cancellationToken);
+            session = await attempts.StartSnapshotWithoutExpirationSweepAsync(
+                profileId,
+                challenge.TrainingTextId,
+                targetTextSnapshot,
+                challenge.RatingEligible,
+                cancellationToken);
             db.ChallengeAttemptBindings.Add(new ChallengeAttemptBinding
             {
                 ChallengeId = challenge.Id,
                 ChallengeRoundId = round.Id,
                 UserProfileId = profileId,
                 TypingAttemptId = session.Id,
-                TextSnapshotHash = TextHash.Compute(session.Text),
+                TextSnapshotHash = challenge.TargetTextHash!,
                 Mode = TrainingMode.Text,
                 BindingToken = CreateBindingToken(),
                 CreatedAt = timeProvider.GetUtcNow()
@@ -473,6 +496,7 @@ public sealed class ChallengeService(
                 throw ChallengeError(ChallengeErrorCodes.Conflict, ConflictStatus, "Diese Herausforderung ist bereits abgeschlossen und kann nicht mehr abgebrochen werden.");
             }
 
+            await EnsureChallengeHasNotStartedAsync(challenge, cancellationToken);
             var now = timeProvider.GetUtcNow();
             challenge.Status = ChallengeStatus.Cancelled;
             challenge.FinishedAt = now;
@@ -496,48 +520,58 @@ public sealed class ChallengeService(
         await using var challengeLock = await challengeLocks.AcquireAsync(challengeId, cancellationToken);
         using var operationCancellation = LinkToLease(cancellationToken, challengeLock);
         cancellationToken = operationCancellation.Token;
-        var existing = await db.Challenges
-            .SingleOrDefaultAsync(item => item.RematchOfChallengeId == challengeId, cancellationToken);
-        if (existing is not null)
-        {
-            EnsureCreator(existing, creatorProfileId);
-            return existing;
-        }
-
-        var source = await RequireChallengeAsync(challengeId, cancellationToken);
-        EnsureCreator(source, creatorProfileId);
-        if (source.Status is ChallengeStatus.Open or ChallengeStatus.Running)
-        {
-            throw ChallengeError(ChallengeErrorCodes.Conflict, ConflictStatus, "Eine Revanche ist erst nach Abschluss oder Abbruch möglich.");
-        }
-
-        var participantIds = await db.ChallengeParticipants
-            .Where(item => item.ChallengeId == source.Id && item.UserProfileId != creatorProfileId)
-            .Select(item => item.UserProfileId)
-            .ToArrayAsync(cancellationToken);
-        var expiryDays = Math.Clamp((int)Math.Ceiling((source.ExpiresAt - source.CreatedAt).TotalDays), 1, 30);
-        var request = new CreateChallengeRequest(
-            BuildRematchTitle(source.Title),
-            source.TrainingTextId,
-            source.Mode,
-            participantIds,
-            source.RoundCount,
-            expiryDays);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         try
         {
+            await ChallengeWriteFence.AcquireAsync(db, challengeId, cancellationToken);
+            var existing = await db.Challenges
+                .SingleOrDefaultAsync(item => item.RematchOfChallengeId == challengeId, cancellationToken);
+            if (existing is not null)
+            {
+                EnsureCreator(existing, creatorProfileId);
+                await transaction.CommitAsync(cancellationToken);
+                return existing;
+            }
+
+            var source = await RequireChallengeAsync(challengeId, cancellationToken);
+            EnsureCreator(source, creatorProfileId);
+            if (source.Status is ChallengeStatus.Open or ChallengeStatus.Running)
+            {
+                throw ChallengeError(ChallengeErrorCodes.Conflict, ConflictStatus, "Eine Revanche ist erst nach Abschluss oder Abbruch möglich.");
+            }
+
+            var targetTextSnapshot = await EnsureTargetSnapshotAsync(source, cancellationToken);
+            var participantIds = await db.ChallengeParticipants
+                .Where(item => item.ChallengeId == source.Id && item.UserProfileId != creatorProfileId)
+                .Select(item => item.UserProfileId)
+                .ToArrayAsync(cancellationToken);
+            var expiryDays = Math.Clamp((int)Math.Ceiling((source.ExpiresAt - source.CreatedAt).TotalDays), 1, 30);
+            var request = new CreateChallengeRequest(
+                BuildRematchTitle(source.Title),
+                source.TrainingTextId,
+                source.Mode,
+                participantIds,
+                source.RoundCount,
+                expiryDays);
             var rematch = await CreateCoreAsync(
                 Guid.CreateVersion7(),
                 creatorProfileId,
                 request,
                 source.Id,
+                new ChallengeTarget(
+                    targetTextSnapshot,
+                    source.TargetTextHash ?? throw ChallengeError(ChallengeErrorCodes.Conflict, ConflictStatus, "Der gespeicherte Challenge-Hash fehlt."),
+                    source.RatingEligible),
                 cancellationToken);
             challengeLock.ThrowIfLost();
+            await transaction.CommitAsync(cancellationToken);
             return rematch;
         }
         catch (DbUpdateException)
         {
+            await transaction.RollbackAsync(CancellationToken.None);
             db.ChangeTracker.Clear();
-            existing = await db.Challenges
+            var existing = await db.Challenges
                 .AsNoTracking()
                 .SingleOrDefaultAsync(item => item.RematchOfChallengeId == challengeId, cancellationToken);
             if (existing is not null)
@@ -574,8 +608,14 @@ public sealed class ChallengeService(
         cancellationToken = operationCancellation.Token;
         await ExecuteChallengeTransactionAsync(challengeId, async challengeTransaction =>
         {
-            await RequireActiveChallengeAsync(challengeId, challengeTransaction, cancellationToken);
+            var challenge = await RequireActiveChallengeAsync(challengeId, challengeTransaction, cancellationToken);
             var participant = await RequireParticipantAsync(challengeId, profileId, cancellationToken);
+            if (participant.Status == ParticipantStatus.Declined)
+            {
+                return;
+            }
+
+            await EnsureChallengeHasNotStartedAsync(challenge, cancellationToken);
             if (participant.Status is ParticipantStatus.Invited or ParticipantStatus.Joined)
             {
                 participant.Status = ParticipantStatus.Declined;
@@ -634,7 +674,13 @@ public sealed class ChallengeService(
         using var operationCancellation = LinkToLease(cancellationToken, challengeLock);
         var operationToken = operationCancellation.Token;
         await using var challengeTransaction = new ChallengeTransactionContext(attemptTerminalizer);
+        await using var sqliteSeasonWriteFence = db.Database.IsSqlite()
+            ? await SeasonWriteFence.AcquireAsync(db, operationToken)
+            : null;
         await using var transaction = await db.Database.BeginTransactionAsync(operationToken);
+        await using var postgresSeasonWriteFence = db.Database.IsNpgsql()
+            ? await SeasonWriteFence.AcquireAsync(db, operationToken)
+            : null;
         await ChallengeWriteFence.AcquireAsync(db, challengeId, operationToken);
         try
         {
@@ -737,6 +783,9 @@ public sealed class ChallengeService(
         if (binding.Consumed ||
             binding.Mode != attempt.Mode ||
             binding.TextSnapshotHash != attempt.TextHash ||
+            binding.TextSnapshotHash != challenge.TargetTextHash ||
+            challenge.TargetTextSnapshot is null ||
+            TextHash.Compute(challenge.TargetTextSnapshot) != challenge.TargetTextHash ||
             attempt.TrainingTextId != challenge.TrainingTextId ||
             attempt.UserProfileId != profileId ||
             attempt.Mode != TrainingMode.Text ||
@@ -767,6 +816,7 @@ public sealed class ChallengeService(
             Accuracy = attempt.Accuracy,
             Consistency = attempt.Consistency,
             Wpm = attempt.Wpm,
+            CompetitionEligible = challenge.RatingEligible && attempt.CompetitionIntegrityEligible,
             FinishedAt = now
         });
 
@@ -816,79 +866,11 @@ public sealed class ChallengeService(
             return;
         }
 
-        if (challenge.Status is ChallengeStatus.Expired or ChallengeStatus.Cancelled or ChallengeStatus.Finished)
-        {
-            return;
-        }
-
-        var participants = await db.ChallengeParticipants.Where(item => item.ChallengeId == challengeId).ToListAsync(cancellationToken);
-        var rounds = await db.ChallengeRounds
-            .Where(item => item.ChallengeId == challengeId)
-            .OrderBy(item => item.RoundNumber)
-            .ToListAsync(cancellationToken);
-        var roundIds = rounds.Select(item => item.Id).ToArray();
-        var results = await db.ChallengeRoundResults
-            .Where(item => roundIds.Contains(item.ChallengeRoundId))
-            .ToListAsync(cancellationToken);
-        var resultCounts = results
-            .GroupBy(item => item.UserProfileId)
-            .ToDictionary(group => group.Key, group => group.Count());
-        var terminal = participants.All(item =>
-            item.Status is ParticipantStatus.Declined or ParticipantStatus.Cancelled ||
-            resultCounts.GetValueOrDefault(item.UserProfileId) >= challenge.RoundCount);
-        if (!terminal)
-        {
-            return;
-        }
-
-        foreach (var round in rounds)
-        {
-            var roundResults = results.Where(item => item.ChallengeRoundId == round.Id).ToArray();
-            var roundRanking = RankRound(roundResults);
-            foreach (var rankedResult in roundRanking)
-            {
-                roundResults.Single(item => item.UserProfileId == rankedResult.Result.UserProfileId).Placement = rankedResult.Placement;
-            }
-        }
-
-        var ranked = challenge.Mode == ChallengeMode.BestOf
-            ? RankSeries(participants, results)
-            : RankRound(results);
-        foreach (var rankedResult in ranked)
-        {
-            participants.Single(item => item.UserProfileId == rankedResult.Result.UserProfileId).Placement = rankedResult.Placement;
-        }
-
-        if (challenge.RatingEligible && ranked.Count >= 2)
-        {
-            var ids = ranked.Select(item => item.Result.UserProfileId).ToArray();
-            await ProfileWriteFence.AcquireAsync(db, ids, cancellationToken);
-            if (!await ProfileWriteFence.IsAvailableAsync(db, ids, cancellationToken))
-            {
-                // Challenge ratings are all-or-nothing; a deleted participant invalidates the match rating.
-                challenge.RatingEligible = false;
-            }
-            else
-            {
-                var profiles = await db.UserProfiles.Where(item => ids.Contains(item.Id) && !item.Deleted).ToListAsync(cancellationToken);
-                var ratings = profiles.ToDictionary(item => item.Id, item => item.ArenaRating);
-                var ratingChanges = MultiplayerRating.CalculatePairwiseEloChanges(ratings, ranked);
-                foreach (var profile in profiles)
-                {
-                    var ratingChange = ratingChanges[profile.Id];
-                    profile.ArenaRating = ratingChange.RatingAfter;
-                    profile.RatedMatchCount++;
-                    var participant = participants.Single(item => item.UserProfileId == profile.Id);
-                    participant.RatingBefore = ratingChange.RatingBefore;
-                    participant.RatingDelta = ratingChange.RatingDelta;
-                    participant.RatingAfter = ratingChange.RatingAfter;
-                }
-            }
-        }
-
-        challenge.Status = ChallengeStatus.Finished;
-        challenge.FinishedAt = timeProvider.GetUtcNow();
-        await db.SaveChangesAsync(cancellationToken);
+        await ChallengeFinalizer.TryCloseAsync(
+            db,
+            challenge,
+            timeProvider.GetUtcNow(),
+            cancellationToken);
     }
 
     private async Task<Challenge> RequireActiveChallengeAsync(
@@ -898,7 +880,7 @@ public sealed class ChallengeService(
     {
         var challenge = await RequireChallengeAsync(challengeId, cancellationToken);
         var expiredNow = await ExpireIfDueAsync(challenge, challengeTransaction, cancellationToken);
-        if (challenge.Status == ChallengeStatus.Expired)
+        if (expiredNow || challenge.Status == ChallengeStatus.Expired)
         {
             if (!expiredNow)
             {
@@ -948,7 +930,7 @@ public sealed class ChallengeService(
         }
 
         var expiredNow = await ExpireIfDueAsync(challenge, challengeTransaction, cancellationToken);
-        if (challenge.Status == ChallengeStatus.Expired)
+        if (expiredNow || challenge.Status == ChallengeStatus.Expired)
         {
             if (!expiredNow)
             {
@@ -1069,17 +1051,13 @@ public sealed class ChallengeService(
         ChallengeTransactionContext challengeTransaction,
         CancellationToken cancellationToken)
     {
-        if (challenge.Status is not (ChallengeStatus.Open or ChallengeStatus.Running) ||
-            challenge.ExpiresAt > timeProvider.GetUtcNow())
-        {
-            return false;
-        }
-
-        challenge.Status = ChallengeStatus.Expired;
-        challenge.FinishedAt ??= timeProvider.GetUtcNow();
-        await challengeTransaction.AbortBoundAttemptsAsync(challenge.Id, challenge.FinishedAt.Value, cancellationToken);
-        await db.SaveChangesAsync(cancellationToken);
-        return true;
+        var outcome = await ChallengeFinalizer.FinalizeExpiredAsync(
+            db,
+            challenge,
+            challengeTransaction,
+            timeProvider.GetUtcNow(),
+            cancellationToken);
+        return outcome != ChallengeExpiryOutcome.NotDue;
     }
 
     private async Task<Challenge> RequireChallengeAsync(Guid challengeId, CancellationToken cancellationToken)
@@ -1096,6 +1074,50 @@ public sealed class ChallengeService(
             ?? throw ChallengeError(ChallengeErrorCodes.NotFound, NotFoundStatus, "Diese Herausforderung wurde nicht gefunden.");
     }
 
+    private async Task<string> EnsureTargetSnapshotAsync(Challenge challenge, CancellationToken cancellationToken)
+    {
+        if (challenge.TargetTextSnapshot is { } snapshot && challenge.TargetTextHash is { } hash)
+        {
+            if (TextHash.Compute(snapshot) != hash)
+            {
+                throw ChallengeError(ChallengeErrorCodes.Conflict, ConflictStatus, "Der gespeicherte Challenge-Text ist inkonsistent.");
+            }
+
+            return snapshot;
+        }
+
+        var hasAttemptState = await db.ChallengeAttemptBindings
+            .AnyAsync(item => item.ChallengeId == challenge.Id, cancellationToken) ||
+            await db.ChallengeRoundResults.AnyAsync(
+                result => db.ChallengeRounds
+                    .Where(round => round.ChallengeId == challenge.Id)
+                    .Select(round => round.Id)
+                    .Contains(result.ChallengeRoundId),
+                cancellationToken);
+        if (hasAttemptState)
+        {
+            throw ChallengeError(
+                ChallengeErrorCodes.Conflict,
+                ConflictStatus,
+                "Diese ältere Herausforderung besitzt keinen verlässlichen Text-Snapshot.");
+        }
+
+        var textBody = await db.TrainingTexts
+            .Where(item => item.Id == challenge.TrainingTextId)
+            .Select(item => item.Body)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (textBody is null)
+        {
+            throw ChallengeError(ChallengeErrorCodes.Conflict, ConflictStatus, "Der Challenge-Text ist nicht mehr verfügbar.");
+        }
+
+        snapshot = TypingEngine.NormalizeText(textBody);
+        challenge.TargetTextSnapshot = snapshot;
+        challenge.TargetTextHash = TextHash.Compute(snapshot);
+        await db.SaveChangesAsync(cancellationToken);
+        return snapshot;
+    }
+
     private async Task<ChallengeRound> RequireNextRoundAsync(Guid challengeId, Guid profileId, CancellationToken cancellationToken)
     {
         var completedRoundIds = db.ChallengeRoundResults
@@ -1108,55 +1130,29 @@ public sealed class ChallengeService(
             ?? throw ChallengeError(ChallengeErrorCodes.Conflict, ConflictStatus, "Alle Runden dieser Herausforderung sind bereits abgeschlossen.");
     }
 
-    private static IReadOnlyList<RankedRaceResult> RankRound(IEnumerable<ChallengeRoundResult> results) =>
-        RaceRanking.RankClassic(results.Select(result => new RaceResult(
-            result.UserProfileId,
-            result.Status,
-            result.DurationMilliseconds,
-            result.Accuracy,
-            0,
-            result.Consistency,
-            result.Wpm,
-            0)));
-
-    private static IReadOnlyList<RankedRaceResult> RankSeries(
-        IReadOnlyCollection<ChallengeParticipant> participants,
-        IReadOnlyCollection<ChallengeRoundResult> results)
-    {
-        var activeParticipants = participants
-            .Where(item => item.Status is not (ParticipantStatus.Declined or ParticipantStatus.Cancelled))
-            .ToArray();
-        var participantCount = activeParticipants.Length;
-        var rankedSeries = ArenaScoring.RankSeries(activeParticipants.Select(participant =>
-        {
-            var participantResults = results.Where(item => item.UserProfileId == participant.UserProfileId).ToArray();
-            return new ArenaSeriesScore(
-                participant.UserProfileId,
-                participantResults.Sum(item => ArenaScoring.PointsForRound(item.Status, item.Placement, participantCount)),
-                participantResults.Count(item => item.Status == ParticipantStatus.Finished && item.Placement == 1),
-                participantResults.Count(item => item.Status == ParticipantStatus.Finished),
-                participantResults.Sum(item => item.DurationMilliseconds),
-                participantResults.Length == 0 ? 0 : participantResults.Average(item => item.Accuracy));
-        }));
-
-        return rankedSeries.Select(item => new RankedRaceResult(
-            new RaceResult(
-                item.Score.UserProfileId,
-                item.Score.FinishedRounds > 0 ? ParticipantStatus.Finished : ParticipantStatus.Dnf,
-                item.Score.TotalDurationMilliseconds,
-                item.Score.AverageAccuracy,
-                0,
-                0,
-                0,
-                0),
-            item.Placement)).ToArray();
-    }
-
     private static void EnsureCreator(Challenge challenge, Guid creatorProfileId)
     {
         if (challenge.CreatorProfileId != creatorProfileId)
         {
             throw ChallengeError(ChallengeErrorCodes.NotFound, NotFoundStatus, "Diese Herausforderung wurde nicht gefunden.");
+        }
+    }
+
+    private async Task EnsureChallengeHasNotStartedAsync(Challenge challenge, CancellationToken cancellationToken)
+    {
+        if (challenge.Status != ChallengeStatus.Open ||
+            await db.ChallengeAttemptBindings.AnyAsync(item => item.ChallengeId == challenge.Id, cancellationToken) ||
+            await db.ChallengeRoundResults.AnyAsync(
+                result => db.ChallengeRounds
+                    .Where(round => round.ChallengeId == challenge.Id)
+                    .Select(round => round.Id)
+                    .Contains(result.ChallengeRoundId),
+                cancellationToken))
+        {
+            throw ChallengeError(
+                ChallengeErrorCodes.Conflict,
+                ConflictStatus,
+                "Nach dem Start eines Challenge-Versuchs kann die Teilnahme nicht mehr abgebrochen werden.");
         }
     }
 

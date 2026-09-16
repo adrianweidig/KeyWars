@@ -1,14 +1,11 @@
 using KeyWars.Auth;
-using KeyWars.Data;
-using KeyWars.Domain;
 using KeyWars.Infrastructure;
 using KeyWars.Services;
 using Microsoft.AspNetCore.Mvc.RazorPages;
-using Microsoft.EntityFrameworkCore;
 
 namespace KeyWars.Pages.Profil;
 
-public sealed class ErfolgeModel(CurrentUser currentUser, KeyWarsDbContext db) : PageModel
+public sealed class ErfolgeModel(CurrentUser currentUser, AchievementProgressService achievementProgress) : PageModel
 {
     public IReadOnlyList<AchievementCard> Achievements { get; private set; } = [];
     public int UnlockedCount { get; private set; }
@@ -16,22 +13,24 @@ public sealed class ErfolgeModel(CurrentUser currentUser, KeyWarsDbContext db) :
     public async Task OnGetAsync(CancellationToken cancellationToken)
     {
         var profile = await currentUser.RequireProfileAsync(User, cancellationToken);
-        var unlocked = (await db.Achievements.Where(item => item.UserProfileId == profile.Id).ToListAsync(cancellationToken))
-            .ToDictionary(item => item.Key, StringComparer.Ordinal);
-        UnlockedCount = unlocked.Count;
+        var overview = await achievementProgress.ReadAsync(profile.Id, cancellationToken);
+        UnlockedCount = overview.UnlockedCount;
         Achievements = MotivationCatalog.AchievementDefinitions
             .Select(definition =>
             {
-                unlocked.TryGetValue(definition.Key, out var achievement);
+                var progress = overview.Items[definition.Key];
                 var visual = MotivationVisuals.ForAchievementKey(definition.Key);
                 return new AchievementCard(
                     definition.Key,
                     definition.Category,
                     definition.Title,
                     definition.Description,
-                    achievement?.UnlockedAt,
+                    progress.UnlockedAt,
                     visual.VisualKey,
-                    visual.Accent);
+                    visual.Accent,
+                    progress.Current,
+                    progress.Target,
+                    progress.Unit);
             })
             .OrderBy(item => item.Unlocked ? 0 : 1)
             .ThenByDescending(item => item.UnlockedAt ?? DateTimeOffset.MinValue)
@@ -48,7 +47,10 @@ public sealed record AchievementCard(
     string Description,
     DateTimeOffset? UnlockedAt,
     string VisualKey,
-    string Accent)
+    string Accent,
+    double Current,
+    double Target,
+    string Unit)
 {
     public bool Unlocked => UnlockedAt is not null;
 }

@@ -8,6 +8,9 @@ node_modules
 **/bin
 **/obj
 App_Data
+secrets/
+**/secrets/
+/.tmp-*/
 TestResults
 coverage
 .env

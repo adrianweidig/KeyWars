@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using KeyWars.Data;
 using KeyWars.Domain;
+using KeyWars.Infrastructure;
 using KeyWars.Services;
 using Microsoft.EntityFrameworkCore;
 
@@ -10,9 +11,13 @@ public static class KeyWarsClaims
 {
     public const string ProfileId = "keywars:profile-id";
     public const string ContentModerator = "keywars:content-moderator";
+    public const string ProfileValidatedAt = "keywars:profile-validated-at";
 }
 
-public sealed class CurrentUser(KeyWarsDbContext db, IProfileAccessGate? accessGate = null)
+public sealed class CurrentUser(
+    KeyWarsDbContext db,
+    IProfileAccessGate? accessGate = null,
+    ProfileRequestContext? requestContext = null)
 {
     public Guid? GetProfileId(ClaimsPrincipal principal)
     {
@@ -28,17 +33,32 @@ public sealed class CurrentUser(KeyWarsDbContext db, IProfileAccessGate? accessG
             return null;
         }
 
-        if (accessGate is not null &&
+        if (requestContext?.TryGetProfile(profileId.Value, out var cached) == true)
+        {
+            return cached;
+        }
+
+        var requestOwnsLease = requestContext?.HasLease(profileId.Value) == true;
+
+        if (!requestOwnsLease && accessGate is not null &&
             await accessGate.GetStateAsync(profileId.Value, cancellationToken) != ProfileAccessState.Available)
         {
             return null;
         }
 
         var profile = await db.UserProfiles.SingleOrDefaultAsync(profile => profile.Id == profileId && !profile.Deleted, cancellationToken);
-        return accessGate is not null &&
-            await accessGate.GetStateAsync(profileId.Value, cancellationToken) != ProfileAccessState.Available
-                ? null
-                : profile;
+        if (profile is null || !requestOwnsLease && accessGate is not null &&
+            await accessGate.GetStateAsync(profileId.Value, cancellationToken) != ProfileAccessState.Available)
+        {
+            return null;
+        }
+
+        if (requestOwnsLease)
+        {
+            requestContext!.SetProfile(profile);
+        }
+
+        return profile;
     }
 
     public async Task<UserProfile> RequireProfileAsync(ClaimsPrincipal principal, CancellationToken cancellationToken = default)

@@ -87,6 +87,69 @@ public sealed partial class WebSmokeTests : IClassFixture<KeyWarsWebFactory>
     }
 
     [Fact]
+    public async Task ArenaPersistenceStatusReturnsOnlyTheAuthenticatedProfilesConfirmedBest()
+    {
+        using var isolatedFactory = new KeyWarsWebFactory();
+        var client = isolatedFactory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        await LoginAsync(client);
+        var targetHash = TextHash.Compute("Bestwertvertrag für den angemeldeten Arena-Teilnehmer.");
+        var previousRoomId = Guid.CreateVersion7();
+        var currentRoomId = Guid.CreateVersion7();
+        await using (var scope = isolatedFactory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<KeyWarsDbContext>();
+            var profileId = await db.UserProfiles
+                .Where(profile => profile.SamAccountName == "max.mustermann" && !profile.Deleted)
+                .Select(profile => profile.Id)
+                .SingleAsync();
+            db.LiveRoomSummaries.AddRange(
+                PersistedRoom(previousRoomId, profileId, targetHash, "best-previous"),
+                PersistedRoom(currentRoomId, profileId, targetHash, "best-current"));
+            db.LiveRoomParticipantSummaries.AddRange(
+                PersistedParticipant(previousRoomId, profileId, 45.2),
+                PersistedParticipant(currentRoomId, profileId, 52.8));
+            await db.SaveChangesAsync();
+        }
+
+        var response = await client.GetAsync($"/api/arena/{currentRoomId}/speicherstatus");
+        using var payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(nameof(CompletionState.Persisted), payload.RootElement.GetProperty("state").GetString());
+        var personalBest = payload.RootElement.GetProperty("personalBest");
+        Assert.Equal(52.8, personalBest.GetProperty("currentWpm").GetDouble());
+        Assert.Equal(45.2, personalBest.GetProperty("previousBestWpm").GetDouble());
+        Assert.Equal(52.8, personalBest.GetProperty("bestWpm").GetDouble());
+        Assert.True(personalBest.GetProperty("isNewBest").GetBoolean());
+    }
+
+    private static LiveRoomSummary PersistedRoom(Guid id, Guid profileId, string targetHash, string key) => new()
+    {
+        Id = id,
+        IdempotencyKey = key,
+        CreatorProfileId = profileId,
+        RoomCode = key[..Math.Min(key.Length, 16)],
+        TargetTextHash = targetHash,
+        Mode = LiveRoomMode.Classic,
+        Visibility = LiveRoomVisibility.InvitationOnly,
+        RoundCount = 1,
+        StartedAt = DateTimeOffset.UtcNow.AddSeconds(-30),
+        FinishedAt = DateTimeOffset.UtcNow
+    };
+
+    private static LiveRoomParticipantSummary PersistedParticipant(Guid roomId, Guid profileId, double wpm) => new()
+    {
+        LiveRoomSummaryId = roomId,
+        UserProfileId = profileId,
+        Status = ParticipantStatus.Finished,
+        CompetitionEligible = true,
+        Placement = 1,
+        DurationMilliseconds = 30_000,
+        Wpm = wpm,
+        Accuracy = 99
+    };
+
+    [Fact]
     public async Task EarlyPartialSprintReturnsTypedProblemWithoutMutation()
     {
         using var isolatedFactory = new KeyWarsWebFactory();
@@ -166,6 +229,82 @@ public sealed partial class WebSmokeTests : IClassFixture<KeyWarsWebFactory>
         Assert.Equal(3, result.RootElement.GetProperty("consistencySampleCount").GetInt32());
         Assert.True(result.RootElement.GetProperty("durationMilliseconds").GetInt32() >= 1_000);
         Assert.Equal(0, result.RootElement.GetProperty("incorrectCharacters").GetInt32());
+    }
+
+    [Fact]
+    public async Task ImmediateExactApiResultRemainsVisibleButCannotEarnCompetitionRewards()
+    {
+        using var isolatedFactory = new KeyWarsWebFactory();
+        var client = isolatedFactory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        await LoginAsync(client);
+        var body = new string('a', 1_800);
+        Guid profileId;
+        Guid textId;
+        int experienceBefore;
+        int seasonPointsBefore;
+        await using (var scope = isolatedFactory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<KeyWarsDbContext>();
+            var profile = await db.UserProfiles.SingleAsync(item => item.SamAccountName == "max.mustermann");
+            profileId = profile.Id;
+            experienceBefore = profile.ExperiencePoints;
+            seasonPointsBefore = profile.SeasonPoints;
+            var text = new TrainingText
+            {
+                OwnerProfileId = profile.Id,
+                Title = "API Integritätsprüfung",
+                SourceKey = "api-integrity-check",
+                Body = body,
+                Visibility = TrainingTextVisibility.Private,
+                RatingEligible = true,
+                CharacterCount = TypingEngine.SplitGraphemes(body).Count
+            };
+            db.TrainingTexts.Add(text);
+            await db.SaveChangesAsync();
+            textId = text.Id;
+        }
+
+        var startResponse = await client.PostAsJsonAsync("/api/spielen/start", new
+        {
+            mode = "Text",
+            trainingTextId = textId
+        });
+        startResponse.EnsureSuccessStatusCode();
+        using var start = JsonDocument.Parse(await startResponse.Content.ReadAsStringAsync());
+        var attemptId = start.RootElement.GetProperty("id").GetGuid();
+        var nonce = start.RootElement.GetProperty("nonce").GetString();
+        (await client.PostAsJsonAsync("/api/spielen/begin", new { attemptId, nonce })).EnsureSuccessStatusCode();
+
+        var finishResponse = await client.PostAsJsonAsync("/api/spielen/abschliessen", new
+        {
+            attemptId,
+            nonce,
+            input = body,
+            backspaces = 0,
+            focusLosses = 0,
+            clientDurationMilliseconds = 600_000
+        });
+        finishResponse.EnsureSuccessStatusCode();
+        using var result = JsonDocument.Parse(await finishResponse.Content.ReadAsStringAsync());
+
+        Assert.True(result.RootElement.GetProperty("completed").GetBoolean());
+        Assert.True(result.RootElement.GetProperty("targetCompleted").GetBoolean());
+        Assert.Equal(0, result.RootElement.GetProperty("motivation").GetProperty("xpDelta").GetInt32());
+        Assert.Equal(experienceBefore, result.RootElement.GetProperty("experiencePoints").GetInt32());
+        Assert.False(result.RootElement.TryGetProperty("competitionIntegrityEligible", out _));
+
+        await using var verificationScope = isolatedFactory.Services.CreateAsyncScope();
+        var verificationDb = verificationScope.ServiceProvider.GetRequiredService<KeyWarsDbContext>();
+        var attempt = await verificationDb.TypingAttempts.SingleAsync(item => item.Id == attemptId);
+        var profileAfter = await verificationDb.UserProfiles.SingleAsync(item => item.Id == profileId);
+        Assert.True(attempt.Completed);
+        Assert.True(attempt.Official);
+        Assert.False(attempt.LeaderboardEligible);
+        Assert.False(attempt.ExperienceAwarded);
+        Assert.Equal(experienceBefore, profileAfter.ExperiencePoints);
+        Assert.Equal(seasonPointsBefore, profileAfter.SeasonPoints);
+        Assert.False(await verificationDb.RewardLedgerEntries.AnyAsync(item =>
+            item.Source == "attempt" && item.SourceId == attemptId.ToString("N")));
     }
 
     [Fact]
@@ -572,6 +711,7 @@ public sealed partial class WebSmokeTests : IClassFixture<KeyWarsWebFactory>
             Phase = AttemptPhase.Finished,
             Completed = true,
             Official = true,
+            CompetitionIntegrityEligible = true,
             CreatedAt = DateTimeOffset.UtcNow.AddMinutes(-5),
             PreparedAt = DateTimeOffset.UtcNow.AddMinutes(-6),
             StartedAt = DateTimeOffset.UtcNow.AddMinutes(-6),
@@ -589,11 +729,12 @@ public sealed partial class WebSmokeTests : IClassFixture<KeyWarsWebFactory>
 
         var profilePage = await client.GetStringAsync("/profil");
 
-        Assert.Contains("Gesamtleistung", profilePage);
+        Assert.Contains("Leistung · 90 Tage", profilePage);
         Assert.Contains("Trendwerte als Tabelle", profilePage);
         Assert.Contains("Aktivitätskalender", profilePage);
         Assert.Contains("Bestwerte je Modus", profilePage);
         Assert.Contains("60-Sekunden-Sprint", profilePage);
+        Assert.Contains(">48,0<", profilePage);
         Assert.DoesNotContain("Sprint60", profilePage);
         Assert.DoesNotContain("style=", profilePage);
         Assert.Contains("<svg", profilePage);
@@ -761,6 +902,13 @@ public sealed partial class WebSmokeTests : IClassFixture<KeyWarsWebFactory>
         var rejectedOldSession = await otherSession.GetAsync("/");
         Assert.Equal(HttpStatusCode.Redirect, rejectedOldSession.StatusCode);
         Assert.Equal("/anmelden?ReturnUrl=%2F", rejectedOldSession.Headers.Location?.ToString());
+        var expiredAuthCookie = rejectedOldSession.Headers.GetValues("Set-Cookie")
+            .Single(value => value.StartsWith("KeyWars.Dev.Auth=;", StringComparison.Ordinal));
+        Assert.Contains("expires=", expiredAuthCookie, StringComparison.OrdinalIgnoreCase);
+
+        var rejectedAfterCookieRemoval = await otherSession.GetAsync("/");
+        Assert.Equal(HttpStatusCode.Redirect, rejectedAfterCookieRemoval.StatusCode);
+        Assert.Equal("/anmelden?ReturnUrl=%2F", rejectedAfterCookieRemoval.Headers.Location?.ToString());
 
         var relogin = await LoginAsync(otherSession);
         Assert.Equal(HttpStatusCode.Redirect, relogin.StatusCode);
@@ -804,7 +952,9 @@ public sealed partial class WebSmokeTests : IClassFixture<KeyWarsWebFactory>
     [Fact]
     public async Task ArenaLobbyRendersEntryPathsAndRoomCapacityWithoutInfrastructureCopy()
     {
-        using var isolatedFactory = new KeyWarsWebFactory();
+        using var isolatedFactory = new ConfiguredKeyWarsWebFactory(
+            maxParticipantsPerRoom: 8,
+            maxActiveRoomsPerCreator: 32);
         var client = isolatedFactory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
         await LoginAsync(client);
         await using var scope = isolatedFactory.Services.CreateAsyncScope();
@@ -1063,6 +1213,55 @@ public sealed partial class WebSmokeTests : IClassFixture<KeyWarsWebFactory>
     }
 
     [Fact]
+    public async Task ArenaCreateResolvesPrivateTextCompetitionEligibilityOnServer()
+    {
+        using var isolatedFactory = new KeyWarsWebFactory();
+        var client = isolatedFactory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        await LoginAsync(client);
+        const string roomTitle = "Privater Arena-Freigabevertrag";
+        Guid textId;
+        await using (var setupScope = isolatedFactory.Services.CreateAsyncScope())
+        {
+            var db = setupScope.ServiceProvider.GetRequiredService<KeyWarsDbContext>();
+            var profile = await db.UserProfiles.SingleAsync(item => item.SamAccountName == "max.mustermann");
+            var text = new TrainingText
+            {
+                OwnerProfileId = profile.Id,
+                Title = "Privater Text",
+                SourceKey = $"private-arena-{Guid.CreateVersion7():N}",
+                Body = "Dieser private Text darf keine Wettbewerbsvorteile erzeugen.",
+                CharacterCount = 59,
+                Visibility = TrainingTextVisibility.Private,
+                RatingEligible = false
+            };
+            db.TrainingTexts.Add(text);
+            await db.SaveChangesAsync();
+            textId = text.Id;
+        }
+
+        var form = await client.GetStringAsync("/arena/neu");
+        var token = AntiForgeryRegex().Match(form).Groups["token"].Value;
+        var response = await client.PostAsync("/arena/neu", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["Input.Title"] = roomTitle,
+            ["Input.TrainingTextId"] = textId.ToString(),
+            ["Input.Visibility"] = nameof(LiveRoomVisibility.InternalOpen),
+            ["Input.Mode"] = nameof(LiveRoomMode.Classic),
+            ["Input.RoundCount"] = "1",
+            ["Input.MaxParticipants"] = "8",
+            ["__RequestVerificationToken"] = token
+        }));
+
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        await using var verificationScope = isolatedFactory.Services.CreateAsyncScope();
+        var rooms = verificationScope.ServiceProvider.GetRequiredService<LiveRoomManager>();
+        var room = Assert.Single(rooms.ListOpenRooms(), item => item.Title == roomTitle);
+        var memento = rooms.ExportRoomState(room.RoomId);
+        Assert.False(memento.TargetCompetitionEligible);
+        Assert.False(memento.RatingEligible);
+    }
+
+    [Fact]
     public async Task ArenaJoinFormUsesSixCharacterCodeContractAndSubmitGuard()
     {
         using var isolatedFactory = new KeyWarsWebFactory();
@@ -1111,7 +1310,8 @@ public sealed class KeyWarsWebFactory : WebApplicationFactory<Program>
 public sealed class ConfiguredKeyWarsWebFactory(
     int maxParticipantsPerRoom,
     int maxArenaTargetGraphemes = LiveOptions.MaximumSafeArenaTargetGraphemes,
-    int maxConcurrentRooms = 256) : WebApplicationFactory<Program>
+    int maxConcurrentRooms = 256,
+    int maxActiveRoomsPerCreator = 5) : WebApplicationFactory<Program>
 {
     private readonly string dataDirectory = Path.Combine(Path.GetTempPath(), $"keywars-e2e-{Guid.NewGuid():N}");
 
@@ -1123,5 +1323,6 @@ public sealed class ConfiguredKeyWarsWebFactory(
         builder.UseSetting("KEYWARS:LIVE:MAX_PARTICIPANTS_PER_ROOM", maxParticipantsPerRoom.ToString(System.Globalization.CultureInfo.InvariantCulture));
         builder.UseSetting("KEYWARS:LIVE:MAX_ARENA_TARGET_GRAPHEMES", maxArenaTargetGraphemes.ToString(System.Globalization.CultureInfo.InvariantCulture));
         builder.UseSetting("KEYWARS:LIVE:MAX_CONCURRENT_ROOMS", maxConcurrentRooms.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        builder.UseSetting("KEYWARS:LIVE:MAX_ACTIVE_ROOMS_PER_CREATOR", maxActiveRoomsPerCreator.ToString(System.Globalization.CultureInfo.InvariantCulture));
     }
 }

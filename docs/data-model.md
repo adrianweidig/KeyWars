@@ -5,6 +5,8 @@ Wichtige Tabellen:
 - `UserProfiles`
 - `TrainingTexts`
 - `TextCollections`
+- `TextCollectionItems`
+- `ContentModerationAuditEntries`
 - `TypingAttempts`
 - `TypingAttemptErrors`
 - `Challenges`
@@ -13,9 +15,13 @@ Wichtige Tabellen:
 - `ChallengeRoundResults`
 - `ChallengeAttemptBindings`
 - `LiveRoomSummaries`
+- `LiveRoomParticipantSummaries`
 - `Missions`
 - `RewardLedgerEntries`
+- `Seasons`
+- `SeasonScores`
 - `Achievements`
+- `GamificationEvents`
 - `WeaknessObservations`
 
 Gruppenwettbewerbe werden über Teilnehmerlisten modelliert, nicht über ein Opponent-Feld.
@@ -71,6 +77,13 @@ nachvollziehbar, welcher Ratingstand in die Berechnung einging und welcher
 Stand nach der transaktionalen Persistenz entstand. Serverabbrüche schreiben
 eine neutrale Änderung mit identischem Before/After-Wert.
 
+`LiveRoomSummaries.TargetTextHash` ist der SHA-256-Hash des normalisierten
+Zieltexts, nicht der Klartext. Zusammen mit Modus und Serverabbruchstatus bildet
+er das Readmodel für persönliche Arena-Bestwerte. Berücksichtigt werden nur
+eigene beendete Teilnehmerzeilen aus persistierten, nicht serverseitig
+abgebrochenen Räumen; alte Zeilen ohne Hash liefern keinen textbezogenen
+Bestwert.
+
 ## Motivation
 
 `Missions` besitzen einen stabilen `Key`, der die fachliche Mission definiert.
@@ -86,10 +99,17 @@ den Raum-Idempotency-Key plus Profil-ID und Missionsbelohnungen über die
 Mission-ID gebucht. Das Ledger ist Teil von Profil-Export und
 Statistik-Reset/Löschung.
 
+`Seasons` speichert feste UTC-Zeiträume. `SeasonScores` aggregiert die Punkte
+pro Saison und Profil; die einzelne Punktevergabe steht mit Saison-ID und
+Punktzahl auf demselben `RewardLedgerEntry` wie die idempotente Quelle. Frühere
+Saisons bleiben erhalten. Profil-Reset und -Löschung entfernen die zugehörigen
+Saisonwerte.
+
 ## Profilaggregation
 
 Die Profilseite nutzt `ProfileInsightsService` und lädt keine vollständige
 Versuchsliste mehr in den Speicher. Trends, Gesamtwerte und Bestwerte werden
 über SQL-Aggregate aus abgeschlossenen `TypingAttempts` berechnet. Die Historie
-ist paginiert; Aktivität wird für die letzten 90 Tage aus Training, Arena und
-erreichten Missionen zusammengesetzt.
+ist paginiert. Gesamtwerte, Bestwerte, Historie und Aktivität folgen dem
+gewählten Zeitraum von 7, 30 oder 90 Tagen; die Trendansicht vergleicht diese
+drei Fenster mit dem jeweils vorherigen Zeitraum.

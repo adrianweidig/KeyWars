@@ -23,14 +23,23 @@ public interface ILivePresenceStateStore
         Guid roomId,
         CancellationToken cancellationToken = default);
     ValueTask<LivePresenceLeave?> RemoveConnectionAsync(
+        Guid profileId,
         string connectionId,
         CancellationToken cancellationToken = default);
     ValueTask<int> CountRoomConnectionsAsync(
         Guid profileId,
         Guid roomId,
         CancellationToken cancellationToken = default);
+    ValueTask<bool> RefreshConnectionAsync(
+        Guid profileId,
+        string connectionId,
+        Guid roomId,
+        CancellationToken cancellationToken = default);
     ValueTask<IReadOnlyList<string>> RemoveProfileFromRoomAsync(
         Guid profileId,
         Guid roomId,
+        CancellationToken cancellationToken = default);
+    ValueTask RemoveProfileAsync(
+        Guid profileId,
         CancellationToken cancellationToken = default);
 }

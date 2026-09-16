@@ -7,10 +7,12 @@ Nutzerverwaltung ist nicht vorgesehen.
 ## Training und Texte
 
 - klassische Textläufe, Wörtertests und zeitlich begrenzte Sprints;
-- Fehlerfokus, Geisterrennen sowie WPM-, Genauigkeits- und Konsistenzwerte;
+- Fehlerfokus, eigener Geist und ausdrücklich freigegebene Rivalen-Geister
+  ohne Tasten-Replay;
 - kuratierte Standardtexte und eine eigene Textbibliothek mit Suche, Filtern,
   Import, Kopie und Bewertung;
-- Dashboard, Missionen, Erfolge, Serien und persönliche Trends.
+- Dashboard, Missionen, Erfolge, Serien und persönliche Trends für 7, 30 oder
+  90 Tage.
 
 ## Gemeinsam spielen
 
@@ -18,6 +20,8 @@ Nutzerverwaltung ist nicht vorgesehen.
 - Live-Arena mit Raumcode, Lobby, Countdown, Rennen und Podium;
 - Einzelrennen, Drei- oder Fünf-Runden-Serien und automatisch ausgeglichene
   Teams;
+- hostgebundene Arena-Revanche und persönliche Bestwerte nach bestätigter
+  Persistenz;
 - transiente Live-Vorschau ohne persistierte Tasten- oder Replaydaten.
 
 ## Profil und Datenschutz
@@ -25,14 +29,20 @@ Nutzerverwaltung ist nicht vorgesehen.
 - JIT-Profilanlage nach erfolgreicher Verzeichnisanmeldung;
 - persönliche Ziele, Darstellungs- und Arenaeinstellungen;
 - Selbstauskunft, Datenexport, Statistik-Reset und Profillöschung;
-- getrennte Freigaben für Profil- und Ranglistenanzeige.
+- getrennte Freigaben für Ranglistenanzeige und Rivalen-Geister.
+
+## Motivation und Wettbewerb
+
+- XP, Level, Missionen, Erfolge, Serien sowie Arena- und Challenge-Rating;
+- konfigurierbare UTC-Saisons mit eigener Punktewertung und Rangliste;
+- keine Währung, kein Shop und keine künstliche Knappheit.
 
 ## Betrieb
 
 - einfache Einzelinstanz mit `compose.yaml` und SQLite;
 - optionaler Scale-Modus mit getrennten Rollen, PostgreSQL und Redis;
-- Health-Endpunkte, Online-Backups, Retention, GHCR-Image und
-  Air-Gap-Artefakte;
+- Health-Endpunkte, Online-Backups der SQLite-Einzelinstanz, dokumentierte
+  PostgreSQL-Sicherung im Scale-Modus, Retention, GHCR-Image und Air-Gap-Artefakte;
 - Browser-, Integrations-, Concurrency-, Last- und Windows-UI-Tests.
 
 Bewusst nicht enthalten sind lokale Produktionskonten, ein externer CDN-Zwang

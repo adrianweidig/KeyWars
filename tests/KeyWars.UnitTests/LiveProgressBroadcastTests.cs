@@ -2,11 +2,81 @@ using KeyWars.Domain;
 using KeyWars.Services;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace KeyWars.UnitTests;
 
 public sealed class LiveProgressBroadcastTests
 {
+    [Fact]
+    public void ParticipantSnapshotSerializesBoundedWindowCoordinates()
+    {
+        var participant = new LiveParticipantSnapshot(
+            ProfileId: Guid.CreateVersion7(),
+            DisplayName: "A",
+            Status: ParticipantStatus.Running,
+            Ready: true,
+            Sequence: 7,
+            CorrectCharacters: 70,
+            TypedTextPreview: $"{new string('c', 8)}w{new string('c', 23)}",
+            Wpm: 42,
+            Placement: null,
+            DurationMilliseconds: 0,
+            Accuracy: 99,
+            TypedStateOffset: 62,
+            TypedCharacters: 100);
+
+        var json = JsonSerializer.Serialize(
+            participant,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+        Assert.Contains("\"typedStateOffset\":62", json, StringComparison.Ordinal);
+        Assert.Contains("\"typedCharacters\":100", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("appendText", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LegacyParticipantMementoWithoutWindowCoordinatesDefaultsSafely()
+    {
+        var participant = new LiveParticipantMemento(
+            ProfileId: Guid.CreateVersion7(),
+            DisplayName: "A",
+            Status: ParticipantStatus.Running,
+            JoinedAt: DateTimeOffset.Parse("2026-08-13T12:00:00Z"),
+            TeamNumber: null,
+            Ready: true,
+            Sequence: 7,
+            CorrectCharacters: 70,
+            TypedTextPreview: "",
+            Wpm: 42,
+            Placement: null,
+            FinishedAt: null,
+            DisconnectedAt: null,
+            DurationMilliseconds: 0,
+            Accuracy: 99,
+            SeriesPoints: 0,
+            RoundWins: 0,
+            FinishedRounds: 0,
+            CompletedRounds: 0,
+            TotalDurationMilliseconds: 0,
+            TotalWpm: 0,
+            TotalAccuracy: 0,
+            CompetitionEligible: true,
+            TypedStateOffset: 62,
+            TypedCharacters: 100);
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        var legacyJson = JsonNode.Parse(JsonSerializer.Serialize(participant, options))!.AsObject();
+        legacyJson.Remove("typedStateOffset");
+        legacyJson.Remove("typedCharacters");
+
+        var restored = legacyJson.Deserialize<LiveParticipantMemento>(options);
+
+        Assert.NotNull(restored);
+        Assert.Equal(0, restored.TypedStateOffset);
+        Assert.Equal(0, restored.TypedCharacters);
+    }
+
     [Fact]
     public async Task ProgressBroadcasterCoalescesLatestDeltaPerParticipant()
     {
@@ -130,6 +200,70 @@ public sealed class LiveProgressBroadcastTests
         Assert.Equal(currentDelta, Assert.Single(selected));
     }
 
+    [Fact]
+    public async Task ProgressBroadcasterKeepsOneSendInFlightAndCoalescesWhileSenderIsBlocked()
+    {
+        var sender = new BlockingProgressSender();
+        var broadcaster = new LiveProgressBroadcaster(
+            sender,
+            Options.Create(new LiveOptions { ProgressBroadcastHz = 60, RoomCommandQueueCapacity = 8 }),
+            TimeProvider.System,
+            NullLogger<LiveProgressBroadcaster>.Instance);
+        var roomId = Guid.CreateVersion7();
+        var participantId = Guid.CreateVersion7();
+
+        var firstPublish = broadcaster.PublishAsync(
+            CreateDelta(roomId, participantId, correctCharacters: 1),
+            CancellationToken.None);
+        await sender.FirstSendStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        for (var sequence = 2; sequence <= 500; sequence++)
+        {
+            await broadcaster.PublishAsync(
+                CreateDelta(roomId, participantId, correctCharacters: sequence),
+                CancellationToken.None);
+        }
+
+        Assert.Equal(1, sender.SendCount);
+        Assert.Equal(1, sender.MaxConcurrentSends);
+        Assert.Equal(1, broadcaster.Snapshot().PendingProgressMessages);
+        Assert.True(sender.FirstSendToken.CanBeCanceled);
+
+        sender.ReleaseFirstSend();
+        await firstPublish.WaitAsync(TimeSpan.FromSeconds(2));
+        await sender.LatestDeltaSent.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.Equal(2, sender.SendCount);
+        Assert.Equal(1, sender.MaxConcurrentSends);
+        Assert.Equal(500, sender.Batches[^1].Deltas.Single().ParticipantSequence);
+    }
+
+    [Fact]
+    public async Task FailedSendNeverRequeuesBeyondThePendingCapacity()
+    {
+        var sender = new BlockingProgressSender(failFirstSend: true);
+        var broadcaster = new LiveProgressBroadcaster(
+            sender,
+            Options.Create(new LiveOptions { ProgressBroadcastHz = 1, RoomCommandQueueCapacity = 1 }),
+            new FixedTimeProvider(DateTimeOffset.Parse("2026-08-13T12:00:00Z")),
+            NullLogger<LiveProgressBroadcaster>.Instance);
+        var roomId = Guid.CreateVersion7();
+
+        var firstPublish = broadcaster.PublishAsync(
+            CreateDelta(roomId, Guid.CreateVersion7(), correctCharacters: 1),
+            CancellationToken.None);
+        await sender.FirstSendStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await broadcaster.PublishAsync(
+            CreateDelta(roomId, Guid.CreateVersion7(), correctCharacters: 2),
+            CancellationToken.None);
+
+        sender.ReleaseFirstSend();
+        await firstPublish.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.Equal(1, broadcaster.Snapshot().PendingProgressMessages);
+        Assert.Equal(1, broadcaster.Snapshot().DroppedProgressMessages);
+    }
+
     private static LiveProgressDelta CreateDelta(
         Guid roomId,
         Guid participantId,
@@ -173,5 +307,66 @@ public sealed class LiveProgressBroadcastTests
             Batches.Add(batch);
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class BlockingProgressSender(bool failFirstSend = false) : ILiveProgressSender
+    {
+        private readonly TaskCompletionSource firstSendRelease = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int activeSends;
+        private int sendCount;
+        private int maxConcurrentSends;
+
+        public TaskCompletionSource FirstSendStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource LatestDeltaSent { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public List<LiveProgressBatch> Batches { get; } = [];
+        public int SendCount => Volatile.Read(ref sendCount);
+        public int MaxConcurrentSends => Volatile.Read(ref maxConcurrentSends);
+        public CancellationToken FirstSendToken { get; private set; }
+
+        public async Task SendAsync(Guid roomId, LiveProgressBatch batch, CancellationToken cancellationToken)
+        {
+            var active = Interlocked.Increment(ref activeSends);
+            var observedMaximum = Volatile.Read(ref maxConcurrentSends);
+            while (active > observedMaximum)
+            {
+                var previous = Interlocked.CompareExchange(ref maxConcurrentSends, active, observedMaximum);
+                if (previous == observedMaximum)
+                {
+                    break;
+                }
+
+                observedMaximum = previous;
+            }
+            var call = Interlocked.Increment(ref sendCount);
+            lock (Batches)
+            {
+                Batches.Add(batch);
+            }
+
+            try
+            {
+                if (call == 1)
+                {
+                    FirstSendToken = cancellationToken;
+                    FirstSendStarted.TrySetResult();
+                    await firstSendRelease.Task.WaitAsync(cancellationToken);
+                    if (failFirstSend)
+                    {
+                        throw new InvalidOperationException("Simulierter Sendefehler");
+                    }
+                }
+
+                if (batch.Deltas.Any(delta => delta.ParticipantSequence == 500))
+                {
+                    LatestDeltaSent.TrySetResult();
+                }
+            }
+            finally
+            {
+                Interlocked.Decrement(ref activeSends);
+            }
+        }
+
+        public void ReleaseFirstSend() => firstSendRelease.TrySetResult();
     }
 }

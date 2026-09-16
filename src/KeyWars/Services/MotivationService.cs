@@ -33,9 +33,14 @@ internal sealed record ArenaMotivationInput(
     string SourceId,
     double Wpm,
     double Accuracy,
-    int DurationMilliseconds);
+    int DurationMilliseconds,
+    DateTimeOffset FinishedAt);
 
-public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProvider, GamificationEventWriter gamificationEvents)
+public sealed class MotivationService(
+    KeyWarsDbContext db,
+    TimeProvider timeProvider,
+    GamificationEventWriter gamificationEvents,
+    SeasonService seasons)
 {
     private const string SourceAttempt = "attempt";
     private const string SourceArena = "arena";
@@ -46,7 +51,12 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
     private const int MinimumXpDurationMilliseconds = 5_000;
 
     public MotivationService(KeyWarsDbContext db, TimeProvider timeProvider)
-        : this(db, timeProvider, new GamificationEventWriter(db))
+        : this(db, timeProvider, new GamificationEventWriter(db), new SeasonService(db, timeProvider))
+    {
+    }
+
+    public MotivationService(KeyWarsDbContext db, TimeProvider timeProvider, GamificationEventWriter gamificationEvents)
+        : this(db, timeProvider, gamificationEvents, new SeasonService(db, timeProvider))
     {
     }
 
@@ -59,18 +69,39 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
 
     public async Task<MotivationOutcome> ApplyAttemptAsync(Guid profileId, TypingAttempt attempt, IReadOnlyList<TypingError> errors, CancellationToken cancellationToken = default)
     {
-        if (!attempt.Completed || !attempt.Official)
+        return await ApplyAttemptAsync(profileId, attempt, errors, true, cancellationToken);
+    }
+
+    internal async Task<MotivationOutcome> ApplyAttemptAsync(
+        Guid profileId,
+        TypingAttempt attempt,
+        IReadOnlyList<TypingError> errors,
+        bool competitionIntegrityEligible,
+        CancellationToken cancellationToken = default)
+    {
+        if (!attempt.Completed || !attempt.Official || !competitionIntegrityEligible)
         {
             return await BuildCurrentOutcomeAsync(profileId, cancellationToken);
         }
 
         var previousBestWpm = await db.TypingAttempts
-            .Where(item => item.UserProfileId == profileId && item.Id != attempt.Id && item.Completed && item.Official)
+            .Where(item =>
+                item.UserProfileId == profileId &&
+                item.Id != attempt.Id &&
+                item.Completed &&
+                item.Official &&
+                item.CompetitionIntegrityEligible)
             .Select(item => (double?)item.Wpm)
             .MaxAsync(cancellationToken) ?? 0d;
         var performance = MotivationPerformance.FromAttempt(profileId, attempt, errors);
         var xp = CalculateXp(performance, previousBestWpm, attempt.TrainingTextId is not null);
-        var outcome = await ApplyPerformanceAsync(performance, xp, previousBestWpm, cancellationToken);
+        var outcome = await ApplyPerformanceAsync(
+            performance,
+            xp,
+            previousBestWpm,
+            attempt.FinishedAt ?? throw new InvalidOperationException(
+                "Ein abgeschlossener Versuch benötigt einen fachlichen Abschlusszeitpunkt."),
+            cancellationToken);
         attempt.ExperienceAwarded = true;
 
         return outcome;
@@ -91,7 +122,7 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
 
         var profile = await db.UserProfiles.SingleAsync(item => item.Id == profileId, cancellationToken);
         var outcomes = await ApplyArenaResultsAsync(
-            [new ArenaMotivationInput(profile, sourceId, wpm, accuracy, durationMilliseconds)],
+            [new ArenaMotivationInput(profile, sourceId, wpm, accuracy, durationMilliseconds, timeProvider.GetUtcNow())],
             cancellationToken);
         return outcomes[profileId];
     }
@@ -109,7 +140,8 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
             .Select(input => new ArenaBatchItem(
                 input.Profile,
                 CreateArenaPerformance(input),
-                0))
+                0,
+                input.FinishedAt))
             .Select(item => item with { Xp = CalculateXp(item.Performance, 0d, false) })
             .ToList();
         if (items.Select(item => item.Profile.Id).Distinct().Count() != items.Count)
@@ -138,6 +170,11 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
         var now = timeProvider.GetUtcNow();
         var today = DateOnly.FromDateTime(timeProvider.GetLocalNow().DateTime);
         var activeProfileIds = activeItems.Select(item => item.Profile.Id).ToArray();
+        await seasons.PrepareScoresAsync(
+            activeItems
+                .Select(item => new SeasonScorePreparation(item.Profile, item.FinishedAt))
+                .ToArray(),
+            cancellationToken);
         var missionLoad = await LoadOrCreateCurrentMissionsAsync(activeProfileIds, today, cancellationToken);
         var missionsByProfile = missionLoad.MissionsByProfile;
         var missionSourceIds = missionsByProfile.Values
@@ -162,7 +199,23 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
             var performance = item.Performance;
             var levelBefore = CalculateLevel(profile.ExperiencePoints);
             profile.Level = levelBefore;
-            var awardedXp = AwardXpPrepared(profile, SourceArena, performance.SourceId, item.Xp, now, knownLedgerEntries);
+            var awardedXp = AwardXpPrepared(
+                profile,
+                SourceArena,
+                performance.SourceId,
+                item.Xp,
+                item.FinishedAt,
+                knownLedgerEntries);
+            if (awardedXp > 0 && performance.CountsForSeason)
+            {
+                await seasons.AwardAsync(
+                    profile,
+                    performance.Source,
+                    performance.SourceId,
+                    Math.Max(1, (int)Math.Round(performance.Wpm / 10d)),
+                    item.FinishedAt,
+                    cancellationToken);
+            }
             profile.CurrentStreakDays = CalculateStreak(profile.LastActivityDate, today, profile.CurrentStreakDays);
             profile.LastActivityDate = today;
 
@@ -199,21 +252,92 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
 
     public async Task EnsureCurrentMissionsAsync(Guid profileId, DateOnly date, CancellationToken cancellationToken = default)
     {
-        var result = await LoadOrCreateCurrentMissionsAsync([profileId], date, cancellationToken);
-        if (result.AddedCount > 0)
+        var weekStart = GetWeekStart(date);
+        var activeDates = new[] { date, weekStart }.Distinct().ToArray();
+        var existing = (await db.Missions
+                .AsNoTracking()
+                .Where(item => item.UserProfileId == profileId && activeDates.Contains(item.MissionDate))
+                .Select(item => new { item.MissionDate, item.Key })
+                .ToListAsync(cancellationToken))
+            .Select(item => (item.MissionDate, item.Key))
+            .ToHashSet();
+        var missing = MotivationCatalog.MissionDefinitions
+            .Select(definition => new
+            {
+                Definition = definition,
+                MissionDate = definition.Cadence == MissionCadence.Daily ? date : weekStart
+            })
+            .Where(item => !existing.Contains((item.MissionDate, item.Definition.Key)))
+            .ToArray();
+        if (missing.Length == 0)
         {
-            await db.SaveChangesAsync(cancellationToken);
+            return;
         }
+
+        await using var transaction = db.Database.CurrentTransaction is null
+            ? await db.Database.BeginTransactionAsync(cancellationToken)
+            : null;
+        foreach (var item in missing)
+        {
+            await InsertMissionIfMissingAsync(profileId, item.MissionDate, item.Definition, cancellationToken);
+        }
+
+        if (transaction is not null)
+        {
+            await transaction.CommitAsync(cancellationToken);
+        }
+    }
+
+    private async Task InsertMissionIfMissingAsync(
+        Guid profileId,
+        DateOnly missionDate,
+        MissionDefinition definition,
+        CancellationToken cancellationToken)
+    {
+        var id = Guid.CreateVersion7();
+        if (db.Database.IsSqlite())
+        {
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT OR IGNORE INTO Missions
+                    (Id, UserProfileId, Key, Title, Description, MissionDate, TargetValue, CurrentValue, Completed, XpReward)
+                VALUES
+                    ({id}, {profileId}, {definition.Key}, {definition.Title}, {definition.Description}, {missionDate},
+                     {definition.TargetValue}, 0, {false}, {definition.XpReward})
+                """, cancellationToken);
+            return;
+        }
+
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO "Missions"
+                ("Id", "UserProfileId", "Key", "Title", "Description", "MissionDate", "TargetValue", "CurrentValue", "Completed", "XpReward")
+            VALUES
+                ({id}, {profileId}, {definition.Key}, {definition.Title}, {definition.Description}, {missionDate},
+                 {definition.TargetValue}, 0, {false}, {definition.XpReward})
+            ON CONFLICT ("UserProfileId", "MissionDate", "Key") DO NOTHING
+            """, cancellationToken);
     }
 
     public async Task<CoachRecommendation> RecommendAsync(Guid profileId, CancellationToken cancellationToken = default)
     {
-        var attempts = (await db.TypingAttempts
-            .Where(item => item.UserProfileId == profileId && item.Completed)
-            .ToListAsync(cancellationToken))
-            .OrderByDescending(item => item.CreatedAt)
-            .Take(10)
-            .ToList();
+        var attempts = db.Database.IsSqlite()
+            ? await db.TypingAttempts
+                .FromSqlInterpolated($"""
+                    SELECT *
+                    FROM TypingAttempts
+                    WHERE UserProfileId = {profileId.ToString().ToUpperInvariant()}
+                      AND Completed = 1
+                    ORDER BY CreatedAt DESC, Id DESC
+                    LIMIT 10
+                    """)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken)
+            : await db.TypingAttempts
+                .AsNoTracking()
+                .Where(item => item.UserProfileId == profileId && item.Completed)
+                .OrderByDescending(item => item.CreatedAt)
+                .ThenByDescending(item => item.Id)
+                .Take(10)
+                .ToListAsync(cancellationToken);
 
         if (attempts.Count == 0)
         {
@@ -258,7 +382,12 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
         return level;
     }
 
-    private async Task<MotivationOutcome> ApplyPerformanceAsync(MotivationPerformance performance, int xp, double previousBestWpm, CancellationToken cancellationToken)
+    private async Task<MotivationOutcome> ApplyPerformanceAsync(
+        MotivationPerformance performance,
+        int xp,
+        double previousBestWpm,
+        DateTimeOffset rewardAwardedAt,
+        CancellationToken cancellationToken)
     {
         var profile = await db.UserProfiles.SingleAsync(item => item.Id == performance.ProfileId, cancellationToken);
         var now = timeProvider.GetUtcNow();
@@ -273,7 +402,13 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
             return BuildOutcome(profile, levelBefore, 0, []);
         }
 
-        var awardedXp = await AwardXpAsync(profile, performance.Source, performance.SourceId, xp, now, cancellationToken);
+        var awardedXp = await AwardXpAsync(
+            profile,
+            performance.Source,
+            performance.SourceId,
+            xp,
+            rewardAwardedAt,
+            cancellationToken);
         if (awardedXp <= 0)
         {
             profile.Level = CalculateLevel(profile.ExperiencePoints);
@@ -284,7 +419,13 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
         profile.LastActivityDate = today;
         if (performance.CountsForSeason)
         {
-            profile.SeasonPoints += Math.Max(1, (int)Math.Round(performance.Wpm / 10));
+            await seasons.AwardAsync(
+                profile,
+                performance.Source,
+                performance.SourceId,
+                Math.Max(1, (int)Math.Round(performance.Wpm / 10d)),
+                rewardAwardedAt,
+                cancellationToken);
         }
 
         var missionLoad = await LoadOrCreateCurrentMissionsAsync([profile.Id], today, cancellationToken);
@@ -490,20 +631,20 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
                     continue;
                 }
 
-                var mission = new Mission
-                {
-                    UserProfileId = profileId,
-                    MissionDate = missionDate,
-                    Key = definition.Key,
-                    Title = definition.Title,
-                    Description = definition.Description,
-                    TargetValue = definition.TargetValue,
-                    XpReward = definition.XpReward
-                };
-                db.Missions.Add(mission);
-                missions.Add(mission);
+                await InsertMissionIfMissingAsync(
+                    profileId,
+                    missionDate,
+                    definition,
+                    cancellationToken);
                 addedCount++;
             }
+        }
+
+        if (addedCount > 0)
+        {
+            missions = await db.Missions
+                .Where(item => distinctProfileIds.Contains(item.UserProfileId) && activeDates.Contains(item.MissionDate))
+                .ToListAsync(cancellationToken);
         }
 
         return new MissionLoadResult(
@@ -538,7 +679,7 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
             true,
             true,
             null,
-            false,
+            true,
             []);
     }
 
@@ -719,7 +860,8 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
         var completedAttemptsQuery = db.TypingAttempts.Where(item =>
             item.UserProfileId == profile.Id &&
             item.Completed &&
-            item.Official);
+            item.Official &&
+            item.CompetitionIntegrityEligible);
         if (performance.AttemptId is { } attemptId)
         {
             completedAttemptsQuery = completedAttemptsQuery.Where(item => item.Id != attemptId);
@@ -735,6 +877,7 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
             item.UserProfileId == profile.Id &&
             item.Completed &&
             item.Official &&
+            item.CompetitionIntegrityEligible &&
             item.Accuracy >= 98);
         if (performance.AttemptId is { } preciseAttemptId)
         {
@@ -751,6 +894,7 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
             item.UserProfileId == profile.Id &&
             item.Completed &&
             item.Official &&
+            item.CompetitionIntegrityEligible &&
             item.Accuracy >= 95);
         if (performance.AttemptId is { } precise95AttemptId)
         {
@@ -765,8 +909,14 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
 
         var authoredTexts = await db.TrainingTexts.CountAsync(item => item.OwnerProfileId == profile.Id, cancellationToken);
         var collections = await db.TextCollections.CountAsync(item => item.OwnerProfileId == profile.Id, cancellationToken);
-        var challengeResults = await db.ChallengeRoundResults.CountAsync(item => item.UserProfileId == profile.Id && item.Status == ParticipantStatus.Finished, cancellationToken);
-        var arenaResults = await db.LiveRoomParticipantSummaries.CountAsync(item => item.UserProfileId == profile.Id && item.Status == ParticipantStatus.Finished, cancellationToken);
+        var challengeResults = await db.ChallengeRoundResults.CountAsync(item =>
+            item.UserProfileId == profile.Id &&
+            item.Status == ParticipantStatus.Finished &&
+            item.CompetitionEligible, cancellationToken);
+        var arenaResults = await db.LiveRoomParticipantSummaries.CountAsync(item =>
+            item.UserProfileId == profile.Id &&
+            item.Status == ParticipantStatus.Finished &&
+            item.CompetitionEligible, cancellationToken);
         if (performance.Source == SourceArena)
         {
             arenaResults++;
@@ -963,7 +1113,11 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
         var ids = profileIds.Distinct().ToArray();
         var attemptRows = await db.TypingAttempts
             .AsNoTracking()
-            .Where(item => ids.Contains(item.UserProfileId) && item.Completed && item.Official)
+            .Where(item =>
+                ids.Contains(item.UserProfileId) &&
+                item.Completed &&
+                item.Official &&
+                item.CompetitionIntegrityEligible)
             .GroupBy(item => item.UserProfileId)
             .Select(group => new
             {
@@ -987,13 +1141,19 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
             .ToListAsync(cancellationToken);
         var challengeRows = await db.ChallengeRoundResults
             .AsNoTracking()
-            .Where(item => ids.Contains(item.UserProfileId) && item.Status == ParticipantStatus.Finished)
+            .Where(item =>
+                ids.Contains(item.UserProfileId) &&
+                item.Status == ParticipantStatus.Finished &&
+                item.CompetitionEligible)
             .GroupBy(item => item.UserProfileId)
             .Select(group => new { ProfileId = group.Key, Count = group.Count() })
             .ToListAsync(cancellationToken);
         var arenaRows = await db.LiveRoomParticipantSummaries
             .AsNoTracking()
-            .Where(item => ids.Contains(item.UserProfileId) && item.Status == ParticipantStatus.Finished)
+            .Where(item =>
+                ids.Contains(item.UserProfileId) &&
+                item.Status == ParticipantStatus.Finished &&
+                item.CompetitionEligible)
             .GroupBy(item => item.UserProfileId)
             .Select(group => new { ProfileId = group.Key, Count = group.Count() })
             .ToListAsync(cancellationToken);
@@ -1221,7 +1381,8 @@ public sealed class MotivationService(KeyWarsDbContext db, TimeProvider timeProv
     private sealed record ArenaBatchItem(
         UserProfile Profile,
         MotivationPerformance Performance,
-        int Xp);
+        int Xp,
+        DateTimeOffset FinishedAt);
 
     private readonly record struct RewardLedgerIdentity(
         Guid UserProfileId,

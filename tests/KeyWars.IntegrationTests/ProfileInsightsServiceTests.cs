@@ -11,6 +11,53 @@ namespace KeyWars.IntegrationTests;
 public sealed class ProfileInsightsServiceTests
 {
     [Fact]
+    public async Task RecentHistoryReadModelReturnsOnlyRequestedLatestRows()
+    {
+        var now = DateTimeOffset.Parse("2026-06-19T12:00:00Z");
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<KeyWarsDbContext>().UseSqlite(connection).Options;
+        await using var db = new KeyWarsDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        var profile = new UserProfile
+        {
+            DisplayName = "Dana Dashboard",
+            SamAccountName = "ddashboard",
+            DirectoryObjectGuid = Guid.NewGuid().ToString(),
+            DirectorySid = "S-dashboard"
+        };
+        db.UserProfiles.Add(profile);
+        var attempts = Enumerable.Range(0, 8)
+            .Select(index => new TypingAttempt
+            {
+                UserProfileId = profile.Id,
+                Mode = TrainingMode.Sprint60,
+                Phase = AttemptPhase.Finished,
+                Completed = true,
+                Official = true,
+                CreatedAt = now.AddMinutes(-index),
+                PreparedAt = now.AddMinutes(-index - 1),
+                StartedAt = now.AddMinutes(-index).AddSeconds(-30),
+                FinishedAt = now.AddMinutes(-index),
+                DurationMilliseconds = 30_000,
+                CorrectCharacters = 100,
+                TotalCharacters = 100,
+                Wpm = 40 + index,
+                Accuracy = 99,
+                Consistency = 90
+            })
+            .ToArray();
+        db.TypingAttempts.AddRange(attempts);
+        await db.SaveChangesAsync();
+
+        var recent = await new ProfileInsightsService(db, new ManualTimeProvider(now))
+            .ReadRecentHistoryAsync(profile.Id, 5);
+
+        Assert.Equal(5, recent.Count);
+        Assert.Equal(attempts.Take(5).Select(item => item.Id), recent.Select(item => item.Id));
+    }
+
+    [Fact]
     public async Task InsightsAggregateLargeAttemptSetWithPagedHistoryAndActivity()
     {
         var now = DateTimeOffset.Parse("2026-06-19T12:00:00Z");
@@ -141,10 +188,191 @@ public sealed class ProfileInsightsServiceTests
             Assert.Equal(attempt.CorrectCharacters, historyRow.CorrectCharacters);
             Assert.Equal(attempt.IncorrectCharacters, historyRow.IncorrectCharacters);
             Assert.Equal(attempt.ConsistencySampleCount, historyRow.ConsistencySampleCount);
+            Assert.Equal(attempt.TrainingTextId, historyRow.TrainingTextId);
+            Assert.Equal(attempt.Official && attempt.FinishedAt is not null && attempt.TrainingTextId is not null, historyRow.CanStartGhost);
         }
         Assert.Single(insights.FeaturedAchievements);
         Assert.Single(insights.CurrentGoals);
         Assert.Single(insights.RecentEvents);
+    }
+
+    [Fact]
+    public async Task SelectedPeriodScopesAggregatesHistoryAndCalendarBoundaries()
+    {
+        var now = DateTimeOffset.Parse("2026-06-19T12:00:00Z");
+        var sevenDayStart = DateTimeOffset.Parse("2026-06-13T00:00:00Z");
+        var periodEnd = DateTimeOffset.Parse("2026-06-20T00:00:00Z");
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<KeyWarsDbContext>().UseSqlite(connection).Options;
+        await using var db = new KeyWarsDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        var profile = new UserProfile
+        {
+            DisplayName = "Toni Zeitraum",
+            SamAccountName = "tzeitraum",
+            DirectoryObjectGuid = Guid.NewGuid().ToString(),
+            DirectorySid = "S-period"
+        };
+        db.UserProfiles.Add(profile);
+
+        TypingAttempt CreateAttempt(DateTimeOffset createdAt, TrainingMode mode = TrainingMode.Sprint60) =>
+            new()
+            {
+                UserProfileId = profile.Id,
+                Mode = mode,
+                Phase = AttemptPhase.Finished,
+                Completed = true,
+                Official = true,
+                CreatedAt = createdAt,
+                PreparedAt = createdAt.AddMinutes(-1),
+                StartedAt = createdAt.AddSeconds(-30),
+                FinishedAt = createdAt,
+                DurationMilliseconds = 30_000,
+                CorrectCharacters = 100,
+                IncorrectCharacters = 1,
+                TotalCharacters = 101,
+                Wpm = 50,
+                RawWpm = 51,
+                Accuracy = 99,
+                Consistency = 90,
+                ConsistencySampleCount = 3
+            };
+
+        var selectedAttempts = Enumerable.Range(0, 12)
+            .Select(index => CreateAttempt(sevenDayStart.AddHours(index)))
+            .ToList();
+        var beforeSevenDays = CreateAttempt(sevenDayStart.AddSeconds(-1), TrainingMode.Words25);
+        var insideThirtyDays = CreateAttempt(DateTimeOffset.Parse("2026-06-01T08:00:00Z"), TrainingMode.Words25);
+        var atExclusiveEnd = CreateAttempt(periodEnd, TrainingMode.Words25);
+        db.TypingAttempts.AddRange(selectedAttempts.Append(beforeSevenDays).Append(insideThirtyDays).Append(atExclusiveEnd));
+        await db.SaveChangesAsync();
+        var service = new ProfileInsightsService(db, new ManualTimeProvider(now));
+
+        var sevenDays = await service.GetAsync(
+            profile,
+            new ProfileInsightsQuery(ProfileInsightsPeriod.SevenDays, 2, 5),
+            CancellationToken.None);
+        var thirtyDays = await service.GetAsync(
+            profile,
+            new ProfileInsightsQuery(ProfileInsightsPeriod.ThirtyDays, 1, 50),
+            CancellationToken.None);
+
+        Assert.Equal(12, sevenDays.Totals.CompletedAttempts);
+        Assert.Equal(12 * 101, sevenDays.Totals.TypedCharacters);
+        Assert.Equal(7, sevenDays.ActivityDays.Count);
+        Assert.Equal(12, sevenDays.ActivityDays.Sum(day => day.TrainingAttempts));
+        var trend = Assert.Single(sevenDays.Trends);
+        Assert.Equal(7, trend.Days);
+        Assert.Equal(12, trend.SampleCount);
+        Assert.Equal(2, sevenDays.HistoryPage);
+        Assert.Equal(5, sevenDays.History.Count);
+        Assert.Equal(12, sevenDays.HistoryTotalItems);
+        Assert.Equal(3, sevenDays.HistoryTotalPages);
+        Assert.All(sevenDays.History, item => Assert.Contains(item.Id, selectedAttempts.Select(attempt => attempt.Id)));
+        Assert.Equal(TrainingMode.Sprint60, Assert.Single(sevenDays.BestModes).Mode);
+
+        Assert.Equal(14, thirtyDays.Totals.CompletedAttempts);
+        Assert.Equal(30, thirtyDays.ActivityDays.Count);
+        Assert.Contains(thirtyDays.History, item => item.Id == beforeSevenDays.Id);
+        Assert.Contains(thirtyDays.History, item => item.Id == insideThirtyDays.Id);
+        Assert.DoesNotContain(thirtyDays.History, item => item.Id == atExclusiveEnd.Id);
+    }
+
+    [Fact]
+    public async Task HistoryOffersGhostRaceOnlyForCurrentlyUsableOfficialTextAttempts()
+    {
+        var now = DateTimeOffset.Parse("2026-06-19T12:00:00Z");
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<KeyWarsDbContext>().UseSqlite(connection).Options;
+        await using var db = new KeyWarsDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        var profile = new UserProfile
+        {
+            DisplayName = "Greta Geist",
+            SamAccountName = "ggeist",
+            DirectoryObjectGuid = Guid.NewGuid().ToString(),
+            DirectorySid = "S-ghost-owner"
+        };
+        var other = new UserProfile
+        {
+            DisplayName = "Fremde Person",
+            SamAccountName = "foreign",
+            DirectoryObjectGuid = Guid.NewGuid().ToString(),
+            DirectorySid = "S-ghost-foreign"
+        };
+        db.UserProfiles.AddRange(profile, other);
+        var available = Text("Verfügbar", TrainingTextVisibility.Organization);
+        var quarantined = Text("Gesperrt", TrainingTextVisibility.Organization, quarantined: true);
+        var foreignPrivate = Text("Fremd privat", TrainingTextVisibility.Private, ownerId: other.Id);
+        db.TrainingTexts.AddRange(available, quarantined, foreignPrivate);
+        var eligible = Attempt(available.Id, official: true, createdAt: now.AddMinutes(-1));
+        var unofficial = Attempt(available.Id, official: false, createdAt: now.AddMinutes(-2));
+        var blocked = Attempt(quarantined.Id, official: true, createdAt: now.AddMinutes(-3));
+        var inaccessible = Attempt(foreignPrivate.Id, official: true, createdAt: now.AddMinutes(-4));
+        db.TypingAttempts.AddRange(eligible, unofficial, blocked, inaccessible);
+        await db.SaveChangesAsync();
+
+        var insights = await new ProfileInsightsService(db, new ManualTimeProvider(now))
+            .GetAsync(profile, new ProfileInsightsQuery(ProfileInsightsPeriod.SevenDays, 1, 10), CancellationToken.None);
+
+        Assert.True(insights.History.Single(item => item.Id == eligible.Id).CanStartGhost);
+        Assert.False(insights.History.Single(item => item.Id == unofficial.Id).CanStartGhost);
+        Assert.False(insights.History.Single(item => item.Id == blocked.Id).CanStartGhost);
+        Assert.False(insights.History.Single(item => item.Id == inaccessible.Id).CanStartGhost);
+
+        TrainingText Text(
+            string title,
+            TrainingTextVisibility visibility,
+            Guid? ownerId = null,
+            bool quarantined = false) => new()
+        {
+            OwnerProfileId = ownerId,
+            Title = title,
+            SourceKey = $"ghost-history-{Guid.NewGuid():N}",
+            Body = "Text für einen geprüften Geist-Einstieg.",
+            Visibility = visibility,
+            IsQuarantined = quarantined,
+            RatingEligible = true,
+            CharacterCount = 42,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+
+        TypingAttempt Attempt(Guid textId, bool official, DateTimeOffset createdAt) => new()
+        {
+            UserProfileId = profile.Id,
+            TrainingTextId = textId,
+            Mode = TrainingMode.Text,
+            Phase = AttemptPhase.Finished,
+            Completed = true,
+            Official = official,
+            LeaderboardEligible = true,
+            PreparedAt = createdAt.AddMinutes(-1),
+            StartedAt = createdAt.AddSeconds(-30),
+            FinishedAt = createdAt,
+            CreatedAt = createdAt,
+            DurationMilliseconds = 30_000,
+            CorrectCharacters = 100,
+            TotalCharacters = 100,
+            Wpm = 40,
+            Accuracy = 100,
+            Consistency = 90
+        };
+    }
+
+    [Fact]
+    public void ProfileInsightsQueryNormalizesHttpValuesAndRejectsInvalidEnums()
+    {
+        var invalidDays = ProfileInsightsQuery.FromDays(365, -4, 500);
+
+        Assert.Equal(ProfileInsightsPeriod.NinetyDays, invalidDays.Period);
+        Assert.Equal(90, invalidDays.Days);
+        Assert.Equal(1, invalidDays.HistoryPage);
+        Assert.Equal(50, invalidDays.HistoryPageSize);
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new ProfileInsightsQuery((ProfileInsightsPeriod)365, 1, 10));
     }
 
     [Fact]

@@ -36,6 +36,38 @@
     </div>
 </section>
 
+<section class="card stack-spaced" aria-labelledby="profile-period-title">
+    <div class="section-title-row">
+        <div>
+            <span class="eyebrow">Auswertung</span>
+            <h2 id="profile-period-title">Zeitraum</h2>
+        </div>
+        <nav class="toolbar-actions" aria-label="Profilzeitraum auswählen" data-profile-period-selector>
+            @foreach (var period in Model.AvailablePeriods)
+            {
+                var days = (int)period;
+                var selected = period == Model.SelectedPeriod;
+                <a class="button @(selected ? "" : "secondary")"
+                   asp-page="/Profil/Index"
+                   asp-route-zeitraum="@days"
+                   asp-route-seite="1"
+                   aria-current="@(selected ? "page" : null)"
+                   data-profile-period="@days">@days Tage</a>
+            }
+        </nav>
+    </div>
+    <p class="muted">Leistung, Trend, Aktivität, Bestwerte und Historie für die letzten @Model.SelectedDays Tage.</p>
+</section>
+
+@if (Model.Insights.Totals.CompletedAttempts == 0)
+{
+    <div class="empty-state compact-empty" role="status" data-profile-period-empty>
+        <h2>Noch keine Trainingsdaten</h2>
+        <p>In den letzten @Model.SelectedDays Tagen wurde kein Training abgeschlossen.</p>
+        <a class="button" asp-page="/Spielen/Index">Training starten</a>
+    </div>
+}
+
 <section class="grid">
     <article class="card">
         <h2>Fortschritt</h2>
@@ -50,7 +82,7 @@
     </article>
 
     <article class="card">
-        <h2>Gesamtleistung</h2>
+        <h2>Leistung · @Model.SelectedDays Tage</h2>
         <div class="metric-row">
             <div class="metric"><span>Versuche</span><strong>@Model.Insights.Totals.CompletedAttempts.ToString("N0", culture)</strong></div>
             <div class="metric"><span>Zeichen</span><strong>@Model.Insights.Totals.TypedCharacters.ToString("N0", culture)</strong></div>
@@ -66,12 +98,12 @@
         <h2>Trend</h2>
         @if (Model.Insights.Trends.All(item => item.SampleCount == 0))
         {
-            <p class="muted">Noch keine abgeschlossenen Versuche für eine belastbare Trendlinie.</p>
+            <p class="muted">Noch keine abgeschlossenen Versuche in den letzten @Model.SelectedDays Tagen.</p>
         }
         else
         {
             <svg class="profile-chart" viewBox="0 0 320 150" role="img" aria-labelledby="trendChartTitle">
-                <title id="trendChartTitle">WPM-Trend über 7, 30 und 90 Tage</title>
+                <title id="trendChartTitle">WPM-Trend der letzten @Model.SelectedDays Tage im Vergleich zum vorherigen Zeitraum</title>
                 <line x1="24" y1="122" x2="300" y2="122" />
                 @for (var index = 0; index < Model.Insights.Trends.Count; index++)
                 {
@@ -109,12 +141,12 @@
         <h2>Aktivität</h2>
         @if (activityDays.All(item => item.Intensity == 0))
         {
-            <p class="muted">Noch keine Aktivität in den letzten 90 Tagen.</p>
+            <p class="muted">Noch keine Aktivität in den letzten @Model.SelectedDays Tagen.</p>
         }
         else
         {
             <svg class="activity-chart" viewBox="0 0 @chartWidth @chartHeight" role="img" aria-labelledby="activityChartTitle">
-                <title id="activityChartTitle">Aktivitätskalender der letzten 90 Tage</title>
+                <title id="activityChartTitle">Aktivitätskalender der letzten @Model.SelectedDays Tage</title>
                 @for (var index = 0; index < activityDays.Count; index++)
                 {
                     var day = activityDays[index];
@@ -145,10 +177,10 @@
 
 <section class="grid stack-spaced">
     <article class="card">
-        <h2>Bestwerte je Modus</h2>
+        <h2>Bestwerte je Modus · @Model.SelectedDays Tage</h2>
         @if (Model.Insights.BestModes.Count == 0)
         {
-            <p class="muted">Noch keine Bestwerte vorhanden.</p>
+            <p class="muted">Noch keine Bestwerte in diesem Zeitraum vorhanden.</p>
         }
         else
         {
@@ -206,17 +238,17 @@
 
 <section class="card stack-spaced">
     <div class="section-title-row">
-        <h2>Historie</h2>
+        <h2>Historie · @Model.SelectedDays Tage</h2>
         <span class="muted">Seite @Model.Insights.HistoryPage.ToString("N0", culture) von @Model.Insights.HistoryTotalPages.ToString("N0", culture)</span>
     </div>
     @if (Model.Insights.History.Count == 0)
     {
-        <p class="muted">Noch keine abgeschlossenen Versuche.</p>
+        <p class="muted">Noch keine abgeschlossenen Versuche in diesem Zeitraum.</p>
     }
     else
     {
         <table class="table">
-            <thead><tr><th>Zeit</th><th>Modus</th><th>WPM</th><th>Genauigkeit</th><th>Konsistenz</th><th>Zeichen</th></tr></thead>
+            <thead><tr><th>Zeit</th><th>Modus</th><th>WPM</th><th>Genauigkeit</th><th>Konsistenz</th><th>Zeichen</th><th>Aktion</th></tr></thead>
             <tbody>
             @foreach (var attempt in Model.Insights.History)
             {
@@ -227,6 +259,18 @@
                     <td data-label="Genauigkeit">@attempt.Accuracy.ToString("0.0", culture) %</td>
                     <td data-label="Konsistenz">@attempt.Consistency.ToString("0.0", culture) %</td>
                     <td data-label="Zeichen">@attempt.CorrectCharacters.ToString("N0", culture)</td>
+                    <td data-label="Aktion">
+                        @if (attempt.CanStartGhost)
+                        {
+                            <a class="button secondary compact-button"
+                               asp-page="/Spielen/Geist"
+                               asp-route-attemptId="@attempt.Id">Geisterrennen</a>
+                        }
+                        else
+                        {
+                            <span class="muted">–</span>
+                        }
+                    </td>
                 </tr>
             }
             </tbody>
@@ -234,9 +278,29 @@
         @if (Model.Insights.HistoryTotalPages > 1)
         {
             <nav class="pagination" aria-label="Historie Seiten">
-                <a class="button secondary" asp-page="/Profil/Index" asp-route-seite="@(Model.Insights.HistoryPage - 1)" aria-disabled="@(Model.Insights.HistoryPage <= 1)">Zurück</a>
+                @if (Model.Insights.HistoryPage > 1)
+                {
+                    <a class="button secondary"
+                       asp-page="/Profil/Index"
+                       asp-route-zeitraum="@Model.SelectedDays"
+                       asp-route-seite="@(Model.Insights.HistoryPage - 1)">Zurück</a>
+                }
+                else
+                {
+                    <span class="button secondary" aria-disabled="true">Zurück</span>
+                }
                 <span aria-current="page">Seite @Model.Insights.HistoryPage von @Model.Insights.HistoryTotalPages</span>
-                <a class="button secondary" asp-page="/Profil/Index" asp-route-seite="@(Model.Insights.HistoryPage + 1)" aria-disabled="@(Model.Insights.HistoryPage >= Model.Insights.HistoryTotalPages)">Weiter</a>
+                @if (Model.Insights.HistoryPage < Model.Insights.HistoryTotalPages)
+                {
+                    <a class="button secondary"
+                       asp-page="/Profil/Index"
+                       asp-route-zeitraum="@Model.SelectedDays"
+                       asp-route-seite="@(Model.Insights.HistoryPage + 1)">Weiter</a>
+                }
+                else
+                {
+                    <span class="button secondary" aria-disabled="true">Weiter</span>
+                }
             </nav>
         }
     }

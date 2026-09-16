@@ -67,27 +67,99 @@ public sealed record ProfileAttemptHistoryRow(
     int ConsistencySampleCount,
     int DurationMilliseconds,
     int CorrectCharacters,
-    int IncorrectCharacters);
+    int IncorrectCharacters,
+    Guid? TrainingTextId,
+    bool CanStartGhost);
+
+public enum ProfileInsightsPeriod
+{
+    SevenDays = 7,
+    ThirtyDays = 30,
+    NinetyDays = 90
+}
+
+public sealed record ProfileInsightsQuery
+{
+    public ProfileInsightsQuery(ProfileInsightsPeriod period, int historyPage, int historyPageSize)
+    {
+        if (period is not (ProfileInsightsPeriod.SevenDays or ProfileInsightsPeriod.ThirtyDays or ProfileInsightsPeriod.NinetyDays))
+        {
+            throw new ArgumentOutOfRangeException(nameof(period));
+        }
+
+        Period = period;
+        HistoryPage = Math.Max(1, historyPage);
+        HistoryPageSize = Math.Clamp(historyPageSize, 5, 50);
+    }
+
+    public ProfileInsightsPeriod Period { get; }
+    public int Days => (int)Period;
+    public int HistoryPage { get; }
+    public int HistoryPageSize { get; }
+
+    public static ProfileInsightsQuery FromDays(int? days, int historyPage, int historyPageSize) =>
+        new(days switch
+        {
+            7 => ProfileInsightsPeriod.SevenDays,
+            30 => ProfileInsightsPeriod.ThirtyDays,
+            90 => ProfileInsightsPeriod.NinetyDays,
+            _ => ProfileInsightsPeriod.NinetyDays
+        }, historyPage, historyPageSize);
+}
 
 public sealed class ProfileInsightsService(KeyWarsDbContext db, TimeProvider timeProvider)
 {
     private static readonly int[] TrendWindows = [7, 30, 90];
 
-    public async Task<ProfileInsights> GetAsync(UserProfile profile, int historyPage, int historyPageSize, CancellationToken cancellationToken)
+    public Task<IReadOnlyList<ProfileAttemptHistoryRow>> ReadRecentHistoryAsync(
+        Guid profileId,
+        int count,
+        CancellationToken cancellationToken = default) =>
+        ReadHistoryPageAsync(profileId, null, 1, Math.Clamp(count, 1, 50), cancellationToken);
+
+    public Task<ProfileInsights> GetAsync(
+        UserProfile profile,
+        int historyPage,
+        int historyPageSize,
+        CancellationToken cancellationToken) =>
+        GetAsync(profile, historyPage, historyPageSize, null, cancellationToken);
+
+    public Task<ProfileInsights> GetAsync(
+        UserProfile profile,
+        ProfileInsightsQuery query,
+        CancellationToken cancellationToken) =>
+        GetAsync(profile, query.HistoryPage, query.HistoryPageSize, query.Period, cancellationToken);
+
+    private async Task<ProfileInsights> GetAsync(
+        UserProfile profile,
+        int historyPage,
+        int historyPageSize,
+        ProfileInsightsPeriod? period,
+        CancellationToken cancellationToken)
     {
         historyPage = Math.Max(1, historyPage);
         historyPageSize = Math.Clamp(historyPageSize, 5, 50);
 
-        var attempts = CompletedAttempts(profile.Id);
+        var now = timeProvider.GetUtcNow();
+        var selectedRange = period is { } selectedPeriod
+            ? BuildDateRange((int)selectedPeriod, now)
+            : null;
+        var attempts = CompletedAttempts(profile.Id, selectedRange);
         var totals = await BuildTotalsAsync(attempts, cancellationToken);
-        var trends = await BuildTrendsAsync(profile.Id, cancellationToken);
+        var trends = await BuildTrendsAsync(profile.Id, selectedRange?.EndExclusive ?? now, cancellationToken);
+        if (period is { } selectedTrendPeriod)
+        {
+            trends = trends.Where(item => item.Days == (int)selectedTrendPeriod).ToList();
+        }
+
         var bestModes = await BuildBestModesAsync(attempts, cancellationToken);
         var totalItems = totals.CompletedAttempts;
-        var totalPages = Math.Max(1, (int)Math.Ceiling(totalItems / (double)historyPageSize));
+        var totalPages = totalItems == 0 ? 1 : ((totalItems - 1) / historyPageSize) + 1;
         historyPage = Math.Min(historyPage, totalPages);
-        var history = await ReadHistoryPageAsync(profile.Id, historyPage, historyPageSize, cancellationToken);
+        var history = await ReadHistoryPageAsync(profile.Id, selectedRange, historyPage, historyPageSize, cancellationToken);
 
-        var activity = await BuildActivityAsync(profile.Id, 90, cancellationToken);
+        var activityRange = selectedRange ?? BuildDateRange(90, now);
+        var activity = await BuildActivityAsync(profile.Id, activityRange, cancellationToken);
         var today = DateOnly.FromDateTime(timeProvider.GetLocalNow().DateTime);
         var weekStart = MotivationService.GetWeekStart(today);
         var goals = await db.Missions
@@ -134,10 +206,34 @@ public sealed class ProfileInsightsService(KeyWarsDbContext db, TimeProvider tim
             recentEvents);
     }
 
-    private IQueryable<TypingAttempt> CompletedAttempts(Guid profileId) =>
-        db.TypingAttempts
+    private IQueryable<TypingAttempt> CompletedAttempts(Guid profileId, ProfileDateRange? range = null)
+    {
+        if (range is not null && db.Database.IsSqlite())
+        {
+            var profileKey = FormatSqliteGuid(profileId);
+            var phase = AttemptPhase.Finished.ToString();
+            var start = FormatSqliteDateTimeOffset(range.StartInclusive);
+            var end = FormatSqliteDateTimeOffset(range.EndExclusive);
+            return db.TypingAttempts
+                .FromSqlInterpolated($"""
+                    SELECT *
+                    FROM TypingAttempts
+                    WHERE UserProfileId = {profileKey}
+                      AND Phase = {phase}
+                      AND Completed = 1
+                      AND substr(CreatedAt, 1, 19) >= {start}
+                      AND substr(CreatedAt, 1, 19) < {end}
+                    """)
+                .AsNoTracking();
+        }
+
+        var attempts = db.TypingAttempts
             .AsNoTracking()
             .Where(attempt => attempt.UserProfileId == profileId && attempt.Phase == AttemptPhase.Finished && attempt.Completed);
+        return range is null
+            ? attempts
+            : attempts.Where(attempt => attempt.CreatedAt >= range.StartInclusive && attempt.CreatedAt < range.EndExclusive);
+    }
 
     private static async Task<ProfileTotals> BuildTotalsAsync(IQueryable<TypingAttempt> attempts, CancellationToken cancellationToken)
     {
@@ -167,32 +263,34 @@ public sealed class ProfileInsightsService(KeyWarsDbContext db, TimeProvider tim
             TimeSpan.FromMilliseconds(aggregate.Duration));
     }
 
-    private async Task<IReadOnlyList<ProfileTrendWindow>> BuildTrendsAsync(Guid profileId, CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<ProfileTrendWindow>> BuildTrendsAsync(
+        Guid profileId,
+        DateTimeOffset currentEnd,
+        CancellationToken cancellationToken)
     {
-        var now = timeProvider.GetUtcNow();
         if (!db.Database.IsSqlite())
         {
-            return await BuildTrendsWithEfAsync(profileId, now, cancellationToken);
+            return await BuildTrendsWithEfAsync(profileId, currentEnd, cancellationToken);
         }
 
         var profileKey = FormatSqliteGuid(profileId);
         var phase = AttemptPhase.Finished.ToString();
-        var nowValue = FormatSqliteDateTimeOffset(now);
+        var endValue = FormatSqliteDateTimeOffset(currentEnd);
         var rows = await db.Database.SqlQuery<TrendAggregateRow>($"""
                 WITH windows(Days, CurrentStart, PreviousStart) AS (
-                    SELECT 7, {FormatSqliteDateTimeOffset(now.AddDays(-7))}, {FormatSqliteDateTimeOffset(now.AddDays(-14))}
+                    SELECT 7, {FormatSqliteDateTimeOffset(currentEnd.AddDays(-7))}, {FormatSqliteDateTimeOffset(currentEnd.AddDays(-14))}
                     UNION ALL
-                    SELECT 30, {FormatSqliteDateTimeOffset(now.AddDays(-30))}, {FormatSqliteDateTimeOffset(now.AddDays(-60))}
+                    SELECT 30, {FormatSqliteDateTimeOffset(currentEnd.AddDays(-30))}, {FormatSqliteDateTimeOffset(currentEnd.AddDays(-60))}
                     UNION ALL
-                    SELECT 90, {FormatSqliteDateTimeOffset(now.AddDays(-90))}, {FormatSqliteDateTimeOffset(now.AddDays(-180))}
+                    SELECT 90, {FormatSqliteDateTimeOffset(currentEnd.AddDays(-90))}, {FormatSqliteDateTimeOffset(currentEnd.AddDays(-180))}
                 ), eligible AS (
                     SELECT Wpm, Accuracy, Consistency, substr(CreatedAt, 1, 19) AS ActivityAt
                     FROM TypingAttempts
                     WHERE UserProfileId = {profileKey}
                       AND Phase = {phase}
                       AND Completed = 1
-                      AND substr(CreatedAt, 1, 19) >= {FormatSqliteDateTimeOffset(now.AddDays(-180))}
-                      AND substr(CreatedAt, 1, 19) < {nowValue}
+                      AND substr(CreatedAt, 1, 19) >= {FormatSqliteDateTimeOffset(currentEnd.AddDays(-180))}
+                      AND substr(CreatedAt, 1, 19) < {endValue}
                 )
                 SELECT windows.Days,
                        COUNT(CASE WHEN eligible.ActivityAt >= windows.CurrentStart THEN 1 END) AS CurrentSampleCount,
@@ -206,7 +304,7 @@ public sealed class ProfileInsightsService(KeyWarsDbContext db, TimeProvider tim
                 FROM windows
                 LEFT JOIN eligible
                   ON eligible.ActivityAt >= windows.PreviousStart
-                 AND eligible.ActivityAt < {nowValue}
+                 AND eligible.ActivityAt < {endValue}
                 GROUP BY windows.Days
                 ORDER BY windows.Days
                 """).ToListAsync(cancellationToken);
@@ -232,17 +330,17 @@ public sealed class ProfileInsightsService(KeyWarsDbContext db, TimeProvider tim
 
     private async Task<IReadOnlyList<ProfileTrendWindow>> BuildTrendsWithEfAsync(
         Guid profileId,
-        DateTimeOffset now,
+        DateTimeOffset currentEnd,
         CancellationToken cancellationToken)
     {
-        var start7 = now.AddDays(-7);
-        var previous7 = now.AddDays(-14);
-        var start30 = now.AddDays(-30);
-        var previous30 = now.AddDays(-60);
-        var start90 = now.AddDays(-90);
-        var previous90 = now.AddDays(-180);
+        var start7 = currentEnd.AddDays(-7);
+        var previous7 = currentEnd.AddDays(-14);
+        var start30 = currentEnd.AddDays(-30);
+        var previous30 = currentEnd.AddDays(-60);
+        var start90 = currentEnd.AddDays(-90);
+        var previous90 = currentEnd.AddDays(-180);
         var aggregate = await CompletedAttempts(profileId)
-            .Where(attempt => attempt.CreatedAt >= previous90 && attempt.CreatedAt < now)
+            .Where(attempt => attempt.CreatedAt >= previous90 && attempt.CreatedAt < currentEnd)
             .GroupBy(_ => 1)
             .Select(group => new
             {
@@ -339,28 +437,27 @@ public sealed class ProfileInsightsService(KeyWarsDbContext db, TimeProvider tim
             .ToList();
     }
 
-    private async Task<IReadOnlyList<ProfileActivityDay>> BuildActivityAsync(Guid profileId, int days, CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<ProfileActivityDay>> BuildActivityAsync(
+        Guid profileId,
+        ProfileDateRange range,
+        CancellationToken cancellationToken)
     {
-        var endDate = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
-        var startDate = endDate.AddDays(-(days - 1));
-        var periodStart = new DateTimeOffset(startDate.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
-        var periodEnd = new DateTimeOffset(endDate.AddDays(1).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
         var goalCounts = await db.Missions
             .AsNoTracking()
             .Where(mission => mission.UserProfileId == profileId &&
                 mission.Completed &&
-                mission.MissionDate >= startDate &&
-                mission.MissionDate <= endDate)
+                mission.MissionDate >= range.StartDate &&
+                mission.MissionDate <= range.EndDate)
             .GroupBy(mission => mission.MissionDate)
             .Select(group => new { Date = group.Key, Count = group.Count() })
             .ToDictionaryAsync(item => item.Date, item => item.Count, cancellationToken);
-        var trainingCounts = await ReadTrainingActivityCountsAsync(profileId, periodStart, periodEnd, cancellationToken);
-        var arenaCounts = await ReadArenaActivityCountsAsync(profileId, periodStart, periodEnd, cancellationToken);
+        var trainingCounts = await ReadTrainingActivityCountsAsync(profileId, range.StartInclusive, range.EndExclusive, cancellationToken);
+        var arenaCounts = await ReadArenaActivityCountsAsync(profileId, range.StartInclusive, range.EndExclusive, cancellationToken);
 
-        var activity = new List<ProfileActivityDay>(days);
-        for (var offset = 0; offset < days; offset++)
+        var activity = new List<ProfileActivityDay>(range.Days);
+        for (var offset = 0; offset < range.Days; offset++)
         {
-            var date = startDate.AddDays(offset);
+            var date = range.StartDate.AddDays(offset);
             activity.Add(new ProfileActivityDay(
                 date,
                 trainingCounts.GetValueOrDefault(date),
@@ -459,13 +556,14 @@ public sealed class ProfileInsightsService(KeyWarsDbContext db, TimeProvider tim
 
     private async Task<IReadOnlyList<ProfileAttemptHistoryRow>> ReadHistoryPageAsync(
         Guid profileId,
+        ProfileDateRange? range,
         int historyPage,
         int historyPageSize,
         CancellationToken cancellationToken)
     {
         if (!db.Database.IsSqlite())
         {
-            return await CompletedAttempts(profileId)
+            return await CompletedAttempts(profileId, range)
                 .OrderByDescending(attempt => attempt.CreatedAt)
                 .ThenByDescending(attempt => attempt.Id)
                 .Skip((historyPage - 1) * historyPageSize)
@@ -480,7 +578,17 @@ public sealed class ProfileInsightsService(KeyWarsDbContext db, TimeProvider tim
                     attempt.ConsistencySampleCount,
                     attempt.DurationMilliseconds,
                     attempt.CorrectCharacters,
-                    attempt.IncorrectCharacters))
+                    attempt.IncorrectCharacters,
+                    attempt.TrainingTextId,
+                    attempt.Official &&
+                    attempt.FinishedAt != null &&
+                    attempt.TrainingTextId != null &&
+                    db.TrainingTexts.Any(text =>
+                        text.Id == attempt.TrainingTextId &&
+                        !text.IsQuarantined &&
+                        (text.IsStandard ||
+                            text.Visibility == TrainingTextVisibility.Organization ||
+                            text.OwnerProfileId == profileId))))
                 .ToListAsync(cancellationToken);
         }
 
@@ -494,18 +602,54 @@ public sealed class ProfileInsightsService(KeyWarsDbContext db, TimeProvider tim
         try
         {
             await using var command = connection.CreateCommand();
-            command.CommandText = """
-                SELECT Id, CreatedAt, Mode, Wpm, Accuracy, Consistency, ConsistencySampleCount,
-                       DurationMilliseconds, CorrectCharacters, IncorrectCharacters
-                FROM TypingAttempts
-                WHERE UserProfileId = $profileId
-                  AND Phase = $phase
-                  AND Completed = 1
-                ORDER BY CreatedAt DESC, Id DESC
-                LIMIT $limit OFFSET $offset
-                """;
+            command.CommandText = range is null
+                ? """
+                    SELECT Id, CreatedAt, Mode, Wpm, Accuracy, Consistency, ConsistencySampleCount,
+                           DurationMilliseconds, CorrectCharacters, IncorrectCharacters,
+                           TrainingTextId, Official, FinishedAt,
+                           CASE WHEN TrainingTextId IS NOT NULL AND EXISTS (
+                               SELECT 1
+                               FROM TrainingTexts text
+                               WHERE text.Id = TypingAttempts.TrainingTextId
+                                 AND text.IsQuarantined = 0
+                                 AND (text.IsStandard = 1 OR text.Visibility = $organization OR text.OwnerProfileId = $profileId)
+                           ) THEN 1 ELSE 0 END AS TextAvailable
+                    FROM TypingAttempts
+                    WHERE UserProfileId = $profileId
+                      AND Phase = $phase
+                      AND Completed = 1
+                    ORDER BY CreatedAt DESC, Id DESC
+                    LIMIT $limit OFFSET $offset
+                    """
+                : """
+                    SELECT Id, CreatedAt, Mode, Wpm, Accuracy, Consistency, ConsistencySampleCount,
+                           DurationMilliseconds, CorrectCharacters, IncorrectCharacters,
+                           TrainingTextId, Official, FinishedAt,
+                           CASE WHEN TrainingTextId IS NOT NULL AND EXISTS (
+                               SELECT 1
+                               FROM TrainingTexts text
+                               WHERE text.Id = TypingAttempts.TrainingTextId
+                                 AND text.IsQuarantined = 0
+                                 AND (text.IsStandard = 1 OR text.Visibility = $organization OR text.OwnerProfileId = $profileId)
+                           ) THEN 1 ELSE 0 END AS TextAvailable
+                    FROM TypingAttempts
+                    WHERE UserProfileId = $profileId
+                      AND Phase = $phase
+                      AND Completed = 1
+                      AND substr(CreatedAt, 1, 19) >= $periodStart
+                      AND substr(CreatedAt, 1, 19) < $periodEnd
+                    ORDER BY CreatedAt DESC, Id DESC
+                    LIMIT $limit OFFSET $offset
+                    """;
             AddParameter(command, "$profileId", FormatSqliteGuid(profileId));
             AddParameter(command, "$phase", AttemptPhase.Finished.ToString());
+            AddParameter(command, "$organization", TrainingTextVisibility.Organization.ToString());
+            if (range is not null)
+            {
+                AddParameter(command, "$periodStart", FormatSqliteDateTimeOffset(range.StartInclusive));
+                AddParameter(command, "$periodEnd", FormatSqliteDateTimeOffset(range.EndExclusive));
+            }
+
             AddParameter(command, "$limit", historyPageSize);
             AddParameter(command, "$offset", (historyPage - 1) * historyPageSize);
 
@@ -523,7 +667,9 @@ public sealed class ProfileInsightsService(KeyWarsDbContext db, TimeProvider tim
                     reader.GetInt32(6),
                     reader.GetInt32(7),
                     reader.GetInt32(8),
-                    reader.GetInt32(9)));
+                    reader.GetInt32(9),
+                    reader.IsDBNull(10) ? null : Guid.Parse(reader.GetString(10)),
+                    !reader.IsDBNull(10) && reader.GetBoolean(11) && !reader.IsDBNull(12) && reader.GetBoolean(13)));
             }
 
             return rows;
@@ -607,6 +753,22 @@ public sealed class ProfileInsightsService(KeyWarsDbContext db, TimeProvider tim
 
     private static string FormatSqliteGuid(Guid value) => value.ToString().ToUpperInvariant();
 
+    private static ProfileDateRange BuildDateRange(int days, DateTimeOffset now)
+    {
+        if (days <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(days));
+        }
+
+        var endDate = DateOnly.FromDateTime(now.UtcDateTime);
+        var startDate = endDate.AddDays(1 - days);
+        return new ProfileDateRange(
+            startDate,
+            endDate,
+            new DateTimeOffset(startDate.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero),
+            new DateTimeOffset(endDate.AddDays(1).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero));
+    }
+
     private static string BuildInitials(UserProfile profile)
     {
         var parts = profile.DisplayName
@@ -636,5 +798,14 @@ public sealed class ProfileInsightsService(KeyWarsDbContext db, TimeProvider tim
         public double PreviousAverageWpm { get; set; }
         public double PreviousAverageAccuracy { get; set; }
         public double PreviousAverageConsistency { get; set; }
+    }
+
+    private sealed record ProfileDateRange(
+        DateOnly StartDate,
+        DateOnly EndDate,
+        DateTimeOffset StartInclusive,
+        DateTimeOffset EndExclusive)
+    {
+        public int Days => EndDate.DayNumber - StartDate.DayNumber + 1;
     }
 }

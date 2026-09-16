@@ -99,6 +99,7 @@ public static class ConfigurationAliases
         section.Bind(options);
         SetInt(section, "MAX_PARTICIPANTS_PER_ROOM", value => options.MaxParticipantsPerRoom = value);
         SetInt(section, "MAX_CONCURRENT_ROOMS", value => options.MaxConcurrentRooms = value);
+        SetInt(section, "MAX_ACTIVE_ROOMS_PER_CREATOR", value => options.MaxActiveRoomsPerCreator = value);
         SetInt(section, "MAX_CONNECTIONS_PER_USER", value => options.MaxConnectionsPerUser = value);
         SetInt(section, "PROGRESS_BROADCAST_HZ", value => options.ProgressBroadcastHz = value);
         SetInt(section, "COUNTDOWN_SECONDS", value => options.CountdownSeconds = value);
@@ -114,6 +115,25 @@ public static class ConfigurationAliases
             1,
             LiveOptions.MaximumSafeArenaTargetGraphemes,
             value => options.MaxArenaTargetGraphemes = value);
+        SetIntInRange(section, "ROUND_DEADLINE_BASE_SECONDS", 15, 300, value => options.RoundDeadlineBaseSeconds = value);
+        SetIntInRange(
+            section,
+            "ROUND_DEADLINE_MILLISECONDS_PER_GRAPHEME",
+            100,
+            5000,
+            value => options.RoundDeadlineMillisecondsPerGrapheme = value);
+        SetIntInRange(
+            section,
+            "ROUND_DEADLINE_MAX_SECONDS",
+            60,
+            LiveOptions.MaximumSafeRoundDeadlineSeconds,
+            value => options.RoundDeadlineMaxSeconds = value);
+        SetIntInRange(
+            section,
+            "ROUND_RESULTS_IDLE_SECONDS",
+            30,
+            LiveOptions.MaximumSafeRoundResultsIdleSeconds,
+            value => options.RoundResultsIdleSeconds = value);
     }
 
     public static void BindChallenges(IConfiguration configuration, ChallengeOptions options)

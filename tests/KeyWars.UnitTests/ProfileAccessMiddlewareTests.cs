@@ -8,6 +8,46 @@ namespace KeyWars.UnitTests;
 
 public sealed class ProfileAccessMiddlewareTests
 {
+    [Theory]
+    [InlineData("/profil/loeschen")]
+    [InlineData("/profil/loeschen/")]
+    [InlineData("/profil/statistik-zuruecksetzen")]
+    [InlineData("/profil/statistik-zuruecksetzen/")]
+    [InlineData("/profil/statistikzuruecksetzen")]
+    [InlineData("/profil/statistikzuruecksetzen/")]
+    public async Task ExclusivePrivacyPostsDoNotAcquireARequestLease(string path)
+    {
+        var gate = new LosingAccessGate();
+        var calls = 0;
+        var middleware = new ProfileAccessMiddleware(_ =>
+        {
+            calls++;
+            return Task.CompletedTask;
+        });
+        var context = AuthenticatedContext(HttpMethods.Post, path);
+
+        await middleware.InvokeAsync(context, gate, new ProfileRequestContext());
+
+        Assert.Equal(1, calls);
+        Assert.Equal(0, gate.AcquireCalls);
+    }
+
+    [Theory]
+    [InlineData("/profil/loeschen/extra")]
+    [InlineData("/profil/statistik-zuruecksetzen/extra")]
+    [InlineData("/profil/statistikzuruecksetzen/extra")]
+    public async Task PrivacyPrefixPostsKeepTheNormalRequestLease(string path)
+    {
+        var gate = new LosingAccessGate();
+        var middleware = new ProfileAccessMiddleware(_ => Task.CompletedTask);
+        var context = AuthenticatedContext(HttpMethods.Post, path);
+
+        await middleware.InvokeAsync(context, gate, new ProfileRequestContext());
+
+        Assert.Equal(1, gate.AcquireCalls);
+        Assert.True(gate.Disposed);
+    }
+
     [Fact]
     public async Task LostAccessLeaseCancelsRequestBeforePrivacyOperationCanContinue()
     {
@@ -25,7 +65,7 @@ public sealed class ProfileAccessMiddlewareTests
             [new Claim(KeyWarsClaims.ProfileId, Guid.CreateVersion7().ToString("D"))],
             "test"));
 
-        var invocation = middleware.InvokeAsync(context, gate);
+        var invocation = middleware.InvokeAsync(context, gate, new ProfileRequestContext());
         await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
         gate.LoseLease();
         await invocation.WaitAsync(TimeSpan.FromSeconds(5));
@@ -37,10 +77,22 @@ public sealed class ProfileAccessMiddlewareTests
         Assert.Contains("profile_access_lost", await reader.ReadToEndAsync(), StringComparison.Ordinal);
     }
 
+    private static DefaultHttpContext AuthenticatedContext(string method, string path)
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Method = method;
+        context.Request.Path = path;
+        context.User = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(KeyWarsClaims.ProfileId, Guid.CreateVersion7().ToString("D"))],
+            "test"));
+        return context;
+    }
+
     private sealed class LosingAccessGate : IProfileAccessGate
     {
         private readonly CancellationTokenSource leaseLost = new();
 
+        public int AcquireCalls { get; private set; }
         public bool Disposed { get; private set; }
 
         public void LoseLease() => leaseLost.Cancel();
@@ -48,8 +100,11 @@ public sealed class ProfileAccessMiddlewareTests
         public ValueTask<ProfileAccessState> GetStateAsync(Guid profileId, CancellationToken cancellationToken = default) =>
             ValueTask.FromResult(ProfileAccessState.Available);
 
-        public ValueTask<IOperationLease> AcquireAsync(Guid profileId, CancellationToken cancellationToken = default) =>
-            ValueTask.FromResult<IOperationLease>(new LosingLease(leaseLost.Token, () => Disposed = true));
+        public ValueTask<IOperationLease> AcquireAsync(Guid profileId, CancellationToken cancellationToken = default)
+        {
+            AcquireCalls++;
+            return ValueTask.FromResult<IOperationLease>(new LosingLease(leaseLost.Token, () => Disposed = true));
+        }
 
         public ValueTask<IOperationLease> AcquireManyAsync(IEnumerable<Guid> profileIds, CancellationToken cancellationToken = default) =>
             AcquireAsync(Guid.Empty, cancellationToken);

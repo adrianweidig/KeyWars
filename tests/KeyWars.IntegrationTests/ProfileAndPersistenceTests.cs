@@ -129,10 +129,137 @@ public sealed class ProfileAndPersistenceTests
         Assert.Equal(context.Time.GetUtcNow(), begin.ServerNow);
 
         context.Time.Advance(TimeSpan.FromSeconds(3));
+        var storedBeforeReplay = await db.TypingAttempts.AsNoTracking().SingleAsync(item => item.Id == session.Id);
         var replay = await service.BeginAsync(context.ProfileId, new BeginAttemptRequest(session.Id, session.Nonce));
+        var storedAfterReplay = await db.TypingAttempts.AsNoTracking().SingleAsync(item => item.Id == session.Id);
         Assert.Equal(begin.StartedAt, replay.StartedAt);
         Assert.Equal(begin.EndsAt, replay.EndsAt);
         Assert.Equal(context.Time.GetUtcNow(), replay.ServerNow);
+        Assert.Equal(AttemptPhase.Started, storedAfterReplay.Phase);
+        Assert.Equal(storedBeforeReplay.StartedAt, storedAfterReplay.StartedAt);
+    }
+
+    [Fact]
+    public async Task StartedSessionReplayRepairsPreparedDatabaseStateBeforePreparedCutoff()
+    {
+        await using var context = await AttemptTestContext.CreateAsync();
+        await using var db = new KeyWarsDbContext(context.Options);
+        var service = context.CreateService(db);
+        var session = await service.StartAsync(
+            context.ProfileId,
+            new StartAttemptRequest(TrainingMode.Words10, null, null, 10));
+        context.Time.Advance(TimeSpan.FromHours(2) - TimeSpan.FromSeconds(1));
+        Assert.True(context.SessionStore.TryGet(session.Id, out var prepared));
+        Assert.NotNull(prepared);
+        var startedAt = context.Time.GetUtcNow();
+        var started = prepared with { Phase = AttemptPhase.Started, StartedAt = startedAt };
+        Assert.True(context.SessionStore.TryUpdate(prepared, started));
+
+        var replay = await service.BeginAsync(
+            context.ProfileId,
+            new BeginAttemptRequest(session.Id, session.Nonce));
+        var repaired = await db.TypingAttempts.AsNoTracking().SingleAsync(item => item.Id == session.Id);
+
+        Assert.Equal(startedAt, replay.StartedAt);
+        Assert.Equal(AttemptPhase.Started, repaired.Phase);
+        Assert.Equal(startedAt, repaired.StartedAt);
+
+        context.Time.Advance(TimeSpan.FromSeconds(2));
+        Assert.Equal(0, await service.ReconcileExpiredDatabaseAttemptsAsync());
+        var afterReconciliation = await db.TypingAttempts.AsNoTracking().SingleAsync(item => item.Id == session.Id);
+        Assert.Equal(AttemptPhase.Started, afterReconciliation.Phase);
+        Assert.True(context.SessionStore.TryGet(session.Id, out var activeSession));
+        Assert.Equal(started, activeSession);
+    }
+
+    [Theory]
+    [InlineData(AttemptPhase.Expired)]
+    [InlineData(AttemptPhase.Aborted)]
+    public async Task StartedSessionReplayDoesNotReopenTerminalDatabaseAttempt(AttemptPhase terminalPhase)
+    {
+        await using var context = await AttemptTestContext.CreateAsync();
+        await using var db = new KeyWarsDbContext(context.Options);
+        var service = context.CreateService(db);
+        var session = await service.StartAsync(
+            context.ProfileId,
+            new StartAttemptRequest(TrainingMode.Words10, null, null, 10));
+        Assert.True(context.SessionStore.TryGet(session.Id, out var prepared));
+        Assert.NotNull(prepared);
+        var started = prepared with { Phase = AttemptPhase.Started, StartedAt = context.Time.GetUtcNow() };
+        Assert.True(context.SessionStore.TryUpdate(prepared, started));
+        var stored = await db.TypingAttempts.SingleAsync(item => item.Id == session.Id);
+        stored.Phase = terminalPhase;
+        stored.FinishedAt = context.Time.GetUtcNow();
+        await db.SaveChangesAsync();
+
+        var error = await Assert.ThrowsAsync<AttemptLifecycleException>(() =>
+            service.BeginAsync(context.ProfileId, new BeginAttemptRequest(session.Id, session.Nonce)));
+
+        Assert.Equal((AttemptErrorCodes.Expired, 410), (error.Code, error.StatusCode));
+        var unchanged = await db.TypingAttempts.AsNoTracking().SingleAsync(item => item.Id == session.Id);
+        Assert.Equal(terminalPhase, unchanged.Phase);
+        Assert.Equal(stored.FinishedAt, unchanged.FinishedAt);
+    }
+
+    [Fact]
+    public async Task StartedSessionReplayDoesNotRepairAttemptForForeignProfile()
+    {
+        await using var context = await AttemptTestContext.CreateAsync();
+        await using var db = new KeyWarsDbContext(context.Options);
+        var service = context.CreateService(db);
+        var session = await service.StartAsync(
+            context.ProfileId,
+            new StartAttemptRequest(TrainingMode.Words10, null, null, 10));
+        Assert.True(context.SessionStore.TryGet(session.Id, out var prepared));
+        Assert.NotNull(prepared);
+        var started = prepared with { Phase = AttemptPhase.Started, StartedAt = context.Time.GetUtcNow() };
+        Assert.True(context.SessionStore.TryUpdate(prepared, started));
+
+        var error = await Assert.ThrowsAsync<AttemptLifecycleException>(() =>
+            service.BeginAsync(Guid.CreateVersion7(), new BeginAttemptRequest(session.Id, session.Nonce)));
+
+        Assert.Equal((AttemptErrorCodes.NotFound, 404), (error.Code, error.StatusCode));
+        var unchanged = await db.TypingAttempts.AsNoTracking().SingleAsync(item => item.Id == session.Id);
+        Assert.Equal(AttemptPhase.Prepared, unchanged.Phase);
+        Assert.Equal(session.PreparedAt, unchanged.StartedAt);
+    }
+
+    [Fact]
+    public async Task PreparedSessionReplayRepairsFromPersistedStartWithoutExtendingSprintDeadline()
+    {
+        await using var context = await AttemptTestContext.CreateAsync();
+        await using var db = new KeyWarsDbContext(context.Options);
+        var service = context.CreateService(db);
+        var session = await service.StartAsync(
+            context.ProfileId,
+            new StartAttemptRequest(TrainingMode.Sprint60, null, 60, 120));
+        var persistedStartedAt = context.Time.GetUtcNow();
+        var stored = await db.TypingAttempts.SingleAsync(item => item.Id == session.Id);
+        stored.Phase = AttemptPhase.Started;
+        stored.StartedAt = persistedStartedAt;
+        await db.SaveChangesAsync();
+        context.Time.Advance(TimeSpan.FromSeconds(17));
+
+        var replay = await service.BeginAsync(
+            context.ProfileId,
+            new BeginAttemptRequest(session.Id, session.Nonce));
+        var unchanged = await db.TypingAttempts.AsNoTracking().SingleAsync(item => item.Id == session.Id);
+
+        Assert.Equal(persistedStartedAt, replay.StartedAt);
+        Assert.Equal(persistedStartedAt.AddSeconds(60), replay.EndsAt);
+        Assert.Equal(AttemptPhase.Started, unchanged.Phase);
+        Assert.Equal(persistedStartedAt, unchanged.StartedAt);
+        Assert.True(context.SessionStore.TryGet(session.Id, out var repaired));
+        Assert.NotNull(repaired);
+        Assert.Equal(AttemptPhase.Started, repaired.Phase);
+        Assert.Equal(persistedStartedAt, repaired.StartedAt);
+
+        context.Time.Advance(TimeSpan.FromSeconds(5));
+        var secondReplay = await service.BeginAsync(
+            context.ProfileId,
+            new BeginAttemptRequest(session.Id, session.Nonce));
+        Assert.Equal(persistedStartedAt, secondReplay.StartedAt);
+        Assert.Equal(persistedStartedAt.AddSeconds(60), secondReplay.EndsAt);
     }
 
     [Theory]
@@ -358,6 +485,123 @@ public sealed class ProfileAndPersistenceTests
         Assert.True(completion.Completed);
         Assert.Equal(2_000, completion.DurationMilliseconds);
         Assert.Equal(100d, completion.Accuracy);
+    }
+
+    [Fact]
+    public async Task ImmediateExactAttemptPersistsButCannotEnterCompetitionOrEarnRewards()
+    {
+        await using var context = await AttemptTestContext.CreateAsync();
+        await using var db = new KeyWarsDbContext(context.Options);
+        var service = context.CreateService(db);
+        var session = await service.StartAsync(
+            context.ProfileId,
+            new StartAttemptRequest(TrainingMode.Words10, null, null, 10));
+        await service.BeginAsync(context.ProfileId, new BeginAttemptRequest(session.Id, session.Nonce));
+
+        var completion = await service.FinishAsync(
+            context.ProfileId,
+            new FinishAttemptRequest(session.Id, session.Text, 0, 0, 120_000) { Nonce = session.Nonce });
+        var stored = await db.TypingAttempts.SingleAsync(item => item.Id == session.Id);
+        var profile = await db.UserProfiles.SingleAsync(item => item.Id == context.ProfileId);
+
+        Assert.True(completion.Completed);
+        Assert.Equal(AttemptPhase.Finished, completion.Phase);
+        Assert.Equal(1_000, completion.DurationMilliseconds);
+        Assert.True(stored.Official);
+        Assert.False(stored.CompetitionIntegrityEligible);
+        Assert.False(stored.LeaderboardEligible);
+        Assert.False(stored.ExperienceAwarded);
+        Assert.Equal(0, profile.ExperiencePoints);
+        Assert.Equal(0, profile.SeasonPoints);
+        Assert.Empty(await db.RewardLedgerEntries.Where(item => item.SourceId == session.Id.ToString("N")).ToListAsync());
+        Assert.Empty(await db.SeasonScores.Where(item => item.UserProfileId == context.ProfileId).ToListAsync());
+    }
+
+    [Fact]
+    public async Task FiveServerSecondsRemainIneligibleForMoreThanOneHundredFiftyGraphemes()
+    {
+        await using var context = await AttemptTestContext.CreateAsync();
+        await using var db = new KeyWarsDbContext(context.Options);
+        var text = await AddRatingEligibleTextAsync(db, context.ProfileId, 151);
+        var service = context.CreateService(db);
+        var session = await service.StartAsync(
+            context.ProfileId,
+            new StartAttemptRequest(TrainingMode.Text, text.Id, null, null));
+        await service.BeginAsync(context.ProfileId, new BeginAttemptRequest(session.Id, session.Nonce));
+        context.Time.Advance(TimeSpan.FromSeconds(5));
+
+        var completion = await service.FinishAsync(
+            context.ProfileId,
+            new FinishAttemptRequest(session.Id, session.Text, 0, 0, 600_000) { Nonce = session.Nonce });
+        var profile = await db.UserProfiles.SingleAsync(item => item.Id == context.ProfileId);
+
+        Assert.True(completion.Completed);
+        Assert.True(completion.Attempt.Official);
+        Assert.False(completion.Attempt.CompetitionIntegrityEligible);
+        Assert.False(completion.Attempt.LeaderboardEligible);
+        Assert.False(completion.ExperienceAwarded);
+        Assert.Equal(5_000, completion.DurationMilliseconds);
+        Assert.Equal(0, profile.ExperiencePoints);
+        Assert.Equal(0, profile.SeasonPoints);
+    }
+
+    [Fact]
+    public async Task PlausibleServerDurationKeepsLeaderboardXpAndSeasonEligibility()
+    {
+        await using var context = await AttemptTestContext.CreateAsync();
+        await using var db = new KeyWarsDbContext(context.Options);
+        var text = await AddRatingEligibleTextAsync(db, context.ProfileId, 151);
+        var service = context.CreateService(db);
+        var session = await service.StartAsync(
+            context.ProfileId,
+            new StartAttemptRequest(TrainingMode.Text, text.Id, null, null));
+        await service.BeginAsync(context.ProfileId, new BeginAttemptRequest(session.Id, session.Nonce));
+        context.Time.Advance(CompetitionEligibility.MinimumPlausibleDuration(151));
+
+        var completion = await service.FinishAsync(
+            context.ProfileId,
+            new FinishAttemptRequest(session.Id, session.Text, 0, 0, 1) { Nonce = session.Nonce });
+        var profile = await db.UserProfiles.SingleAsync(item => item.Id == context.ProfileId);
+
+        Assert.True(completion.Completed);
+        Assert.True(completion.Attempt.Official);
+        Assert.True(completion.Attempt.CompetitionIntegrityEligible);
+        Assert.True(completion.Attempt.LeaderboardEligible);
+        Assert.True(completion.ExperienceAwarded);
+        Assert.True(profile.ExperiencePoints > 0);
+        Assert.True(profile.SeasonPoints > 0);
+        Assert.Contains(await db.RewardLedgerEntries.ToListAsync(), item =>
+            item.Source == "attempt" && item.SourceId == session.Id.ToString("N") && item.Xp > 0);
+        Assert.Contains(await db.SeasonScores.ToListAsync(), item =>
+            item.UserProfileId == context.ProfileId && item.Points > 0);
+    }
+
+    [Fact]
+    public async Task ImplausibleAttemptCannotUnlockSpeedAchievementsThroughTheNextLegitimateAttempt()
+    {
+        await using var context = await AttemptTestContext.CreateAsync();
+        await using var db = new KeyWarsDbContext(context.Options);
+        var service = context.CreateService(db);
+        var implausible = await service.StartAsync(
+            context.ProfileId,
+            new StartAttemptRequest(TrainingMode.Words10, null, null, 10));
+        await service.BeginAsync(context.ProfileId, new BeginAttemptRequest(implausible.Id, implausible.Nonce));
+        await service.FinishAsync(
+            context.ProfileId,
+            new FinishAttemptRequest(implausible.Id, implausible.Text, 0, 0, 600_000) { Nonce = implausible.Nonce });
+
+        var legitimate = await service.StartAsync(
+            context.ProfileId,
+            new StartAttemptRequest(TrainingMode.Words10, null, null, 10));
+        await service.BeginAsync(context.ProfileId, new BeginAttemptRequest(legitimate.Id, legitimate.Nonce));
+        context.Time.Advance(TimeSpan.FromSeconds(60));
+        var completion = await service.FinishAsync(
+            context.ProfileId,
+            new FinishAttemptRequest(legitimate.Id, legitimate.Text, 0, 0, 1) { Nonce = legitimate.Nonce });
+
+        Assert.True(completion.Attempt.CompetitionIntegrityEligible);
+        Assert.DoesNotContain(await db.Achievements.ToListAsync(), item =>
+            item.UserProfileId == context.ProfileId && item.Key.StartsWith("speed-", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -795,6 +1039,38 @@ public sealed class ProfileAndPersistenceTests
     }
 
     [Fact]
+    public void StartupValidationRejectsShortModeratorGroupValuesOutsideDevelopment()
+    {
+        var configuration = StartupConfiguration("Staging", new Dictionary<string, string?>
+        {
+            ["KEYWARS:LDAP:URLS"] = "ldaps://dc01.example.local:636",
+            ["KEYWARS:LDAP:BASE_DN"] = "DC=example,DC=local",
+            ["KEYWARS:LDAP:UPN_SUFFIX"] = "example.local",
+            ["KEYWARS:MODERATION:MODERATOR_GROUP_VALUES"] = "Content Admins"
+        });
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            StartupValidator.Validate(configuration, new TestEnvironment("Staging"), NullLogger.Instance));
+
+        Assert.Contains("MODERATOR_GROUP_VALUES", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("vollständige memberOf-DNs", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void StartupValidationAcceptsFullModeratorGroupDnOutsideDevelopment()
+    {
+        var configuration = StartupConfiguration("Staging", new Dictionary<string, string?>
+        {
+            ["KEYWARS:LDAP:URLS"] = "ldaps://dc01.example.local:636",
+            ["KEYWARS:LDAP:BASE_DN"] = "DC=example,DC=local",
+            ["KEYWARS:LDAP:UPN_SUFFIX"] = "example.local",
+            ["KEYWARS:MODERATION:MODERATOR_GROUP_DNS"] = "CN=Content Admins,OU=Groups,DC=example,DC=local"
+        });
+
+        StartupValidator.Validate(configuration, new TestEnvironment("Staging"), NullLogger.Instance);
+    }
+
+    [Fact]
     public void StartupValidationRejectsMissingLdapCaCertificate()
     {
         var configuration = StartupConfiguration("Staging", new Dictionary<string, string?>
@@ -879,6 +1155,26 @@ public sealed class ProfileAndPersistenceTests
         public string ApplicationName { get; set; } = "KeyWars.Tests";
         public string ContentRootPath { get; set; } = Directory.GetCurrentDirectory();
         public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
+    }
+
+    private static async Task<TrainingText> AddRatingEligibleTextAsync(
+        KeyWarsDbContext db,
+        Guid profileId,
+        int graphemeCount)
+    {
+        var text = new TrainingText
+        {
+            OwnerProfileId = profileId,
+            Title = $"Integrität {graphemeCount}",
+            SourceKey = $"integrity-{graphemeCount}",
+            Body = new string('a', graphemeCount),
+            Visibility = TrainingTextVisibility.Private,
+            RatingEligible = true,
+            CharacterCount = graphemeCount
+        };
+        db.TrainingTexts.Add(text);
+        await db.SaveChangesAsync();
+        return text;
     }
 
     private sealed class AttemptTestContext : IAsyncDisposable

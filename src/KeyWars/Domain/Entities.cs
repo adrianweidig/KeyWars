@@ -145,6 +145,7 @@ public sealed class TypingAttempt
     public double WordTimingVariation { get; set; }
     public bool Completed { get; set; }
     public bool Official { get; set; }
+    public bool CompetitionIntegrityEligible { get; set; }
     public bool LeaderboardEligible { get; set; }
     public bool ExperienceAwarded { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
@@ -172,6 +173,9 @@ public sealed class Challenge
     public Guid? RematchOfChallengeId { get; set; }
     public Guid CreatorProfileId { get; set; }
     public Guid TrainingTextId { get; set; }
+    public string? TargetTextSnapshot { get; set; }
+    [MaxLength(71)]
+    public string? TargetTextHash { get; set; }
     [MaxLength(160)]
     public string Title { get; set; } = "";
     public ChallengeMode Mode { get; set; } = ChallengeMode.Classic;
@@ -217,6 +221,7 @@ public sealed class ChallengeRoundResult
     public double Wpm { get; set; }
     public double Accuracy { get; set; }
     public double Consistency { get; set; }
+    public bool CompetitionEligible { get; set; }
     public DateTimeOffset? FinishedAt { get; set; }
 }
 
@@ -247,6 +252,8 @@ public sealed class LiveRoomSummary
     public Guid CreatorProfileId { get; set; }
     [MaxLength(16)]
     public string RoomCode { get; set; } = "";
+    [MaxLength(71)]
+    public string TargetTextHash { get; set; } = "";
     public LiveRoomMode Mode { get; set; }
     public LiveRoomVisibility Visibility { get; set; }
     public int RoundCount { get; set; }
@@ -267,9 +274,38 @@ public sealed class LiveRoomParticipantSummary
     public int DurationMilliseconds { get; set; }
     public double Wpm { get; set; }
     public double Accuracy { get; set; }
+    public bool CompetitionEligible { get; set; }
     public int RatingBefore { get; set; } = 1000;
     public double RatingDelta { get; set; }
     public int RatingAfter { get; set; } = 1000;
+}
+
+public enum LiveRoomCompletionOutboxState
+{
+    Pending,
+    Failed
+}
+
+public sealed class LiveRoomCompletionOutboxEntry
+{
+    public Guid RoomId { get; set; }
+    [MaxLength(80)]
+    public string IdempotencyKey { get; set; } = "";
+    public int SchemaVersion { get; set; } = 1;
+    public string Payload { get; set; } = "";
+    public LiveRoomCompletionOutboxState State { get; set; } = LiveRoomCompletionOutboxState.Pending;
+    public int AttemptCount { get; set; }
+    public long EnqueuedAtUnixMilliseconds { get; set; }
+    public long NextAttemptAtUnixMilliseconds { get; set; }
+    public long UpdatedAtUnixMilliseconds { get; set; }
+    [MaxLength(256)]
+    public string? LastError { get; set; }
+}
+
+public sealed class LiveRoomCompletionOutboxProfile
+{
+    public Guid RoomId { get; set; }
+    public Guid UserProfileId { get; set; }
 }
 
 public sealed class Mission
@@ -298,7 +334,29 @@ public sealed class RewardLedgerEntry
     [MaxLength(80)]
     public string SourceId { get; set; } = "";
     public int Xp { get; set; }
+    public Guid? SeasonId { get; set; }
+    public int SeasonPoints { get; set; }
     public DateTimeOffset AwardedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public sealed class Season
+{
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    [MaxLength(32)]
+    public string Key { get; set; } = "";
+    [MaxLength(80)]
+    public string Name { get; set; } = "";
+    public DateTimeOffset StartsAt { get; set; }
+    public DateTimeOffset EndsAt { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public sealed class SeasonScore
+{
+    public Guid SeasonId { get; set; }
+    public Guid UserProfileId { get; set; }
+    public int Points { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
 public sealed class Achievement

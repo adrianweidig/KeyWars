@@ -11,17 +11,13 @@ public sealed class IndexModel(
     CurrentUser currentUser,
     KeyWarsDbContext db,
     MotivationService motivation,
-    ChallengeService challenges,
     ProfileInsightsService insights,
     CompetitionLeaderboardService leaderboards,
     TimeProvider timeProvider) : PageModel
 {
     public UserProfile Profile { get; private set; } = new();
     public IReadOnlyList<Mission> Missions { get; private set; } = [];
-    public IReadOnlyList<Challenge> Challenges { get; private set; } = [];
-    public ProfileInsights Insights { get; private set; } = EmptyInsights;
-    public CoachRecommendation Recommendation { get; private set; } = new("Starte mit einer ruhigen Runde.", TrainingMode.Sprint60, 1);
-    public LevelProgress LevelProgress { get; private set; } = new(1, 0, 0, 200, 0, 200, 0);
+    public IReadOnlyList<ProfileAttemptHistoryRow> RecentResults { get; private set; } = [];
     public LeaderboardBoard DailySprintBoard { get; private set; } = EmptyDailySprintBoard;
 
     public async Task OnGetAsync(CancellationToken cancellationToken)
@@ -35,31 +31,12 @@ public sealed class IndexModel(
             .OrderBy(item => item.MissionDate == today ? 0 : 1)
             .ThenBy(item => item.Title)
             .ToListAsync(cancellationToken);
-        Challenges = await challenges.ListForProfileAsync(Profile.Id, cancellationToken);
-        Recommendation = await motivation.RecommendAsync(Profile.Id, cancellationToken);
-        LevelProgress = MotivationService.GetLevelProgress(Profile.ExperiencePoints);
-        Insights = await insights.GetAsync(Profile, 1, 5, cancellationToken);
-        DailySprintBoard = (await leaderboards.GetAsync(
+        RecentResults = await insights.ReadRecentHistoryAsync(Profile.Id, 5, cancellationToken);
+        DailySprintBoard = await leaderboards.GetBoardAsync(
             Profile,
             new LeaderboardQuery(CompetitionBoardKind.Sprint, CompetitionPeriod.Day, TrainingMode.Sprint60, null),
-            cancellationToken)).Board;
+            cancellationToken);
     }
-
-    private static readonly ProfileInsights EmptyInsights = new(
-        "KW",
-        "Bronze",
-        new ProfileTotals(0, 0, 0, 0, 0, TimeSpan.Zero),
-        [],
-        [],
-        [],
-        [],
-        1,
-        5,
-        0,
-        1,
-        [],
-        [],
-        []);
 
     private static readonly LeaderboardBoard EmptyDailySprintBoard = new(
         CompetitionBoardKind.Sprint,

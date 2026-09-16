@@ -1,8 +1,9 @@
 # Live-Arena
 
-Live-Räume unterstützen standardmäßig bis zu 64 Personen. Ihr aktiver
-Raumzustand liegt im Arbeitsspeicher der zuständigen Arena-Instanz; im
-Scale-Modus sichert Redis zusätzlich Zuständigkeit und Presence. Verfügbar sind
+Live-Räume unterstützen standardmäßig bis zu 64 Personen. In der
+Einzelinstanz liegt ihr Zustand im Prozessspeicher. Im Scale-Modus ist Redis
+die gemeinsame Autorität für Raumzustand, Zuordnung und Presence; jede
+Arena-Replik kann einen Raum nach Reconnect weiterführen. Verfügbar sind
 Einzelrennen, Serien über drei oder fünf Runden und eine automatisch
 ausgeglichene Teamwertung über eine Runde.
 
@@ -12,13 +13,20 @@ ausgeglichene Teamwertung über eine Runde.
 - Progress-Deltas werden pro Person koalesziert und höchstens mit der konfigurierten Broadcast-Rate gesendet.
 - Start, Finish, Leave und Phasenwechsel liefern zuverlässige Vollsnapshots.
 - Erst das Ende eines Rennens oder einer Serie erzeugt einen idempotenten Abschlussjob mit aggregierten Ergebnissen.
-- Rating, XP und Saisonpunkte gelten erst nach Status `Persisted` als bestätigt.
-- Bei Server-Shutdown werden laufende Rennen ohne Ratingänderung als abgebrochen gespeichert; Lobbys sind flüchtig.
+- Rating, XP, Saisonpunkte und persönliche Arena-Bestwerte gelten erst nach Status `Persisted` als bestätigt.
+- Nur die Einzelinstanz bricht laufende Rennen beim Prozess-Shutdown ohne Ratingänderung ab und verliert offene Lobbys. Im Scale-Modus überlebt der Redis-Raumzustand den Neustart einer Arena-Replik und wird nach den konfigurierten Fristen bereinigt.
 
 Mehrere Tabs derselben Person ergeben eine Teilnehmerzeile. Nach Verlust der
 letzten Verbindung läuft die Reconnect-Frist. Verlässt die Raumleitung Lobby
 oder Serienpause, übernimmt die älteste aktive Person und kann ohne Reload
 fortfahren.
+
+Nach dem vollständigen Abschluss kann die Raumleitung idempotent eine Revanche
+mit derselben Gruppe und Konfiguration anlegen. Der persönliche Bestwert
+vergleicht ausschließlich persistierte eigene Ergebnisse mit gleichem
+normalisiertem Zieltext-Hash und Modus. Der Hash enthält weder Klartext noch
+Tastenverlauf; ältere Ergebniszeilen ohne Hash liefern bewusst keinen
+textbezogenen Bestwert.
 
 Arena-Zieltexte werden vor der Auswahl normalisiert und auf Grapheme sowie
 UTF-8-Größe begrenzt. Zu lange Texte bleiben als Trainingsinhalt erhalten, sind

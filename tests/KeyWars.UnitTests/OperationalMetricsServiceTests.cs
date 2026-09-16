@@ -57,6 +57,7 @@ public sealed class OperationalMetricsServiceTests
         }
 
         public ValueTask<LiveRoomSnapshot> CreateRoomAsync(CreateLiveRoomRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public ValueTask<LiveRoomSnapshot> CreateRematchAsync(Guid roomId, Guid hostProfileId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public ValueTask<IReadOnlyList<LiveRoomSnapshot>> ListOpenRoomsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public ValueTask<LiveRoomLobbyPage> ListLobbySummariesAsync(Guid viewerProfileId, int offset = 0, int limit = 20, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public ValueTask<Guid> ResolveRoomIdByCodeAsync(string code, CancellationToken cancellationToken = default) => throw new NotSupportedException();
@@ -74,8 +75,10 @@ public sealed class OperationalMetricsServiceTests
         public ValueTask<LiveRoomSnapshot> GiveUpAsync(Guid roomId, Guid profileId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public ValueTask<LiveRoomSnapshot> DisconnectAsync(Guid roomId, Guid profileId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public ValueTask<LiveRoomSnapshot> SnapshotAsync(Guid roomId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public ValueTask<LiveRoomSnapshot> SnapshotForViewerAsync(Guid roomId, Guid viewerProfileId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public ValueTask<IReadOnlyList<LiveRoomSnapshot>> SweepAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public ValueTask RemoveProfileAsync(Guid profileId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public ValueTask ClearProfileRemovalFenceAsync(Guid profileId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public ValueTask<int> AbortActiveRoomsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 

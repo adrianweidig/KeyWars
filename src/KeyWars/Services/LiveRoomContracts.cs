@@ -16,7 +16,9 @@ public sealed record LiveParticipantSnapshot(
     double Accuracy,
     int? TeamNumber = null,
     int SeriesPoints = 0,
-    int RoundWins = 0);
+    int RoundWins = 0,
+    int TypedStateOffset = 0,
+    int TypedCharacters = 0);
 
 public sealed record LiveTeamSnapshot(
     int TeamNumber,
@@ -58,7 +60,8 @@ public sealed record LiveRoomSnapshot(
 
 public sealed record LiveProgressResult(
     LiveProgressDelta? Delta,
-    LiveRoomSnapshot? Snapshot);
+    LiveRoomSnapshot? Snapshot,
+    bool RelayedByDispatcher = false);
 
 public sealed record CreateLiveRoomRequest(
     Guid CreatorProfileId,
@@ -69,7 +72,8 @@ public sealed record CreateLiveRoomRequest(
     LiveRoomVisibility Visibility,
     int RoundCount,
     int MaxParticipants,
-    IReadOnlyList<LiveRoomInvitation>? Invitations = null);
+    IReadOnlyList<LiveRoomInvitation>? Invitations = null,
+    bool TargetCompetitionEligible = false);
 
 public sealed record LiveRoomInvitation(Guid ProfileId, string DisplayName);
 
@@ -114,7 +118,10 @@ public sealed record CompletedRoomRecord(
     DateTimeOffset CreatedAt,
     DateTimeOffset? StartedAt,
     DateTimeOffset? FinishedAt,
-    IReadOnlyList<CompletedParticipantRecord> Participants);
+    IReadOnlyList<CompletedParticipantRecord> Participants,
+    string TargetTextHash = "",
+    bool RatingEligible = false,
+    bool TargetCompetitionEligible = false);
 
 public sealed record CompletedParticipantRecord(
     Guid UserProfileId,
@@ -123,4 +130,6 @@ public sealed record CompletedParticipantRecord(
     int DurationMilliseconds,
     double Wpm,
     double Accuracy,
-    int? TeamNumber = null);
+    int? TeamNumber = null,
+    int CorrectCharacters = 0,
+    bool CompetitionEligible = false);

@@ -16,7 +16,10 @@ public sealed record LiveProgressDelta(
     string TypedStateBits,
     double Wpm,
     double Accuracy,
-    int? RankHint);
+    int? RankHint,
+    int TypedStateOffset = 0,
+    int TypedStateLength = 0,
+    LiveProgressInputStatus InputStatus = LiveProgressInputStatus.Applied);
 
 public sealed record LiveProgressBatch(
     Guid RoomId,
@@ -50,6 +53,7 @@ public sealed class LiveProgressBroadcaster(
     TimeProvider timeProvider,
     ILogger<LiveProgressBroadcaster> logger)
 {
+    private static readonly TimeSpan BroadcastSendTimeout = TimeSpan.FromSeconds(5);
     private readonly ConcurrentDictionary<Guid, RoomProgressBuffer> rooms = new();
     private readonly TimeSpan minimumBroadcastInterval = TimeSpan.FromSeconds(1d / Math.Clamp(options.Value.ProgressBroadcastHz, 1, 60));
     private readonly int capacity = Math.Clamp(options.Value.RoomCommandQueueCapacity, 1, 65_536);
@@ -99,11 +103,13 @@ public sealed class LiveProgressBroadcaster(
 
             room.Pending[delta.ParticipantId] = delta;
             var elapsed = now - room.LastBroadcastAt;
-            if (room.LastBroadcastAt == default || elapsed >= minimumBroadcastInterval)
+            if (!room.SendInProgress &&
+                (room.LastBroadcastAt == default || elapsed >= minimumBroadcastInterval))
             {
                 dueDeltas = DrainUnlocked(room, now);
+                room.SendInProgress = true;
             }
-            else if (!room.FlushScheduled)
+            else if (!room.SendInProgress && !room.FlushScheduled)
             {
                 room.FlushScheduled = true;
                 delay = minimumBroadcastInterval - elapsed;
@@ -112,7 +118,7 @@ public sealed class LiveProgressBroadcaster(
 
         if (dueDeltas is not null)
         {
-            await SendBatchAsync(delta.RoomId, dueDeltas, now, cancellationToken);
+            await SendBatchAsync(delta.RoomId, room, dueDeltas, now).WaitAsync(cancellationToken);
         }
 
         if (delay is { } flushDelay)
@@ -132,19 +138,41 @@ public sealed class LiveProgressBroadcaster(
         var now = timeProvider.GetUtcNow();
         lock (room.Gate)
         {
+            room.FlushScheduled = false;
             if (room.Pending.Count == 0)
             {
-                room.FlushScheduled = false;
+                return;
+            }
+
+            if (room.SendInProgress)
+            {
                 return;
             }
 
             dueDeltas = DrainUnlocked(room, now);
+            room.SendInProgress = true;
         }
 
-        await SendBatchAsync(roomId, dueDeltas, now, cancellationToken);
+        await SendBatchAsync(roomId, room, dueDeltas, now).WaitAsync(cancellationToken);
     }
 
-    public bool RemoveRoom(Guid roomId) => rooms.TryRemove(roomId, out _);
+    public bool RemoveRoom(Guid roomId)
+    {
+        if (!rooms.TryRemove(roomId, out var room))
+        {
+            return false;
+        }
+
+        lock (room.Gate)
+        {
+            room.Removed = true;
+            room.Lifetime.Cancel();
+            room.Pending.Clear();
+            room.Latest.Clear();
+        }
+
+        return true;
+    }
 
     public LiveProgressMetrics Snapshot()
     {
@@ -190,58 +218,122 @@ public sealed class LiveProgressBroadcaster(
             .ToList();
         room.Pending.Clear();
         room.LastBroadcastAt = now;
-        room.FlushScheduled = false;
         return dueDeltas;
     }
 
-    private async Task SendBatchAsync(Guid roomId, IReadOnlyList<LiveProgressDelta> deltas, DateTimeOffset now, CancellationToken cancellationToken)
+    private async Task SendBatchAsync(
+        Guid roomId,
+        RoomProgressBuffer room,
+        IReadOnlyList<LiveProgressDelta> deltas,
+        DateTimeOffset now)
     {
-        if (deltas.Count == 0)
-        {
-            return;
-        }
-
-        if (!rooms.TryGetValue(roomId, out var room))
-        {
-            return;
-        }
-
-        await room.SendGate.WaitAsync(CancellationToken.None);
+        IReadOnlyList<LiveProgressDelta> current = [];
+        var sent = false;
         try
         {
-            int currentRoomVersion;
             lock (room.Gate)
             {
-                currentRoomVersion = room.CurrentRoomVersion;
+                current = deltas
+                    .Where(delta => delta.RoomVersion == room.CurrentRoomVersion)
+                    .Where(delta => !room.LastSentWatermarks.TryGetValue(delta.ParticipantId, out var watermark) ||
+                        delta.RoomVersion > watermark.RoomVersion ||
+                        delta.RoomVersion == watermark.RoomVersion && delta.ParticipantSequence > watermark.ParticipantSequence)
+                    .OrderBy(delta => delta.RankHint)
+                    .ThenBy(delta => delta.ParticipantId)
+                    .ToArray();
             }
 
-            var current = deltas
-                .Where(delta => delta.RoomVersion == currentRoomVersion)
-                .Where(delta => !room.LastSentWatermarks.TryGetValue(delta.ParticipantId, out var sent) ||
-                    delta.RoomVersion > sent.RoomVersion ||
-                    delta.RoomVersion == sent.RoomVersion && delta.ParticipantSequence > sent.ParticipantSequence)
-                .OrderBy(delta => delta.RankHint)
-                .ThenBy(delta => delta.ParticipantId)
-                .ToArray();
-            if (current.Length == 0)
+            if (current.Count == 0)
             {
                 return;
             }
 
             var batch = new LiveProgressBatch(roomId, current.Max(delta => delta.RoomVersion), now, current);
-            await sender.SendAsync(roomId, batch, CancellationToken.None);
-            foreach (var delta in current)
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(room.Lifetime.Token);
+            deadline.CancelAfter(BroadcastSendTimeout);
+            await sender.SendAsync(roomId, batch, deadline.Token);
+            sent = true;
+            lock (room.Gate)
             {
-                room.LastSentWatermarks[delta.ParticipantId] = new ProgressWatermark(
-                    delta.RoomVersion,
-                    delta.ParticipantSequence);
+                foreach (var delta in current.Where(delta => delta.RoomVersion == room.CurrentRoomVersion))
+                {
+                    room.LastSentWatermarks[delta.ParticipantId] = new ProgressWatermark(
+                        delta.RoomVersion,
+                        delta.ParticipantSequence);
+                }
             }
 
             Interlocked.Increment(ref broadcastCount);
         }
+        catch (OperationCanceledException) when (room.Lifetime.IsCancellationRequested)
+        {
+        }
+        catch (OperationCanceledException ex)
+        {
+            logger.LogWarning(ex, "Ein Arena-Progress-Broadcast hat das Zeitlimit überschritten.");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Ein Arena-Progress-Broadcast ist fehlgeschlagen.");
+        }
         finally
         {
-            room.SendGate.Release();
+            bool startNext = false;
+            TimeSpan? nextDelay = null;
+            IReadOnlyList<LiveProgressDelta>? nextDeltas = null;
+            var nextNow = timeProvider.GetUtcNow();
+            lock (room.Gate)
+            {
+                if (!sent && !room.Removed)
+                {
+                    foreach (var delta in current)
+                    {
+                        if (room.Latest.TryGetValue(delta.ParticipantId, out var latest) &&
+                            latest.RoomVersion == room.CurrentRoomVersion)
+                        {
+                            if (room.Pending.ContainsKey(delta.ParticipantId))
+                            {
+                                continue;
+                            }
+
+                            if (room.Pending.Count < capacity)
+                            {
+                                room.Pending[delta.ParticipantId] = latest;
+                            }
+                            else
+                            {
+                                Interlocked.Increment(ref droppedProgressMessages);
+                            }
+                        }
+                    }
+                }
+
+                room.SendInProgress = false;
+                if (!room.Removed && room.Pending.Count > 0)
+                {
+                    var elapsed = nextNow - room.LastBroadcastAt;
+                    if (elapsed >= minimumBroadcastInterval)
+                    {
+                        nextDeltas = DrainUnlocked(room, nextNow);
+                        room.SendInProgress = true;
+                        startNext = true;
+                    }
+                    else if (!room.FlushScheduled)
+                    {
+                        room.FlushScheduled = true;
+                        nextDelay = minimumBroadcastInterval - elapsed;
+                    }
+                }
+            }
+
+            if (startNext)
+            {
+                _ = SendBatchAsync(roomId, room, nextDeltas!, nextNow);
+            }
+            else if (nextDelay is { } delay)
+            {
+                _ = ScheduleFlushAsync(roomId, delay);
+            }
         }
     }
 
@@ -251,9 +343,11 @@ public sealed class LiveProgressBroadcaster(
         public Dictionary<Guid, LiveProgressDelta> Pending { get; } = [];
         public Dictionary<Guid, LiveProgressDelta> Latest { get; } = [];
         public Dictionary<Guid, ProgressWatermark> LastSentWatermarks { get; } = [];
-        public SemaphoreSlim SendGate { get; } = new(1, 1);
+        public CancellationTokenSource Lifetime { get; } = new();
         public DateTimeOffset LastBroadcastAt { get; set; }
         public bool FlushScheduled { get; set; }
+        public bool SendInProgress { get; set; }
+        public bool Removed { get; set; }
         public int CurrentRoomVersion { get; set; }
     }
 

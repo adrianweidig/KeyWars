@@ -58,59 +58,46 @@ public sealed class LiveRoomCompletionQueue : BackgroundService,
     ILiveRoomCompletionDrain,
     ILiveRoomCompletionMonitor
 {
-    private const int MaxPersistenceAttempts = 3;
-    private static readonly TimeSpan[] RetryDelays = [TimeSpan.FromMilliseconds(100), TimeSpan.FromMilliseconds(500)];
     private readonly ILiveRoomCompletionWriter completionWriter;
+    private readonly LiveRoomCompletionOutbox outbox;
+    private readonly TimeProvider timeProvider;
     private readonly ILogger<LiveRoomCompletionQueue> logger;
-    private readonly Channel<CompletedRoomRecord> records;
-    private readonly ConcurrentDictionary<Guid, CompletionTracker> trackedRecords = new();
-    private readonly ConcurrentQueue<Guid> persistedRecordOrder = new();
     private readonly object enqueueGate = new();
     private readonly SemaphoreSlim processingGate = new(1, 1);
+    private readonly SemaphoreSlim wakeSignal = new(0, 1);
     private readonly TimeSpan defaultDrainTimeout;
     private int acceptingRecords = 1;
-    private int pendingRecords;
-    private int failedRecords;
-    private int retainedPersistedRecords;
-    private int queuedRecords;
     private long retryAttempts;
     private long persistedCompletions;
     private long failedCompletions;
-    private long abortedUnconfirmedCompletions;
     private long measuredPersistenceOperations;
     private long totalPersistenceStopwatchTicks;
 
     public LiveRoomCompletionQueue(
         IOptions<LiveOptions> options,
         ILiveRoomCompletionWriter completionWriter,
+        LiveRoomCompletionOutbox outbox,
+        TimeProvider timeProvider,
         ILogger<LiveRoomCompletionQueue> logger)
     {
         var liveOptions = options.Value;
         ValidateOptions(liveOptions);
         this.completionWriter = completionWriter;
+        this.outbox = outbox;
+        this.timeProvider = timeProvider;
         this.logger = logger;
         Capacity = liveOptions.CompletionQueueCapacity;
         FailedRecordLimit = Capacity;
         defaultDrainTimeout = TimeSpan.FromSeconds(liveOptions.CompletionDrainTimeoutSeconds);
-        records = Channel.CreateBounded<CompletedRoomRecord>(new BoundedChannelOptions(Capacity)
-        {
-            SingleReader = false,
-            SingleWriter = false,
-            FullMode = BoundedChannelFullMode.Wait
-        });
     }
 
     public int Capacity { get; }
     public int FailedRecordLimit { get; }
-    public int PendingCount => Volatile.Read(ref pendingRecords);
-    public int FailedRecordCount => Volatile.Read(ref failedRecords);
+    public int PendingCount => outbox.GetSnapshot(timeProvider.GetUtcNow()).PendingCount;
+    public int FailedRecordCount => outbox.GetSnapshot(timeProvider.GetUtcNow()).FailedCount;
     public long FailedAttempts => Volatile.Read(ref failedCompletions);
     public long RetryAttempts => Volatile.Read(ref retryAttempts);
-    public TimeSpan OldestPendingAge => trackedRecords.Values
-        .Where(tracker => tracker.State == CompletionState.Pending)
-        .Select(tracker => tracker.Age)
-        .DefaultIfEmpty(TimeSpan.Zero)
-        .Max();
+    public TimeSpan OldestPendingAge => outbox.GetSnapshot(timeProvider.GetUtcNow()).OldestPendingAge;
 
     public CompletionReceipt Enqueue(CompletedRoomRecord record)
     {
@@ -121,58 +108,49 @@ public sealed class LiveRoomCompletionQueue : BackgroundService,
 
         lock (enqueueGate)
         {
-            if (trackedRecords.TryGetValue(record.Id, out var existing))
+            var admission = outbox.Admit(
+                record,
+                Capacity,
+                Volatile.Read(ref acceptingRecords) != 0,
+                timeProvider.GetUtcNow());
+            if (admission.State == CompletionState.Pending)
             {
-                if (!StringComparer.Ordinal.Equals(existing.IdempotencyKey, record.IdempotencyKey))
-                {
-                    throw new InvalidOperationException("Für diesen Arena-Raum existiert bereits ein anderer Persistenzauftrag.");
-                }
-
-                return existing.Receipt;
+                SignalWorker();
+            }
+            else if (admission.Created)
+            {
+                Interlocked.Increment(ref failedCompletions);
+                logger.LogError(
+                    "Ein Arena-Ergebnis wurde dauerhaft gesichert, kann wegen erschöpfter Persistenzkapazität aber erst nach Redrive verarbeitet werden.");
             }
 
-            if (Volatile.Read(ref acceptingRecords) == 0 || PendingCount + FailedRecordCount >= Capacity)
-            {
-                return RegisterRejectedRecord(record);
-            }
-
-            var tracker = new CompletionTracker(record, CompletionState.Pending);
-            if (!trackedRecords.TryAdd(record.Id, tracker))
-            {
-                throw new InvalidOperationException("Der Arena-Persistenzauftrag konnte nicht eindeutig registriert werden.");
-            }
-
-            Interlocked.Increment(ref pendingRecords);
-            if (records.Writer.TryWrite(record))
-            {
-                Interlocked.Increment(ref queuedRecords);
-                return tracker.Receipt;
-            }
-
-            Interlocked.Decrement(ref pendingRecords);
-            tracker.TransitionFromPending(CompletionState.Failed);
-            RegisterFailedTracker(tracker);
-            return tracker.Receipt;
+            return new CompletionReceipt(record.Id, record.IdempotencyKey, admission.State);
         }
     }
 
     public CompletionStatusSnapshot GetStatus(Guid roomId)
     {
-        return trackedRecords.TryGetValue(roomId, out var tracker)
-            ? new CompletionStatusSnapshot(tracker.State)
-            : new CompletionStatusSnapshot(CompletionState.AbortedUnconfirmed);
+        return new CompletionStatusSnapshot(outbox.GetStatus(roomId).State);
     }
 
     public bool CanAcceptNewRoom(int currentRoomCount)
     {
-        if (currentRoomCount < 0 ||
-            Volatile.Read(ref acceptingRecords) == 0 ||
-            FailedRecordCount >= FailedRecordLimit)
+        if (currentRoomCount < 0 || Volatile.Read(ref acceptingRecords) == 0)
         {
             return false;
         }
 
-        return currentRoomCount + PendingCount + FailedRecordCount < Capacity;
+        try
+        {
+            var snapshot = outbox.GetSnapshot(timeProvider.GetUtcNow());
+            return snapshot.FailedCount < FailedRecordLimit &&
+                currentRoomCount + snapshot.PendingCount + snapshot.FailedCount < Capacity;
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(exception, "Die lokale Completion-Outbox ist nicht erreichbar; neue Arenen werden fail-closed abgelehnt.");
+            return false;
+        }
     }
 
     public LiveRoomCompletionMetrics GetMetrics()
@@ -182,13 +160,14 @@ public sealed class LiveRoomCompletionQueue : BackgroundService,
         var averageMilliseconds = operations == 0
             ? 0
             : Math.Round(stopwatchTicks * 1000d / Stopwatch.Frequency / operations, 2);
+        var snapshot = outbox.GetSnapshot(timeProvider.GetUtcNow());
         return new LiveRoomCompletionMetrics(
-            PendingCount,
-            FailedRecordCount,
+            snapshot.PendingCount,
+            snapshot.FailedCount,
             RetryAttempts,
             Volatile.Read(ref persistedCompletions),
             Volatile.Read(ref failedCompletions),
-            Volatile.Read(ref abortedUnconfirmedCompletions),
+            0,
             averageMilliseconds);
     }
 
@@ -208,38 +187,36 @@ public sealed class LiveRoomCompletionQueue : BackgroundService,
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var related = trackedRecords.Values
-                .Where(tracker => tracker.ContainsProfile(profileId))
-                .ToArray();
-            var failed = related.Count(tracker => tracker.State is CompletionState.Failed or CompletionState.AbortedUnconfirmed);
-            if (failed > 0)
+            var related = outbox.GetProfileSnapshot(profileId);
+            if (related.FailedCount > 0)
             {
-                return new CompletionDrainResult(CompletionDrainStatus.Failed, 0, failed);
+                return new CompletionDrainResult(CompletionDrainStatus.Failed, 0, related.FailedCount);
             }
 
-            var pending = related.Where(tracker => tracker.State == CompletionState.Pending).ToArray();
-            if (pending.Length == 0)
+            if (related.PendingCount == 0)
             {
                 return new CompletionDrainResult(CompletionDrainStatus.Success, 0, 0);
             }
+
+            SignalWorker();
 
             var elapsed = Stopwatch.GetElapsedTime(startedAt);
             var remaining = timeout - elapsed;
             if (remaining <= TimeSpan.Zero)
             {
-                return new CompletionDrainResult(CompletionDrainStatus.Timeout, pending.Length, 0);
+                return new CompletionDrainResult(CompletionDrainStatus.Timeout, related.PendingCount, 0);
             }
 
             try
             {
-                await Task.WhenAll(pending.Select(tracker => tracker.Completion)).WaitAsync(remaining, cancellationToken);
+                await Task.Delay(
+                    TimeSpan.FromMilliseconds(Math.Min(100, remaining.TotalMilliseconds)),
+                    timeProvider,
+                    cancellationToken);
             }
             catch (TimeoutException)
             {
-                return new CompletionDrainResult(
-                    CompletionDrainStatus.Timeout,
-                    related.Count(tracker => tracker.State == CompletionState.Pending),
-                    0);
+                return new CompletionDrainResult(CompletionDrainStatus.Timeout, related.PendingCount, 0);
             }
         }
     }
@@ -248,56 +225,41 @@ public sealed class LiveRoomCompletionQueue : BackgroundService,
     {
         while (true)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (outbox.GetSnapshot(timeProvider.GetUtcNow()).PendingCount == 0)
+            {
+                return;
+            }
+
+            var processed = false;
             await processingGate.WaitAsync(cancellationToken);
             try
             {
-                while (records.Reader.TryRead(out var record))
-                {
-                    Interlocked.Decrement(ref queuedRecords);
-                    await ProcessRecordAsync(record, cancellationToken);
-                }
+                processed = await ProcessNextDueAsync(cancellationToken);
             }
             finally
             {
                 processingGate.Release();
             }
 
-            var pending = trackedRecords.Values
-                .Where(tracker => tracker.State == CompletionState.Pending)
-                .Select(tracker => tracker.Completion)
-                .ToArray();
-            if (pending.Length == 0)
+            if (!processed)
             {
-                return;
+                await DelayUntilNextAttemptAsync(cancellationToken);
             }
-
-            if (Volatile.Read(ref queuedRecords) > 0)
-            {
-                continue;
-            }
-
-            await Task.WhenAll(pending).WaitAsync(cancellationToken);
         }
     }
 
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
         Interlocked.Exchange(ref acceptingRecords, 0);
-        records.Writer.TryComplete();
+        SignalWorker();
         try
         {
-            await FlushAsync(cancellationToken);
             await base.StopAsync(cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            logger.LogWarning("{Count} Arena-Ergebnisjobs sind beim Shutdown noch in Bearbeitung.", PendingCount);
-            MarkPendingAsAbortedUnconfirmed();
-        }
-
-        if (PendingCount > 0)
-        {
-            logger.LogWarning("{Count} Arena-Ergebnisjobs konnten vor dem Shutdown nicht persistiert werden.", PendingCount);
+            logger.LogWarning("Der lokale Completion-Worker wurde beim Shutdown abgebrochen; offene Aufträge bleiben dauerhaft vorgemerkt.");
         }
     }
 
@@ -305,94 +267,78 @@ public sealed class LiveRoomCompletionQueue : BackgroundService,
     {
         try
         {
-            while (await records.Reader.WaitToReadAsync(stoppingToken))
+            while (!stoppingToken.IsCancellationRequested)
             {
+                var processed = false;
                 await processingGate.WaitAsync(stoppingToken);
                 try
                 {
-                    if (!records.Reader.TryRead(out var record))
-                    {
-                        continue;
-                    }
-
-                    Interlocked.Decrement(ref queuedRecords);
-                    await ProcessRecordAsync(record, stoppingToken);
+                    processed = await ProcessNextDueAsync(stoppingToken);
                 }
                 finally
                 {
                     processingGate.Release();
                 }
+
+                if (!processed)
+                {
+                    await WaitForWorkAsync(stoppingToken);
+                }
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
-            MarkPendingAsAbortedUnconfirmed();
         }
     }
 
-    private CompletionReceipt RegisterRejectedRecord(CompletedRoomRecord record)
+    private async Task<bool> ProcessNextDueAsync(CancellationToken cancellationToken)
     {
-        var tracker = new CompletionTracker(record, CompletionState.Failed);
-        if (trackedRecords.TryAdd(record.Id, tracker))
+        var item = await outbox.ReadNextDueAsync(timeProvider.GetUtcNow(), cancellationToken);
+        if (item is null)
         {
-            RegisterFailedTracker(tracker);
-        }
-        else
-        {
-            Interlocked.Increment(ref failedCompletions);
-        }
-
-        logger.LogError("Ein Arena-Ergebnis konnte wegen erschöpfter Persistenzkapazität nicht eingereiht werden.");
-        return tracker.Receipt;
-    }
-
-    private void RegisterFailedTracker(CompletionTracker tracker)
-    {
-        Interlocked.Increment(ref failedCompletions);
-        if (!TryReserveFailedRecord())
-        {
-            trackedRecords.TryRemove(new KeyValuePair<Guid, CompletionTracker>(tracker.RoomId, tracker));
-        }
-
-        tracker.Complete();
-    }
-
-    private bool TryReserveFailedRecord()
-    {
-        while (true)
-        {
-            var current = Volatile.Read(ref failedRecords);
-            if (current >= FailedRecordLimit)
-            {
-                return false;
-            }
-
-            if (Interlocked.CompareExchange(ref failedRecords, current + 1, current) == current)
-            {
-                return true;
-            }
-        }
-    }
-
-    private async Task ProcessRecordAsync(CompletedRoomRecord record, CancellationToken cancellationToken)
-    {
-        if (!trackedRecords.TryGetValue(record.Id, out var tracker) ||
-            !StringComparer.Ordinal.Equals(tracker.IdempotencyKey, record.IdempotencyKey) ||
-            tracker.State != CompletionState.Pending)
-        {
-            return;
+            return false;
         }
 
         var startedAt = Stopwatch.GetTimestamp();
         try
         {
-            var persisted = await PersistWithRetryAsync(record, cancellationToken);
-            CompletePendingTracker(tracker, persisted ? CompletionState.Persisted : CompletionState.Failed);
+            var record = LiveRoomCompletionOutbox.Deserialize(item);
+            await completionWriter.PersistAsync(record, cancellationToken);
+            await outbox.CompleteAsync(item, cancellationToken);
+            Interlocked.Increment(ref persistedCompletions);
+            return true;
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            CompletePendingTracker(tracker, CompletionState.AbortedUnconfirmed);
             throw;
+        }
+        catch (Exception exception)
+        {
+            var attempt = checked(item.AttemptCount + 1);
+            if (IsTransientSqliteFailure(exception))
+            {
+                var delay = CalculateRetryDelay(attempt);
+                Interlocked.Increment(ref retryAttempts);
+                logger.LogWarning(
+                    exception,
+                    "Transientes SQLite-Problem bei der Arena-Persistenz; Versuch {Attempt} wird nach {Delay} erneut ausgeführt.",
+                    attempt,
+                    delay);
+                await outbox.RescheduleAsync(
+                    item,
+                    attempt,
+                    timeProvider.GetUtcNow().Add(delay),
+                    exception.Message,
+                    CancellationToken.None);
+                return true;
+            }
+
+            logger.LogError(
+                exception,
+                "Ein Arena-Ergebnis konnte nicht persistiert werden; der dauerhaft gesicherte Auftrag wartet auf Redrive.");
+            await outbox.FailAsync(item, attempt, exception.Message, CancellationToken.None);
+            Interlocked.Increment(ref failedCompletions);
+            return true;
         }
         finally
         {
@@ -401,86 +347,40 @@ public sealed class LiveRoomCompletionQueue : BackgroundService,
         }
     }
 
-    private void CompletePendingTracker(CompletionTracker tracker, CompletionState state)
+    private async Task WaitForWorkAsync(CancellationToken cancellationToken)
     {
-        if (!tracker.TransitionFromPending(state))
-        {
-            return;
-        }
+        var nextAttempt = outbox.GetNextAttemptAt();
+        var delay = nextAttempt is null
+            ? TimeSpan.FromSeconds(1)
+            : nextAttempt.Value - timeProvider.GetUtcNow();
+        delay = TimeSpan.FromMilliseconds(Math.Clamp(delay.TotalMilliseconds, 1, 1_000));
+        await wakeSignal.WaitAsync(delay, cancellationToken);
+    }
 
-        Interlocked.Decrement(ref pendingRecords);
-        switch (state)
+    private async Task DelayUntilNextAttemptAsync(CancellationToken cancellationToken)
+    {
+        var nextAttempt = outbox.GetNextAttemptAt();
+        var delay = nextAttempt is null
+            ? TimeSpan.FromMilliseconds(100)
+            : nextAttempt.Value - timeProvider.GetUtcNow();
+        if (delay > TimeSpan.Zero)
         {
-            case CompletionState.Persisted:
-                tracker.Complete();
-                Interlocked.Increment(ref persistedCompletions);
-                Interlocked.Increment(ref retainedPersistedRecords);
-                persistedRecordOrder.Enqueue(tracker.RoomId);
-                TrimPersistedRecords();
-                break;
-            case CompletionState.Failed:
-                RegisterFailedTracker(tracker);
-                break;
-            case CompletionState.AbortedUnconfirmed:
-                Interlocked.Increment(ref abortedUnconfirmedCompletions);
-                if (!TryReserveFailedRecord())
-                {
-                    trackedRecords.TryRemove(new KeyValuePair<Guid, CompletionTracker>(tracker.RoomId, tracker));
-                }
-
-                tracker.Complete();
-                break;
+            await Task.Delay(delay, timeProvider, cancellationToken);
         }
     }
 
-    private void TrimPersistedRecords()
+    private void SignalWorker()
     {
-        while (Volatile.Read(ref retainedPersistedRecords) > Capacity && persistedRecordOrder.TryDequeue(out var roomId))
+        if (wakeSignal.CurrentCount == 0)
         {
-            if (trackedRecords.TryGetValue(roomId, out var tracker) &&
-                tracker.State == CompletionState.Persisted &&
-                trackedRecords.TryRemove(new KeyValuePair<Guid, CompletionTracker>(roomId, tracker)))
-            {
-                Interlocked.Decrement(ref retainedPersistedRecords);
-            }
+            wakeSignal.Release();
         }
     }
 
-    private void MarkPendingAsAbortedUnconfirmed()
+    private static TimeSpan CalculateRetryDelay(int attempt)
     {
-        foreach (var tracker in trackedRecords.Values.Where(tracker => tracker.State == CompletionState.Pending))
-        {
-            CompletePendingTracker(tracker, CompletionState.AbortedUnconfirmed);
-        }
-    }
-
-    private async Task<bool> PersistWithRetryAsync(CompletedRoomRecord record, CancellationToken cancellationToken)
-    {
-        for (var attempt = 1; attempt <= MaxPersistenceAttempts; attempt++)
-        {
-            try
-            {
-                await completionWriter.PersistAsync(record, cancellationToken);
-                return true;
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception ex) when (IsTransientSqliteFailure(ex) && attempt < MaxPersistenceAttempts)
-            {
-                Interlocked.Increment(ref retryAttempts);
-                logger.LogWarning(ex, "Transientes SQLite-Problem bei der Arena-Persistenz; Versuch {Attempt}/{MaxAttempts}.", attempt, MaxPersistenceAttempts);
-                await Task.Delay(RetryDelays[Math.Min(attempt - 1, RetryDelays.Length - 1)], cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Ein Arena-Ergebnis konnte nicht persistiert werden; der Job bleibt als fehlgeschlagen sichtbar.");
-                return false;
-            }
-        }
-
-        return false;
+        var exponent = Math.Min(Math.Max(0, attempt - 1), 8);
+        return TimeSpan.FromMilliseconds(Math.Min(30_000, 100 * (1 << exponent)));
     }
 
     private static bool IsTransientSqliteFailure(Exception exception)
@@ -500,6 +400,11 @@ public sealed class LiveRoomCompletionQueue : BackgroundService,
         if (options.MaxConcurrentRooms is < 1 or > 65_536)
         {
             failures.Add("MaxConcurrentRooms muss zwischen 1 und 65536 liegen.");
+        }
+
+        if (options.MaxActiveRoomsPerCreator is < 1 or > 1_024)
+        {
+            failures.Add("MaxActiveRoomsPerCreator muss zwischen 1 und 1024 liegen.");
         }
 
         if (options.CompletionQueueCapacity is < 1 or > 65_536)
@@ -522,40 +427,6 @@ public sealed class LiveRoomCompletionQueue : BackgroundService,
         }
     }
 
-    private sealed class CompletionTracker(CompletedRoomRecord record, CompletionState initialState)
-    {
-        private readonly long enqueuedAt = Stopwatch.GetTimestamp();
-        private readonly TaskCompletionSource completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        private readonly Guid[] profileIds = record.Participants
-            .Select(participant => participant.UserProfileId)
-            .Distinct()
-            .ToArray();
-        private int state = (int)initialState;
-
-        public Guid RoomId => receipt.RoomId;
-        public string IdempotencyKey => receipt.IdempotencyKey;
-        public CompletionState State => (CompletionState)Volatile.Read(ref state);
-        public CompletionReceipt Receipt => receipt with { State = State };
-        public Task Completion => completion.Task;
-        public TimeSpan Age => Stopwatch.GetElapsedTime(enqueuedAt);
-
-        private readonly CompletionReceipt receipt = new(record.Id, record.IdempotencyKey, initialState);
-
-        public bool ContainsProfile(Guid profileId)
-        {
-            return profileIds.Contains(profileId);
-        }
-
-        public bool TransitionFromPending(CompletionState nextState)
-        {
-            return Interlocked.CompareExchange(ref state, (int)nextState, (int)CompletionState.Pending) == (int)CompletionState.Pending;
-        }
-
-        public void Complete()
-        {
-            completion.TrySetResult();
-        }
-    }
 }
 
 public sealed class RelationalLiveRoomCompletionWriter(IServiceScopeFactory scopeFactory) : ILiveRoomCompletionWriter
@@ -573,7 +444,13 @@ public sealed class RelationalLiveRoomCompletionWriter(IServiceScopeFactory scop
         await using var scope = scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<KeyWarsDbContext>();
         var motivation = scope.ServiceProvider.GetRequiredService<MotivationService>();
+        await using var sqliteSeasonWriteFence = db.Database.IsSqlite()
+            ? await SeasonWriteFence.AcquireAsync(db, cancellationToken)
+            : null;
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var postgresSeasonWriteFence = db.Database.IsNpgsql()
+            ? await SeasonWriteFence.AcquireAsync(db, cancellationToken)
+            : null;
         var participantIds = record.Participants.Select(item => item.UserProfileId).Distinct().ToArray();
         await ProfileWriteFence.AcquireAsync(db, participantIds, cancellationToken);
         if (await db.LiveRoomSummaries.AnyAsync(item => item.Id == record.Id || item.IdempotencyKey == record.IdempotencyKey, cancellationToken))
@@ -591,6 +468,23 @@ public sealed class RelationalLiveRoomCompletionWriter(IServiceScopeFactory scop
         }
 
         var profilesById = profiles.ToDictionary(profile => profile.Id);
+        var participantsById = record.Participants.ToDictionary(participant => participant.UserProfileId);
+        var rewardEligibility = record.Participants.ToDictionary(
+            participant => participant.UserProfileId,
+            participant => record.TargetCompetitionEligible &&
+                participant.Status == ParticipantStatus.Finished &&
+                participant.CompetitionEligible &&
+                CompetitionEligibility.HasPlausibleServerPace(
+                    participant.CorrectCharacters,
+                    TimeSpan.FromMilliseconds(participant.DurationMilliseconds)));
+        var ratingEligibility = record.Participants.ToDictionary(
+            participant => participant.UserProfileId,
+            participant => participant.CompetitionEligible &&
+                (participant.Status == ParticipantStatus.Dnf ||
+                 participant.Status == ParticipantStatus.Finished &&
+                 CompetitionEligibility.HasPlausibleServerPace(
+                     participant.CorrectCharacters,
+                     TimeSpan.FromMilliseconds(participant.DurationMilliseconds))));
         var ratingChanges = profiles.ToDictionary(profile => profile.Id, profile => new RatingChange(profile.Id, profile.ArenaRating, 0, profile.ArenaRating));
         var rankingInput = record.Participants
             .Select(item => new RaceResult(
@@ -613,17 +507,75 @@ public sealed class RelationalLiveRoomCompletionWriter(IServiceScopeFactory scop
                 .ToArray()
             : RaceRanking.RankClassic(rankingInput);
         var isServerAbort = record.Participants.Any(item => item.Status == ParticipantStatus.AbortedByServer);
-        if (!isServerAbort && ranked.Count >= 2)
+        var isClassicSingleRound = record.Mode == LiveRoomMode.Classic && record.RoundCount == 1;
+        var validClassicFinishers = isClassicSingleRound
+            ? RaceRanking.RankClassic(rankingInput
+                .Where(result => rewardEligibility[result.UserProfileId])
+                .ToArray())
+            : [];
+        var classicForfeitPlacement = validClassicFinishers.Count + 1;
+        var ratingRanked = isClassicSingleRound
+            ? validClassicFinishers
+                .Concat(rankingInput
+                    .Where(result =>
+                    {
+                        var participant = participantsById[result.UserProfileId];
+                        return participant.Status == ParticipantStatus.Dnf && participant.CompetitionEligible ||
+                            participant.Status == ParticipantStatus.Finished && !rewardEligibility[result.UserProfileId];
+                    })
+                    .Select(result => new RankedRaceResult(
+                        result with { Status = ParticipantStatus.Dnf },
+                        classicForfeitPlacement)))
+                .OrderBy(item => item.Placement)
+                .ThenBy(item => item.Result.UserProfileId)
+                .ToArray()
+            : ranked
+                .Where(item => ratingEligibility[item.Result.UserProfileId])
+                .ToArray();
+        var ratingProfileIds = ratingRanked
+            .Select(item => item.Result.UserProfileId)
+            .ToHashSet();
+        var ratingRequiresFullFieldIntegrity = record.RoundCount > 1 || record.Mode == LiveRoomMode.Team;
+        var ratingFieldEligible = !ratingRequiresFullFieldIntegrity || record.Participants.All(participant =>
+            ratingEligibility[participant.UserProfileId]);
+        IReadOnlyDictionary<Guid, int?>? ratingTeamNumbers = null;
+        if (record.Mode == LiveRoomMode.Team)
         {
-            var ratings = profiles.ToDictionary(item => item.Id, item => item.ArenaRating);
-            ratingChanges = MultiplayerRating.CalculatePairwiseEloChanges(ratings, ranked).ToDictionary(item => item.Key, item => item.Value);
-            foreach (var profile in profiles)
+            ratingTeamNumbers = record.Participants
+                .Where(participant => ratingProfileIds.Contains(participant.UserProfileId))
+                .ToDictionary(participant => participant.UserProfileId, participant => participant.TeamNumber);
+            var teamSizes = ratingTeamNumbers.Values
+                .Where(teamNumber => teamNumber is 1 or 2)
+                .GroupBy(teamNumber => teamNumber!.Value)
+                .ToDictionary(group => group.Key, group => group.Count());
+            ratingFieldEligible &= teamSizes.Count == 2 &&
+                teamSizes.GetValueOrDefault(1) > 0 &&
+                teamSizes.GetValueOrDefault(1) == teamSizes.GetValueOrDefault(2) &&
+                teamSizes.Values.Sum() == ratingTeamNumbers.Count;
+        }
+
+        var hasRatedFinisher = isClassicSingleRound
+            ? validClassicFinishers.Count > 0
+            : ratingRanked.Any(item => item.Result.Status == ParticipantStatus.Finished);
+        if (record.TargetCompetitionEligible && record.RatingEligible && !isServerAbort &&
+            ratingFieldEligible && hasRatedFinisher && ratingRanked.Length >= 2)
+        {
+            var ratings = profiles
+                .Where(item => ratingProfileIds.Contains(item.Id))
+                .ToDictionary(item => item.Id, item => item.ArenaRating);
+            foreach (var ratingChange in MultiplayerRating.CalculatePairwiseEloChanges(
+                         ratings,
+                         ratingRanked,
+                         teamNumbers: ratingTeamNumbers))
             {
-                var participant = record.Participants.Single(item => item.UserProfileId == profile.Id);
+                ratingChanges[ratingChange.Key] = ratingChange.Value;
+            }
+
+            foreach (var profile in profiles.Where(item => ratingProfileIds.Contains(item.Id)))
+            {
                 var ratingChange = ratingChanges[profile.Id];
                 profile.ArenaRating = ratingChange.RatingAfter;
                 profile.RatedMatchCount++;
-                profile.SeasonPoints += Math.Max(1, (int)Math.Round(participant.Wpm / 10d));
                 profile.UpdatedAt = DateTimeOffset.UtcNow;
             }
         }
@@ -636,6 +588,7 @@ public sealed class RelationalLiveRoomCompletionWriter(IServiceScopeFactory scop
             IdempotencyKey = record.IdempotencyKey,
             CreatorProfileId = record.CreatorProfileId,
             RoomCode = record.RoomCode,
+            TargetTextHash = record.TargetTextHash,
             Mode = record.Mode,
             Visibility = record.Visibility,
             RoundCount = record.RoundCount,
@@ -659,19 +612,21 @@ public sealed class RelationalLiveRoomCompletionWriter(IServiceScopeFactory scop
                 DurationMilliseconds = participant.DurationMilliseconds,
                 Wpm = participant.Wpm,
                 Accuracy = participant.Accuracy,
+                CompetitionEligible = rewardEligibility[participant.UserProfileId],
                 RatingBefore = ratingChange.RatingBefore,
                 RatingDelta = ratingChange.RatingDelta,
                 RatingAfter = ratingChange.RatingAfter
             });
 
-            if (!isServerAbort && participant.Status == ParticipantStatus.Finished)
+            if (!isServerAbort && rewardEligibility[participant.UserProfileId])
             {
                 motivationInputs.Add(new ArenaMotivationInput(
                     profilesById[participant.UserProfileId],
                     $"{record.IdempotencyKey}:{participant.UserProfileId:N}",
                     participant.Wpm,
                     participant.Accuracy,
-                    participant.DurationMilliseconds));
+                    participant.DurationMilliseconds,
+                    record.FinishedAt ?? record.CreatedAt));
             }
         }
 

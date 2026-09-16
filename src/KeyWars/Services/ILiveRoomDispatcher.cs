@@ -5,6 +5,10 @@ public interface ILiveRoomDispatcher
     ValueTask<LiveRoomSnapshot> CreateRoomAsync(
         CreateLiveRoomRequest request,
         CancellationToken cancellationToken = default);
+    ValueTask<LiveRoomSnapshot> CreateRematchAsync(
+        Guid roomId,
+        Guid hostProfileId,
+        CancellationToken cancellationToken = default);
     ValueTask<IReadOnlyList<LiveRoomSnapshot>> ListOpenRoomsAsync(
         CancellationToken cancellationToken = default);
     ValueTask<LiveRoomLobbyPage> ListLobbySummariesAsync(
@@ -80,8 +84,13 @@ public interface ILiveRoomDispatcher
         Guid profileId,
         CancellationToken cancellationToken = default);
     ValueTask<LiveRoomSnapshot> SnapshotAsync(Guid roomId, CancellationToken cancellationToken = default);
+    ValueTask<LiveRoomSnapshot> SnapshotForViewerAsync(
+        Guid roomId,
+        Guid viewerProfileId,
+        CancellationToken cancellationToken = default);
     ValueTask<IReadOnlyList<LiveRoomSnapshot>> SweepAsync(CancellationToken cancellationToken = default);
     ValueTask RemoveProfileAsync(Guid profileId, CancellationToken cancellationToken = default);
+    ValueTask ClearProfileRemovalFenceAsync(Guid profileId, CancellationToken cancellationToken = default);
     ValueTask<int> AbortActiveRoomsAsync(CancellationToken cancellationToken = default);
 }
 
@@ -89,6 +98,9 @@ public sealed class LocalLiveRoomDispatcher(LiveRoomManager rooms) : ILiveRoomDi
 {
     public ValueTask<LiveRoomSnapshot> CreateRoomAsync(CreateLiveRoomRequest request, CancellationToken cancellationToken = default) =>
         Result(rooms.CreateRoom(request), cancellationToken);
+
+    public ValueTask<LiveRoomSnapshot> CreateRematchAsync(Guid roomId, Guid hostProfileId, CancellationToken cancellationToken = default) =>
+        Result(rooms.CreateRematch(roomId, hostProfileId), cancellationToken);
 
     public ValueTask<IReadOnlyList<LiveRoomSnapshot>> ListOpenRoomsAsync(CancellationToken cancellationToken = default) =>
         Result(rooms.ListOpenRooms(), cancellationToken);
@@ -144,6 +156,9 @@ public sealed class LocalLiveRoomDispatcher(LiveRoomManager rooms) : ILiveRoomDi
     public ValueTask<LiveRoomSnapshot> SnapshotAsync(Guid roomId, CancellationToken cancellationToken = default) =>
         Result(rooms.Snapshot(roomId), cancellationToken);
 
+    public ValueTask<LiveRoomSnapshot> SnapshotForViewerAsync(Guid roomId, Guid viewerProfileId, CancellationToken cancellationToken = default) =>
+        Result(rooms.SnapshotForViewer(roomId, viewerProfileId), cancellationToken);
+
     public ValueTask<IReadOnlyList<LiveRoomSnapshot>> SweepAsync(CancellationToken cancellationToken = default) =>
         Result(rooms.Sweep(), cancellationToken);
 
@@ -151,6 +166,12 @@ public sealed class LocalLiveRoomDispatcher(LiveRoomManager rooms) : ILiveRoomDi
     {
         cancellationToken.ThrowIfCancellationRequested();
         rooms.RemoveProfile(profileId);
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask ClearProfileRemovalFenceAsync(Guid profileId, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
         return ValueTask.CompletedTask;
     }
 

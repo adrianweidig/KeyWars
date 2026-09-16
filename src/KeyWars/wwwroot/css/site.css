@@ -1923,6 +1923,11 @@ select:focus-visible {
   overflow: auto;
 }
 
+[data-arena-room][data-arena-roster-expanded="true"] .live-typing-board.focused {
+  max-height: min(70vh, 720px);
+  overflow: auto;
+}
+
 .typing-timer {
   display: flex;
   align-items: baseline;
@@ -2559,6 +2564,18 @@ select:focus-visible {
 .arena-roster-table-wrap {
   min-width: 0;
   overflow-x: auto;
+}
+
+[data-arena-room][data-arena-roster-expanded="true"] .arena-roster-table-wrap {
+  max-height: min(70vh, 720px);
+  overflow: auto;
+}
+
+[data-arena-room][data-arena-roster-expanded="true"] .participant-list.focused thead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
 }
 
 .pill {
@@ -4297,6 +4314,38 @@ button.tertiary {
   background: var(--surface-2);
   color: var(--muted);
   font-size: 0.9rem;
+}
+
+.arena-personal-best {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid rgba(242, 184, 75, 0.58);
+  border-radius: 8px;
+  background: rgba(242, 184, 75, 0.1);
+}
+
+.arena-personal-best strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.arena-personal-best-detail {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  text-align: right;
+}
+
+@media (max-width: 640px) {
+  .arena-personal-best,
+  .arena-personal-best-detail {
+    align-items: flex-start;
+    flex-direction: column;
+    text-align: left;
+  }
 }
 
 [data-persistence-state="Running"] .arena-persistence-status {
@@ -6633,14 +6682,15 @@ body.app-public.auth-exit-page .shell {
   }
 
   .competition-tabs {
-    display: grid;
-    grid-template-columns: repeat(5, minmax(84px, 1fr));
+    display: flex;
+    flex-wrap: nowrap;
     gap: 8px;
     overflow-x: auto;
     padding-bottom: 2px;
   }
 
   .competition-tabs a {
+    flex: 1 0 84px;
     min-width: 84px;
     min-height: 44px;
     padding: 10px 12px;

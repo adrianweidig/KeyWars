@@ -33,6 +33,7 @@ public sealed record TypingAttemptExport(
     double WordTimingVariation,
     bool Completed,
     bool Official,
+    bool CompetitionIntegrityEligible,
     bool LeaderboardEligible,
     bool ExperienceAwarded,
     DateTimeOffset CreatedAt);
@@ -49,12 +50,28 @@ public sealed record ChallengeAttemptBindingExport(
     DateTimeOffset CreatedAt,
     DateTimeOffset? ConsumedAt);
 
+public sealed record ChallengeExport(
+    Guid Id,
+    Guid? RematchOfChallengeId,
+    Guid CreatorProfileId,
+    Guid TrainingTextId,
+    string? TargetTextHash,
+    string Title,
+    ChallengeMode Mode,
+    ChallengeStatus Status,
+    int RoundCount,
+    bool RatingEligible,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset ExpiresAt,
+    DateTimeOffset? FinishedAt);
+
 public sealed record LiveRoomSummaryExport(
     Guid Id,
     int RoundNumber,
     int RoundVersion,
     Guid CreatorProfileId,
     string RoomCode,
+    string TargetTextHash,
     LiveRoomMode Mode,
     LiveRoomVisibility Visibility,
     int RoundCount,
@@ -70,6 +87,8 @@ public sealed record ProfileExportPayload(
     IReadOnlyList<TypingAttemptExport> Attempts,
     IReadOnlyList<TypingAttemptError> AttemptErrors,
     IReadOnlyList<RewardLedgerEntry> RewardLedger,
+    IReadOnlyList<Season> Seasons,
+    IReadOnlyList<SeasonScore> SeasonScores,
     IReadOnlyList<Mission> Missions,
     IReadOnlyList<Achievement> Achievements,
     IReadOnlyList<GamificationEvent> GamificationEvents,
@@ -78,7 +97,7 @@ public sealed record ProfileExportPayload(
     IReadOnlyList<TextCollection> OwnedCollections,
     IReadOnlyList<TextCollectionItem> OwnedCollectionItems,
     IReadOnlyList<ContentModerationAuditEntry> ContentModerationAudit,
-    IReadOnlyList<Challenge> CreatedChallenges,
+    IReadOnlyList<ChallengeExport> CreatedChallenges,
     IReadOnlyList<ChallengeRound> ChallengeRounds,
     IReadOnlyList<ChallengeParticipant> ChallengeParticipations,
     IReadOnlyList<ChallengeRoundResult> ChallengeRoundResults,
@@ -91,8 +110,10 @@ public sealed class ProfilePrivacyService(
     ILiveRoomDispatcher liveRooms,
     ILiveRoomCompletionDrain liveRoomCompletions,
     IAttemptSessionStateStore attemptSessions,
+    ILivePresenceStateStore livePresence,
     IProfileAccessGate accessGate,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider,
+    IProfileHubConnectionRevoker hubConnections)
 {
     public async Task<ProfileExportPayload> BuildExportAsync(Guid profileId, CancellationToken cancellationToken = default)
     {
@@ -127,6 +148,7 @@ public sealed class ProfilePrivacyService(
                 item.WordTimingVariation,
                 item.Completed,
                 item.Official,
+                item.CompetitionIntegrityEligible,
                 item.LeaderboardEligible,
                 item.ExperienceAwarded,
                 item.CreatedAt))
@@ -145,6 +167,20 @@ public sealed class ProfilePrivacyService(
 
         var createdChallenges = await db.Challenges
             .Where(item => item.CreatorProfileId == profileId)
+            .Select(item => new ChallengeExport(
+                item.Id,
+                item.RematchOfChallengeId,
+                item.CreatorProfileId,
+                item.TrainingTextId,
+                item.TargetTextHash,
+                item.Title,
+                item.Mode,
+                item.Status,
+                item.RoundCount,
+                item.RatingEligible,
+                item.CreatedAt,
+                item.ExpiresAt,
+                item.FinishedAt))
             .ToListAsync(cancellationToken);
         var challengeParticipations = await db.ChallengeParticipants
             .Where(item => item.UserProfileId == profileId)
@@ -193,6 +229,7 @@ public sealed class ProfilePrivacyService(
                 item.RoundVersion,
                 item.CreatorProfileId,
                 item.RoomCode,
+                item.TargetTextHash,
                 item.Mode,
                 item.Visibility,
                 item.RoundCount,
@@ -201,14 +238,29 @@ public sealed class ProfilePrivacyService(
                 item.FinishedAt,
                 item.AbortedByServer))
             .ToListAsync(cancellationToken);
+        var rewardLedger = await db.RewardLedgerEntries
+            .Where(item => item.UserProfileId == profileId)
+            .ToListAsync(cancellationToken);
+        var seasonScores = await db.SeasonScores
+            .Where(item => item.UserProfileId == profileId)
+            .ToListAsync(cancellationToken);
+        var seasonIds = seasonScores.Select(item => item.SeasonId)
+            .Concat(rewardLedger.Where(item => item.SeasonId != null).Select(item => item.SeasonId!.Value))
+            .Distinct()
+            .ToArray();
+        var seasons = seasonIds.Length == 0
+            ? []
+            : await db.Seasons.Where(item => seasonIds.Contains(item.Id)).ToListAsync(cancellationToken);
 
         return new ProfileExportPayload(
-            3,
+            ProfileExportService.SchemaVersion,
             timeProvider.GetUtcNow(),
             profile,
             attempts,
             await db.TypingAttemptErrors.Where(item => item.UserProfileId == profileId).ToListAsync(cancellationToken),
-            await db.RewardLedgerEntries.Where(item => item.UserProfileId == profileId).ToListAsync(cancellationToken),
+            rewardLedger,
+            seasons,
+            seasonScores,
             await db.Missions.Where(item => item.UserProfileId == profileId).ToListAsync(cancellationToken),
             await db.Achievements.Where(item => item.UserProfileId == profileId).ToListAsync(cancellationToken),
             await db.GamificationEvents.Where(item => item.UserProfileId == profileId).ToListAsync(cancellationToken),
@@ -272,6 +324,7 @@ public sealed class ProfilePrivacyService(
                 var profile = await ReloadAvailableProfileAsync(profileId, operationToken);
                 await DeleteDerivedStatisticsAsync(profileId, operationToken);
                 await RemoveOwnedCollectionsAsync(profileId, operationToken);
+                await RedactOwnedChallengeSnapshotsAsync(profileId, operationToken);
                 await PseudonymizeOwnedTextsAsync(profileId, now, operationToken);
                 await MarkActiveChallengesDeclinedAsync(profileId, now, operationToken);
 
@@ -326,6 +379,12 @@ public sealed class ProfilePrivacyService(
         try
         {
             await accessGate.WaitForIdleAsync(profileId, operationToken);
+            await hubConnections.RevokeProfileAsync(
+                profileId,
+                markDeleted
+                    ? "Dein Profil wurde gelöscht."
+                    : "Deine Arena-Sitzung wurde wegen des Statistik-Resets beendet.",
+                operationToken);
             var removedSessions = await attemptSessions.RemoveProfileAsync(profileId, operationToken);
             var persistedAttemptIds = await db.TypingAttempts
                 .Where(attempt => attempt.UserProfileId == profileId &&
@@ -346,6 +405,7 @@ public sealed class ProfilePrivacyService(
             await attemptSessions.RemoveProfileAsync(profileId, operationToken);
             await AbortActiveAttemptsAsync(profileId, operationToken);
             await liveRooms.RemoveProfileAsync(profileId, operationToken);
+            await livePresence.RemoveProfileAsync(profileId, operationToken);
             var drain = await liveRoomCompletions.DrainProfileAsync(profileId, operationToken);
             EnsureDrainSucceeded(drain);
             operationLease.ThrowIfLost();
@@ -354,6 +414,10 @@ public sealed class ProfilePrivacyService(
             if (markDeleted)
             {
                 await accessGate.MarkDeletedAsync(profileId, operationToken);
+            }
+            else
+            {
+                await liveRooms.ClearProfileRemovalFenceAsync(profileId, operationToken);
             }
         }
         finally
@@ -452,6 +516,7 @@ public sealed class ProfilePrivacyService(
         await db.ChallengeAttemptBindings.Where(item => item.UserProfileId == profileId).ExecuteDeleteAsync(cancellationToken);
         await db.TypingAttempts.Where(item => item.UserProfileId == profileId).ExecuteDeleteAsync(cancellationToken);
         await db.RewardLedgerEntries.Where(item => item.UserProfileId == profileId).ExecuteDeleteAsync(cancellationToken);
+        await db.SeasonScores.Where(item => item.UserProfileId == profileId).ExecuteDeleteAsync(cancellationToken);
         await db.Missions.Where(item => item.UserProfileId == profileId).ExecuteDeleteAsync(cancellationToken);
         await db.Achievements.Where(item => item.UserProfileId == profileId).ExecuteDeleteAsync(cancellationToken);
         await db.GamificationEvents.Where(item => item.UserProfileId == profileId).ExecuteDeleteAsync(cancellationToken);
@@ -491,20 +556,27 @@ public sealed class ProfilePrivacyService(
                 cancellationToken);
     }
 
+    private async Task RedactOwnedChallengeSnapshotsAsync(Guid profileId, CancellationToken cancellationToken)
+    {
+        await db.Challenges
+            .Where(challenge =>
+                challenge.TargetTextSnapshot != null &&
+                db.TrainingTexts.Any(text =>
+                    text.Id == challenge.TrainingTextId &&
+                    text.OwnerProfileId == profileId))
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(challenge => challenge.TargetTextSnapshot, (string?)null)
+                .SetProperty(challenge => challenge.RatingEligible, false),
+                cancellationToken);
+    }
+
     private async Task MarkActiveChallengesDeclinedAsync(Guid profileId, DateTimeOffset now, CancellationToken cancellationToken)
     {
-        var activeChallengeIds = (await db.Challenges.ToListAsync(cancellationToken))
-            .Where(item => item.Status is ChallengeStatus.Open or ChallengeStatus.Running)
-            .Select(item => item.Id)
-            .ToList();
-        if (activeChallengeIds.Count == 0)
-        {
-            return;
-        }
-
         await db.ChallengeParticipants
             .Where(item => item.UserProfileId == profileId &&
-                activeChallengeIds.Contains(item.ChallengeId) &&
+                db.Challenges.Any(challenge =>
+                    challenge.Id == item.ChallengeId &&
+                    (challenge.Status == ChallengeStatus.Open || challenge.Status == ChallengeStatus.Running)) &&
                 item.Status != ParticipantStatus.Finished &&
                 item.Status != ParticipantStatus.Dnf &&
                 item.Status != ParticipantStatus.Declined)

@@ -34,6 +34,27 @@ In einem zweiten Terminal:
 
 Exitcode `0` bedeutet SLO bestanden, `2` SLO verletzt und `1` ungültige Konfiguration oder technischer Abbruch. `Strg+C` beendet den Lauf kontrolliert; `--timeout-seconds` setzt zusätzlich ein hartes Gesamtlimit.
 
+## Reproduzierbarer Redis-Cluster-Harness
+
+Der isolierte Scale-Harness startet PostgreSQL, einen Redis Cluster aus drei
+Mastern und drei Replikaten sowie je zwei Web-, Arena- und Worker-Replikate. Er
+prüft reale Slot-Weiterleitungen, den erwarteten `CROSSSLOT`-Negativvertrag,
+Attempt-, Presence-, Progress- und Profil-Gate-Store-Flows über mehrere Buckets,
+den fail-closed v1-zu-v2-Cutover, Pending-Completion-Recovery mit TTL,
+Container-Restarts, Redis-Master-Failover während eines begrenzten Soaks und
+ein Rolling Image Update.
+
+```powershell
+pwsh .\tests\cluster\Invoke-ClusterHarness.ps1
+```
+
+Mit `-SoakSeconds 120` wird der begrenzte Soak verlängert. `-Keep` lässt den
+Test-Stack für die Diagnose aktiv; ohne diesen Schalter entfernt der Harness
+Container und Volumes immer. Ergebnisse liegen unter
+`TestResults/cluster-harness/`. Der Aufbau verwendet ausschließlich
+`compose.test-cluster.yaml`, zufällig erzeugte Prozesswerte und Test-Volumes;
+er darf nicht mit Produktionsdaten oder Produktionszugängen verbunden werden.
+
 ## Profile und Messmodell
 
 | Profil | Zweck | Voreinstellung |
@@ -102,4 +123,7 @@ Clients werden Round-Robin verteilt. `--forced-node 0` bindet den gesamten Lauf 
 - Servergrenzen wie maximale Räume und Personen je Raum vor dem Lauf bewusst setzen und im Bericht festhalten.
 - Ab 20.000 Verbindungen mehrere Lastgeneratoren verwenden; sonst wird der Generator zum Engpass.
 - Soak-, Failover- und Autoscaling-Abnahmen gehören auf dedizierte Infrastruktur, nicht in Pull-Request-CI.
+- Der Pull-Request-Harness ist bewusst klein und zeitlich begrenzt; eine längere
+  Kapazitäts- oder Verfügbarkeitsabnahme bleibt Aufgabe dedizierter
+  Testinfrastruktur.
 - Eine fiktive Zahl von 20 Millionen gleichzeitigen Nutzenden ist **keine Garantie**. Sie erfordert verteilte Generatoren, mehrere Regionen, Kapazitäts- und Kostenmodelle sowie wiederholte Messungen jeder Ausbaustufe.

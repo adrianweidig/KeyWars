@@ -15,7 +15,7 @@ public sealed class ClusterRateLimitMiddlewareTests
     [InlineData("Development", true, 200)]
     [InlineData("Development", false, 10)]
     [InlineData("Production", true, 10)]
-    public async Task ClusterLoginLimitMatchesTheLocalLoginPolicy(
+    public async Task LoginLimitIsAppliedInEveryTopology(
         string environmentName,
         bool developmentLogin,
         int expectedLimit)
@@ -29,7 +29,6 @@ public sealed class ClusterRateLimitMiddlewareTests
 
         await middleware.InvokeAsync(
             context,
-            ClusterTopology,
             new TestHostEnvironment(environmentName),
             Options.Create(new AuthOptions { DevelopmentLogin = developmentLogin }),
             limiter);
@@ -37,15 +36,65 @@ public sealed class ClusterRateLimitMiddlewareTests
         Assert.Equal(expectedLimit, limiter.PermitLimit);
     }
 
-    private static readonly RuntimeTopology ClusterTopology = new(
-        RuntimeRole.Web,
-        KeyWarsDatabaseProvider.PostgreSql,
-        "Host=postgres;Database=keywars",
-        "redis:6379",
-        "KeyWars");
+    [Theory]
+    [InlineData("/anmelden")]
+    [InlineData("/anmelden/")]
+    public async Task SingleNodeLoginRequestsAreRejectedAfterTheLimit(string path)
+    {
+        var limiter = new SingleNodeSharedRateLimiter();
+        var calls = 0;
+        var middleware = new ClusterRateLimitMiddleware(_ =>
+        {
+            calls++;
+            return Task.CompletedTask;
+        });
+
+        for (var index = 0; index < 11; index++)
+        {
+            var context = new DefaultHttpContext();
+            context.Request.Method = HttpMethods.Post;
+            context.Request.Path = path;
+            context.Connection.RemoteIpAddress = IPAddress.Loopback;
+            await middleware.InvokeAsync(
+                context,
+                new TestHostEnvironment("Production"),
+                Options.Create(new AuthOptions()),
+                limiter);
+
+            Assert.Equal(index < 10 ? StatusCodes.Status200OK : StatusCodes.Status429TooManyRequests,
+                context.Response.StatusCode);
+        }
+
+        Assert.Equal(10, calls);
+    }
+
+    [Fact]
+    public async Task LoginPrefixPathIsNotClassifiedAsLogin()
+    {
+        var calls = 0;
+        var limiter = new CapturingLimiter();
+        var middleware = new ClusterRateLimitMiddleware(_ =>
+        {
+            calls++;
+            return Task.CompletedTask;
+        });
+        var context = new DefaultHttpContext();
+        context.Request.Method = HttpMethods.Post;
+        context.Request.Path = "/anmelden/extra";
+
+        await middleware.InvokeAsync(
+            context,
+            new TestHostEnvironment("Production"),
+            Options.Create(new AuthOptions()),
+            limiter);
+
+        Assert.Equal(1, calls);
+        Assert.Equal(0, limiter.Calls);
+    }
 
     private sealed class CapturingLimiter : ISharedRateLimiter
     {
+        public int Calls { get; private set; }
         public int PermitLimit { get; private set; }
 
         public ValueTask<bool> TryAcquireAsync(
@@ -55,6 +104,7 @@ public sealed class ClusterRateLimitMiddlewareTests
             TimeSpan window,
             CancellationToken cancellationToken = default)
         {
+            Calls++;
             PermitLimit = permitLimit;
             return ValueTask.FromResult(true);
         }

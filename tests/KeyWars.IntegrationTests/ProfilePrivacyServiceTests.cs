@@ -4,6 +4,7 @@ using KeyWars.Domain;
 using KeyWars.Services;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -11,6 +12,17 @@ namespace KeyWars.IntegrationTests;
 
 public sealed class ProfilePrivacyServiceTests
 {
+    [Fact]
+    public void ActiveChallengeDeclineStaysServerSideAndProfileScoped()
+    {
+        var source = File.ReadAllText(FindPrivacyServiceSource());
+
+        Assert.DoesNotContain("db.Challenges.ToListAsync", source, StringComparison.Ordinal);
+        Assert.Contains("db.Challenges.Any(challenge =>", source, StringComparison.Ordinal);
+        Assert.Contains("item.UserProfileId == profileId", source, StringComparison.Ordinal);
+        Assert.Contains("ExecuteUpdateAsync", source, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task ResetStatisticsClearsDerivedDataAndRatings()
     {
@@ -23,6 +35,7 @@ public sealed class ProfilePrivacyServiceTests
         context.Completions.Enqueue(completion);
         await context.Completions.FlushAsync();
         var room = context.LiveRooms.CreateRoom(new CreateLiveRoomRequest(profile.Id, profile.DisplayName, "Reset", "Text", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 8));
+        context.Presence.EnterRoom(profile.Id, "reset-tab", room.RoomId);
         var service = context.CreatePrivacyService();
 
         await service.ResetStatisticsAsync(profile.Id);
@@ -44,7 +57,9 @@ public sealed class ProfilePrivacyServiceTests
         Assert.Empty(context.Sessions.RemoveProfile(profile.Id));
         Assert.Equal(ProfileAccessState.Available, context.AccessGate.GetState(profile.Id));
         Assert.Equal(CompletionState.Persisted, context.Completions.GetStatus(completion.Id).State);
-        Assert.Equal(ParticipantStatus.LeftBeforeStart, context.LiveRooms.Snapshot(room.RoomId).Participants.Single().Status);
+        Assert.Empty(context.LiveRooms.Snapshot(room.RoomId).Participants);
+        Assert.Equal(0, context.Presence.CountRoomConnections(profile.Id, room.RoomId));
+        Assert.Equal(profile.Id, Assert.Single(context.HubConnections.RevokedProfiles));
     }
 
     [Fact]
@@ -56,7 +71,14 @@ public sealed class ProfilePrivacyServiceTests
         await context.SeedStatisticsAsync();
         var text = await context.SeedOwnedTextAndCollectionAsync();
         var challenge = await context.SeedActiveChallengeAsync();
+        challenge.TrainingTextId = text.Id;
+        challenge.TargetTextSnapshot = text.Body;
+        challenge.TargetTextHash = TextHash.Compute(text.Body);
+        challenge.RatingEligible = true;
+        await context.Db.SaveChangesAsync();
         await context.SeedActiveAttemptAsync(AttemptPhase.Started);
+        var presenceRoomId = Guid.CreateVersion7();
+        context.Presence.EnterRoom(profile.Id, "privacy-tab", presenceRoomId);
         var service = context.CreatePrivacyService();
 
         await service.DeleteProfileAsync(profile.Id);
@@ -64,6 +86,7 @@ public sealed class ProfilePrivacyServiceTests
             .ProvisionAsync(context.Identity, CancellationToken.None);
 
         Assert.True(profile.Deleted);
+        Assert.Equal(profile.Id, Assert.Single(context.HubConnections.RevokedProfiles));
         Assert.NotEqual(context.Identity.ObjectGuid, profile.DirectoryObjectGuid);
         Assert.Equal("Gelöschtes Profil", profile.DisplayName);
         Assert.False(profile.LeaderboardVisible);
@@ -78,7 +101,13 @@ public sealed class ProfilePrivacyServiceTests
         Assert.Equal(0, storedText.CharacterCount);
         var participant = await context.Db.ChallengeParticipants.AsNoTracking().SingleAsync(item => item.ChallengeId == challenge.Id && item.UserProfileId == profile.Id);
         Assert.Equal(ParticipantStatus.Declined, participant.Status);
-        Assert.Equal(ParticipantStatus.LeftBeforeStart, context.LiveRooms.Snapshot(room.RoomId).Participants.Single().Status);
+        var storedChallenge = await context.Db.Challenges.AsNoTracking().SingleAsync(item => item.Id == challenge.Id);
+        Assert.Null(storedChallenge.TargetTextSnapshot);
+        Assert.Equal(TextHash.Compute("Geheimer Text"), storedChallenge.TargetTextHash);
+        Assert.False(storedChallenge.RatingEligible);
+        Assert.Empty(context.LiveRooms.Snapshot(room.RoomId).Participants);
+        Assert.Equal(0, context.Presence.CountRoomConnections(profile.Id, presenceRoomId));
+        Assert.Null(context.Presence.RemoveConnection(profile.Id, "privacy-tab"));
         Assert.Empty(context.Sessions.RemoveProfile(profile.Id));
         Assert.Equal(ProfileAccessState.Deleted, context.AccessGate.GetState(profile.Id));
         Assert.True(context.AccessGate.IsBlocked(profile.Id));
@@ -101,6 +130,21 @@ public sealed class ProfilePrivacyServiceTests
         Assert.True(context.Sessions.TryGet(attempt.Id, out _));
         Assert.Equal(900, context.Profile.ExperiencePoints);
         context.AccessGate.CompleteOperation(context.Profile.Id);
+    }
+
+    [Fact]
+    public async Task HubRevocationFailureStopsPrivacyMutationAndReleasesGate()
+    {
+        await using var context = await PrivacyTestContext.CreateAsync();
+        await context.SeedStatisticsAsync();
+        context.HubConnections.Fail = true;
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            context.CreatePrivacyService().ResetStatisticsAsync(context.Profile.Id));
+
+        Assert.Equal(900, context.Profile.ExperiencePoints);
+        Assert.Equal(context.Profile.Id, Assert.Single(context.HubConnections.RevokedProfiles));
+        Assert.Equal(ProfileAccessState.Available, context.AccessGate.GetState(context.Profile.Id));
     }
 
     [Fact]
@@ -134,8 +178,10 @@ public sealed class ProfilePrivacyServiceTests
             new LocalLiveRoomDispatcher(context.LiveRooms),
             context.Completions,
             context.Sessions,
+            context.Presence,
             accessGate,
-            context.Time);
+            context.Time,
+            context.HubConnections);
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
             service.ResetStatisticsAsync(context.Profile.Id));
@@ -293,6 +339,14 @@ public sealed class ProfilePrivacyServiceTests
             CreatedAt = now,
             FinishedAt = now.AddMinutes(1)
         };
+        var season = new Season
+        {
+            Key = "2026-06",
+            Name = "Juni 2026",
+            StartsAt = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero),
+            EndsAt = new DateTimeOffset(2026, 7, 1, 0, 0, 0, TimeSpan.Zero),
+            CreatedAt = now
+        };
         context.Db.TypingAttempts.Add(otherAttempt);
         context.Db.TrainingTexts.Add(otherText);
         context.Db.TextCollections.Add(otherCollection);
@@ -319,6 +373,10 @@ public sealed class ProfilePrivacyServiceTests
             Xp = 25,
             AwardedAt = now
         });
+        context.Db.Seasons.Add(season);
+        context.Db.SeasonScores.AddRange(
+            new SeasonScore { SeasonId = season.Id, UserProfileId = context.Profile.Id, Points = 17, UpdatedAt = now },
+            new SeasonScore { SeasonId = season.Id, UserProfileId = other.Id, Points = 99, UpdatedAt = now });
         context.Db.Missions.Add(new Mission
         {
             UserProfileId = other.Id,
@@ -402,13 +460,17 @@ public sealed class ProfilePrivacyServiceTests
 
         var export = await service.BuildExportAsync(context.Profile.Id);
 
-        Assert.Equal(3, export.Version);
+        Assert.Equal(ProfileExportService.SchemaVersion, export.Version);
         Assert.Equal(context.Profile.Id, export.Profile.Id);
         var exportedAttempt = Assert.Single(export.Attempts);
         Assert.Equal(profileAttempt.Id, exportedAttempt.Id);
         Assert.Equal(profileAttempt.Mode, exportedAttempt.Mode);
         Assert.NotEmpty(export.AttemptErrors);
         Assert.NotEmpty(export.RewardLedger);
+        Assert.Equal(season.Id, Assert.Single(export.Seasons).Id);
+        var exportedSeasonScore = Assert.Single(export.SeasonScores);
+        Assert.Equal(context.Profile.Id, exportedSeasonScore.UserProfileId);
+        Assert.Equal(17, exportedSeasonScore.Points);
         Assert.NotEmpty(export.Missions);
         Assert.NotEmpty(export.Achievements);
         Assert.NotEmpty(export.GamificationEvents);
@@ -475,6 +537,8 @@ public sealed class ProfilePrivacyServiceTests
             nameof(KeyWarsDbContext.LiveRoomParticipantSummaries),
             nameof(KeyWarsDbContext.Missions),
             nameof(KeyWarsDbContext.RewardLedgerEntries),
+            nameof(KeyWarsDbContext.Seasons),
+            nameof(KeyWarsDbContext.SeasonScores),
             nameof(KeyWarsDbContext.Achievements),
             nameof(KeyWarsDbContext.GamificationEvents),
             nameof(KeyWarsDbContext.WeaknessObservations)
@@ -509,9 +573,27 @@ public sealed class ProfilePrivacyServiceTests
             [new CompletedParticipantRecord(profileId, ParticipantStatus.Finished, 1, 27000, 70, 100)]);
     }
 
+    private static string FindPrivacyServiceSource()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            var candidate = Path.Combine(directory.FullName, "src", "KeyWars", "Services", "ProfilePrivacyService.cs");
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+
+            directory = directory.Parent;
+        }
+
+        throw new FileNotFoundException("ProfilePrivacyService.cs wurde nicht gefunden.");
+    }
+
     private sealed class PrivacyTestContext : IAsyncDisposable
     {
         private readonly SqliteConnection connection;
+        private readonly ServiceProvider outboxServices;
 
         private PrivacyTestContext(
             SqliteConnection connection,
@@ -522,9 +604,13 @@ public sealed class ProfilePrivacyServiceTests
             LiveRoomManager liveRooms,
             LiveRoomCompletionQueue completions,
             AttemptSessionStore sessions,
-            ProfileAccessGate accessGate)
+            LivePresenceTracker presence,
+            ProfileAccessGate accessGate,
+            RecordingProfileHubConnectionRevoker hubConnections,
+            ServiceProvider outboxServices)
         {
             this.connection = connection;
+            this.outboxServices = outboxServices;
             Db = db;
             Time = time;
             Profile = profile;
@@ -532,7 +618,9 @@ public sealed class ProfilePrivacyServiceTests
             LiveRooms = liveRooms;
             Completions = completions;
             Sessions = sessions;
+            Presence = presence;
             AccessGate = accessGate;
+            HubConnections = hubConnections;
         }
 
         public KeyWarsDbContext Db { get; }
@@ -542,7 +630,9 @@ public sealed class ProfilePrivacyServiceTests
         public LiveRoomManager LiveRooms { get; }
         public LiveRoomCompletionQueue Completions { get; }
         public AttemptSessionStore Sessions { get; }
+        public LivePresenceTracker Presence { get; }
         public ProfileAccessGate AccessGate { get; }
+        public RecordingProfileHubConnectionRevoker HubConnections { get; }
 
         public static async Task<PrivacyTestContext> CreateAsync(bool failCompletionWrites = false)
         {
@@ -575,11 +665,19 @@ public sealed class ProfilePrivacyServiceTests
             ILiveRoomCompletionWriter completionWriter = failCompletionWrites
                 ? new FailingCompletionWriter()
                 : new NoopCompletionWriter();
+            var outboxServices = new ServiceCollection()
+                .AddScoped(_ => new KeyWarsDbContext(options))
+                .AddSingleton<TimeProvider>(time)
+                .AddSingleton<LiveRoomCompletionOutbox>()
+                .BuildServiceProvider();
             var completions = new LiveRoomCompletionQueue(
                 Options.Create(liveOptions),
                 completionWriter,
+                outboxServices.GetRequiredService<LiveRoomCompletionOutbox>(),
+                time,
                 NullLogger<LiveRoomCompletionQueue>.Instance);
             var sessions = new AttemptSessionStore();
+            var presence = new LivePresenceTracker(Options.Create(liveOptions), time);
             var accessGate = new ProfileAccessGate();
             return new PrivacyTestContext(
                 connection,
@@ -590,7 +688,10 @@ public sealed class ProfilePrivacyServiceTests
                 CreateLiveRooms(time, liveOptions, completions),
                 completions,
                 sessions,
-                accessGate);
+                presence,
+                accessGate,
+                new RecordingProfileHubConnectionRevoker(),
+                outboxServices);
         }
 
         public ProfilePrivacyService CreatePrivacyService() => new(
@@ -598,8 +699,10 @@ public sealed class ProfilePrivacyServiceTests
             new LocalLiveRoomDispatcher(LiveRooms),
             Completions,
             Sessions,
+            Presence,
             AccessGate,
-            Time);
+            Time,
+            HubConnections);
 
         public async Task SeedStatisticsAsync()
         {
@@ -742,6 +845,7 @@ public sealed class ProfilePrivacyServiceTests
         public async ValueTask DisposeAsync()
         {
             await Db.DisposeAsync();
+            await outboxServices.DisposeAsync();
             await connection.DisposeAsync();
         }
 
@@ -766,6 +870,24 @@ public sealed class ProfilePrivacyServiceTests
             new TypingEngine(timeProvider),
             NullLogger<LiveRoomManager>.Instance,
             completionSink);
+    }
+
+    private sealed class RecordingProfileHubConnectionRevoker : IProfileHubConnectionRevoker
+    {
+        public List<Guid> RevokedProfiles { get; } = [];
+        public bool Fail { get; set; }
+
+        public Task RevokeProfileAsync(
+            Guid profileId,
+            string reason,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            RevokedProfiles.Add(profileId);
+            return Fail
+                ? Task.FromException(new InvalidOperationException("Hub-Widerruf fehlgeschlagen."))
+                : Task.CompletedTask;
+        }
     }
 
     private sealed class LostLeaseProfileAccessGate : IProfileAccessGate

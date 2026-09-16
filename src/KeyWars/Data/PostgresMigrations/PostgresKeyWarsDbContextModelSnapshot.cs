@@ -17,7 +17,7 @@ namespace KeyWars.Data.PostgresMigrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "10.0.10")
+                .HasAnnotation("ProductVersion", "10.0.11")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -92,6 +92,13 @@ namespace KeyWars.Data.PostgresMigrations
 
                     b.Property<string>("Status")
                         .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("TargetTextHash")
+                        .HasMaxLength(71)
+                        .HasColumnType("character varying(71)");
+
+                    b.Property<string>("TargetTextSnapshot")
                         .HasColumnType("text");
 
                     b.Property<string>("Title")
@@ -251,6 +258,11 @@ namespace KeyWars.Data.PostgresMigrations
                     b.Property<Guid>("ChallengeRoundId")
                         .HasColumnType("uuid");
 
+                    b.Property<bool>("CompetitionEligible")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.Property<double>("Consistency")
                         .HasColumnType("double precision");
 
@@ -283,9 +295,9 @@ namespace KeyWars.Data.PostgresMigrations
                     b.HasIndex("ChallengeRoundId", "UserProfileId")
                         .IsUnique();
 
-                    b.HasIndex("Status", "FinishedAt", "UserProfileId");
-
                     b.HasIndex("UserProfileId", "Status", "FinishedAt");
+
+                    b.HasIndex("Status", "CompetitionEligible", "FinishedAt", "UserProfileId");
 
                     b.ToTable("ChallengeRoundResults");
                 });
@@ -411,6 +423,69 @@ namespace KeyWars.Data.PostgresMigrations
                     b.ToTable("GamificationEvents");
                 });
 
+            modelBuilder.Entity("KeyWars.Domain.LiveRoomCompletionOutboxEntry", b =>
+                {
+                    b.Property<Guid>("RoomId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("EnqueuedAtUnixMilliseconds")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<long>("NextAttemptAtUnixMilliseconds")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("SchemaVersion")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<long>("UpdatedAtUnixMilliseconds")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("RoomId");
+
+                    b.HasIndex("IdempotencyKey")
+                        .IsUnique();
+
+                    b.HasIndex("State", "NextAttemptAtUnixMilliseconds", "EnqueuedAtUnixMilliseconds", "RoomId");
+
+                    b.ToTable("LiveRoomCompletionOutboxEntries");
+                });
+
+            modelBuilder.Entity("KeyWars.Domain.LiveRoomCompletionOutboxProfile", b =>
+                {
+                    b.Property<Guid>("RoomId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("UserProfileId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("RoomId", "UserProfileId");
+
+                    b.HasIndex("UserProfileId", "RoomId");
+
+                    b.ToTable("LiveRoomCompletionOutboxProfiles");
+                });
+
             modelBuilder.Entity("KeyWars.Domain.LiveRoomParticipantSummary", b =>
                 {
                     b.Property<Guid>("Id")
@@ -419,6 +494,11 @@ namespace KeyWars.Data.PostgresMigrations
 
                     b.Property<double>("Accuracy")
                         .HasColumnType("double precision");
+
+                    b.Property<bool>("CompetitionEligible")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
 
                     b.Property<int>("DurationMilliseconds")
                         .HasColumnType("integer");
@@ -457,7 +537,7 @@ namespace KeyWars.Data.PostgresMigrations
 
                     b.HasIndex("LiveRoomSummaryId", "Status");
 
-                    b.HasIndex("UserProfileId", "Status");
+                    b.HasIndex("UserProfileId", "Status", "CompetitionEligible");
 
                     b.ToTable("LiveRoomParticipantSummaries");
                 });
@@ -506,6 +586,11 @@ namespace KeyWars.Data.PostgresMigrations
                     b.Property<DateTimeOffset?>("StartedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("TargetTextHash")
+                        .IsRequired()
+                        .HasMaxLength(71)
+                        .HasColumnType("character varying(71)");
+
                     b.Property<string>("Visibility")
                         .IsRequired()
                         .HasColumnType("text");
@@ -520,6 +605,8 @@ namespace KeyWars.Data.PostgresMigrations
                     b.HasIndex("RoomCode");
 
                     b.HasIndex("FinishedAt", "AbortedByServer");
+
+                    b.HasIndex("TargetTextHash", "Mode", "AbortedByServer");
 
                     b.ToTable("LiveRoomSummaries");
                 });
@@ -582,6 +669,12 @@ namespace KeyWars.Data.PostgresMigrations
                     b.Property<DateTimeOffset>("AwardedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<Guid?>("SeasonId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("SeasonPoints")
+                        .HasColumnType("integer");
+
                     b.Property<string>("Source")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -600,12 +693,72 @@ namespace KeyWars.Data.PostgresMigrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("SeasonId", "UserProfileId");
+
                     b.HasIndex("UserProfileId", "AwardedAt");
 
                     b.HasIndex("UserProfileId", "Source", "SourceId")
                         .IsUnique();
 
                     b.ToTable("RewardLedgerEntries");
+                });
+
+            modelBuilder.Entity("KeyWars.Domain.Season", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("EndsAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<DateTimeOffset>("StartsAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Key")
+                        .IsUnique();
+
+                    b.HasIndex("StartsAt", "EndsAt");
+
+                    b.ToTable("Seasons");
+                });
+
+            modelBuilder.Entity("KeyWars.Domain.SeasonScore", b =>
+                {
+                    b.Property<Guid>("SeasonId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("UserProfileId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Points")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("SeasonId", "UserProfileId");
+
+                    b.HasIndex("UserProfileId");
+
+                    b.HasIndex("SeasonId", "Points", "UserProfileId");
+
+                    b.ToTable("SeasonScores");
                 });
 
             modelBuilder.Entity("KeyWars.Domain.TextCollection", b =>
@@ -735,6 +888,11 @@ namespace KeyWars.Data.PostgresMigrations
                     b.Property<int>("ClientDurationMilliseconds")
                         .HasColumnType("integer");
 
+                    b.Property<bool>("CompetitionIntegrityEligible")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
                     b.Property<bool>("Completed")
                         .HasColumnType("boolean");
 
@@ -834,6 +992,8 @@ namespace KeyWars.Data.PostgresMigrations
                     b.HasIndex("Phase", "FinishedAt", "PreparedAt", "Id");
 
                     b.HasIndex("Phase", "FinishedAt", "StartedAt", "Id");
+
+                    b.HasIndex("UserProfileId", "Completed", "Official", "CompetitionIntegrityEligible", "Wpm");
 
                     b.HasIndex("UserProfileId", "Phase", "Completed", "CreatedAt", "Id");
 
@@ -1185,6 +1345,15 @@ namespace KeyWars.Data.PostgresMigrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("KeyWars.Domain.LiveRoomCompletionOutboxProfile", b =>
+                {
+                    b.HasOne("KeyWars.Domain.LiveRoomCompletionOutboxEntry", null)
+                        .WithMany()
+                        .HasForeignKey("RoomId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("KeyWars.Domain.LiveRoomParticipantSummary", b =>
                 {
                     b.HasOne("KeyWars.Domain.LiveRoomSummary", null)
@@ -1220,6 +1389,21 @@ namespace KeyWars.Data.PostgresMigrations
 
             modelBuilder.Entity("KeyWars.Domain.RewardLedgerEntry", b =>
                 {
+                    b.HasOne("KeyWars.Domain.UserProfile", null)
+                        .WithMany()
+                        .HasForeignKey("UserProfileId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("KeyWars.Domain.SeasonScore", b =>
+                {
+                    b.HasOne("KeyWars.Domain.Season", null)
+                        .WithMany()
+                        .HasForeignKey("SeasonId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
                     b.HasOne("KeyWars.Domain.UserProfile", null)
                         .WithMany()
                         .HasForeignKey("UserProfileId")

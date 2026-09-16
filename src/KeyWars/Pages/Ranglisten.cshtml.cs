@@ -16,7 +16,8 @@ public sealed class RanglistenModel(CurrentUser currentUser, CompetitionLeaderbo
         (CompetitionBoardKind.Sprint, "sprint", "Sprint"),
         (CompetitionBoardKind.Text, "text", "Texte"),
         (CompetitionBoardKind.Challenge, "challenge", "Challenges"),
-        (CompetitionBoardKind.Xp, "xp", "XP")
+        (CompetitionBoardKind.Xp, "xp", "XP"),
+        (CompetitionBoardKind.Season, "season", "Saison")
     ];
 
     public IReadOnlyList<(CompetitionPeriod Period, string Value, string Label)> Periods { get; } =
@@ -68,6 +69,7 @@ public sealed class RanglistenModel(CurrentUser currentUser, CompetitionLeaderbo
         "text" => CompetitionBoardKind.Text,
         "challenge" => CompetitionBoardKind.Challenge,
         "xp" => CompetitionBoardKind.Xp,
+        "season" => CompetitionBoardKind.Season,
         _ => CompetitionBoardKind.ArenaRating
     };
 

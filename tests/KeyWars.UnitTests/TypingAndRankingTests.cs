@@ -278,6 +278,62 @@ public sealed class TypingAndRankingTests
     }
 
     [Fact]
+    public void PairwiseEloUsesJointRoundingWithoutCreatingOrDestroyingRating()
+    {
+        var ids = Enumerable.Range(0, 3).Select(_ => Guid.CreateVersion7()).ToArray();
+        var ranked = ids
+            .Select((id, index) => new RankedRaceResult(
+                new RaceResult(id, ParticipantStatus.Finished, 20_000 + index, 99, 0, 99, 80, 300),
+                index + 1))
+            .ToArray();
+        var ratings = new Dictionary<Guid, int>
+        {
+            [ids[0]] = 800,
+            [ids[1]] = 800,
+            [ids[2]] = 825
+        };
+
+        var deltas = MultiplayerRating.CalculatePairwiseElo(ratings, ranked);
+
+        Assert.Equal(0, deltas.Values.Sum());
+        Assert.True(deltas[ids[0]] > 0);
+        Assert.True(deltas[ids[2]] < 0);
+    }
+
+    [Fact]
+    public void TeamEloSkipsTeammatesAndNormalizesOnlyAcrossOpponents()
+    {
+        var ids = Enumerable.Range(0, 4).Select(_ => Guid.CreateVersion7()).ToArray();
+        var ranked = ids
+            .Select((id, index) => new RankedRaceResult(
+                new RaceResult(id, ParticipantStatus.Finished, 20_000 + index, 99, 0, 99, 80, 300),
+                index < 2 ? 1 : 2))
+            .ToArray();
+        var ratings = new Dictionary<Guid, int>
+        {
+            [ids[0]] = 2000,
+            [ids[1]] = 1000,
+            [ids[2]] = 1000,
+            [ids[3]] = 1000
+        };
+        var teams = new Dictionary<Guid, int?>
+        {
+            [ids[0]] = 1,
+            [ids[1]] = 1,
+            [ids[2]] = 2,
+            [ids[3]] = 2
+        };
+
+        var deltas = MultiplayerRating.CalculatePairwiseElo(ratings, ranked, teamNumbers: teams);
+
+        Assert.Equal(0, deltas[ids[0]]);
+        Assert.Equal(12, deltas[ids[1]]);
+        Assert.Equal(-6, deltas[ids[2]]);
+        Assert.Equal(-6, deltas[ids[3]]);
+        Assert.Equal(0, deltas.Values.Sum());
+    }
+
+    [Fact]
     public void CompetitionRankingUsesMetricTieBreakers()
     {
         var now = DateTimeOffset.Parse("2026-06-27T10:00:00Z");
@@ -303,7 +359,10 @@ public sealed class TypingAndRankingTests
         var eligible = Attempt(TrainingMode.Sprint60, 95, official: true);
 
         Assert.True(CompetitionEligibility.IsAttemptEligible(eligible));
+        eligible.CompetitionIntegrityEligible = false;
+        Assert.False(CompetitionEligibility.IsAttemptEligible(eligible));
         Assert.False(CompetitionEligibility.IsAttemptEligible(Attempt(TrainingMode.Ghost, 95, official: true)));
+        Assert.False(CompetitionEligibility.IsAttemptEligible(Attempt(TrainingMode.RivalGhost, 95, official: true)));
         Assert.False(CompetitionEligibility.IsAttemptEligible(Attempt(TrainingMode.Sprint60, 89.9, official: true)));
         Assert.False(CompetitionEligibility.IsAttemptEligible(Attempt(TrainingMode.Sprint60, 95, official: false)));
 
@@ -313,6 +372,7 @@ public sealed class TypingAndRankingTests
             Phase = AttemptPhase.Finished,
             Completed = true,
             Official = official,
+            CompetitionIntegrityEligible = true,
             LeaderboardEligible = true,
             Accuracy = accuracy
         };

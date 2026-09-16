@@ -27,8 +27,12 @@ public class KeyWarsDbContext : DbContext
     public DbSet<ChallengeAttemptBinding> ChallengeAttemptBindings => Set<ChallengeAttemptBinding>();
     public DbSet<LiveRoomSummary> LiveRoomSummaries => Set<LiveRoomSummary>();
     public DbSet<LiveRoomParticipantSummary> LiveRoomParticipantSummaries => Set<LiveRoomParticipantSummary>();
+    public DbSet<LiveRoomCompletionOutboxEntry> LiveRoomCompletionOutboxEntries => Set<LiveRoomCompletionOutboxEntry>();
+    public DbSet<LiveRoomCompletionOutboxProfile> LiveRoomCompletionOutboxProfiles => Set<LiveRoomCompletionOutboxProfile>();
     public DbSet<Mission> Missions => Set<Mission>();
     public DbSet<RewardLedgerEntry> RewardLedgerEntries => Set<RewardLedgerEntry>();
+    public DbSet<Season> Seasons => Set<Season>();
+    public DbSet<SeasonScore> SeasonScores => Set<SeasonScore>();
     public DbSet<Achievement> Achievements => Set<Achievement>();
     public DbSet<GamificationEvent> GamificationEvents => Set<GamificationEvent>();
     public DbSet<WeaknessObservation> WeaknessObservations => Set<WeaknessObservation>();
@@ -93,12 +97,21 @@ public class KeyWarsDbContext : DbContext
         {
             entity.HasIndex(attempt => new { attempt.UserProfileId, attempt.Mode, attempt.CreatedAt });
             entity.HasIndex(attempt => new { attempt.UserProfileId, attempt.Phase, attempt.Completed, attempt.CreatedAt, attempt.Id });
+            entity.HasIndex(attempt => new
+            {
+                attempt.UserProfileId,
+                attempt.Completed,
+                attempt.Official,
+                attempt.CompetitionIntegrityEligible,
+                attempt.Wpm
+            });
             entity.HasIndex(attempt => new { attempt.Phase, attempt.FinishedAt, attempt.PreparedAt, attempt.Id });
             entity.HasIndex(attempt => new { attempt.Phase, attempt.FinishedAt, attempt.StartedAt, attempt.Id });
             entity.HasIndex(attempt => new { attempt.Completed, attempt.Phase, attempt.PreparedAt, attempt.Id });
             entity.HasIndex(attempt => new { attempt.LeaderboardEligible, attempt.Phase, attempt.Completed, attempt.Official, attempt.Mode, attempt.FinishedAt });
             entity.HasIndex(attempt => new { attempt.TrainingTextId, attempt.LeaderboardEligible, attempt.Wpm });
             entity.HasIndex(attempt => attempt.TrainingTextId);
+            entity.Property(attempt => attempt.CompetitionIntegrityEligible).HasDefaultValue(false);
             entity.Property(attempt => attempt.Mode).HasConversion<string>();
             entity.Property(attempt => attempt.Phase).HasConversion<string>();
             entity.HasOne<UserProfile>()
@@ -128,6 +141,7 @@ public class KeyWarsDbContext : DbContext
 
         modelBuilder.Entity<Challenge>(entity =>
         {
+            entity.Property(challenge => challenge.TargetTextHash).HasMaxLength(71);
             entity.HasIndex(challenge => challenge.CreatorProfileId);
             entity.HasIndex(challenge => challenge.Status);
             entity.HasIndex(challenge => new { challenge.Status, challenge.FinishedAt });
@@ -177,7 +191,8 @@ public class KeyWarsDbContext : DbContext
         {
             entity.HasIndex(result => new { result.ChallengeRoundId, result.UserProfileId }).IsUnique();
             entity.HasIndex(result => new { result.UserProfileId, result.Status, result.FinishedAt });
-            entity.HasIndex(result => new { result.Status, result.FinishedAt, result.UserProfileId });
+            entity.HasIndex(result => new { result.Status, result.CompetitionEligible, result.FinishedAt, result.UserProfileId });
+            entity.Property(result => result.CompetitionEligible).HasDefaultValue(false);
             entity.Property(result => result.Status).HasConversion<string>();
             entity.HasOne<ChallengeRound>()
                 .WithMany()
@@ -221,7 +236,9 @@ public class KeyWarsDbContext : DbContext
             entity.HasIndex(room => room.RoomCode);
             entity.HasIndex(room => room.IdempotencyKey).IsUnique();
             entity.HasIndex(room => new { room.FinishedAt, room.AbortedByServer });
+            entity.HasIndex(room => new { room.TargetTextHash, room.Mode, room.AbortedByServer });
             entity.Property(room => room.IdempotencyKey).HasMaxLength(80);
+            entity.Property(room => room.TargetTextHash).HasMaxLength(71);
             entity.Property(room => room.Mode).HasConversion<string>();
             entity.Property(room => room.Visibility).HasConversion<string>();
             entity.HasOne<UserProfile>()
@@ -234,7 +251,8 @@ public class KeyWarsDbContext : DbContext
         {
             entity.HasIndex(summary => summary.LiveRoomSummaryId);
             entity.HasIndex(summary => new { summary.LiveRoomSummaryId, summary.Status });
-            entity.HasIndex(summary => new { summary.UserProfileId, summary.Status });
+            entity.HasIndex(summary => new { summary.UserProfileId, summary.Status, summary.CompetitionEligible });
+            entity.Property(summary => summary.CompetitionEligible).HasDefaultValue(false);
             entity.Property(summary => summary.Status).HasConversion<string>();
             entity.HasOne<LiveRoomSummary>()
                 .WithMany()
@@ -244,6 +262,26 @@ public class KeyWarsDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(summary => summary.UserProfileId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<LiveRoomCompletionOutboxEntry>(entity =>
+        {
+            entity.HasKey(item => item.RoomId);
+            entity.HasIndex(item => item.IdempotencyKey).IsUnique();
+            entity.HasIndex(item => new { item.State, item.NextAttemptAtUnixMilliseconds, item.EnqueuedAtUnixMilliseconds, item.RoomId });
+            entity.Property(item => item.IdempotencyKey).HasMaxLength(80);
+            entity.Property(item => item.State).HasConversion<string>();
+            entity.Property(item => item.LastError).HasMaxLength(256);
+        });
+
+        modelBuilder.Entity<LiveRoomCompletionOutboxProfile>(entity =>
+        {
+            entity.HasKey(item => new { item.RoomId, item.UserProfileId });
+            entity.HasIndex(item => new { item.UserProfileId, item.RoomId });
+            entity.HasOne<LiveRoomCompletionOutboxEntry>()
+                .WithMany()
+                .HasForeignKey(item => item.RoomId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<Mission>(entity =>
@@ -260,9 +298,31 @@ public class KeyWarsDbContext : DbContext
         {
             entity.HasIndex(entry => new { entry.UserProfileId, entry.Source, entry.SourceId }).IsUnique();
             entity.HasIndex(entry => new { entry.UserProfileId, entry.AwardedAt });
+            entity.HasIndex(entry => new { entry.SeasonId, entry.UserProfileId });
             entity.HasOne<UserProfile>()
                 .WithMany()
                 .HasForeignKey(entry => entry.UserProfileId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<Season>(entity =>
+        {
+            entity.HasIndex(season => season.Key).IsUnique();
+            entity.HasIndex(season => new { season.StartsAt, season.EndsAt });
+        });
+
+        modelBuilder.Entity<SeasonScore>(entity =>
+        {
+            entity.HasKey(score => new { score.SeasonId, score.UserProfileId });
+            entity.HasIndex(score => new { score.SeasonId, score.Points, score.UserProfileId });
+            entity.HasIndex(score => score.UserProfileId);
+            entity.HasOne<Season>()
+                .WithMany()
+                .HasForeignKey(score => score.SeasonId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<UserProfile>()
+                .WithMany()
+                .HasForeignKey(score => score.UserProfileId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

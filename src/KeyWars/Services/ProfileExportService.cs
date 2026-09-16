@@ -1,3 +1,4 @@
+using System.IO.Pipelines;
 using System.Text.Json;
 using KeyWars.Data;
 using KeyWars.Domain;
@@ -55,7 +56,7 @@ public sealed record ProfileExportRangeMetadata(bool Filtered, DateOnly? From, D
 
 public sealed class ProfileExportService(KeyWarsDbContext db, TimeProvider timeProvider)
 {
-    public const int SchemaVersion = 3;
+    public const int SchemaVersion = 4;
     private const int FlushInterval = 128;
     private static readonly JsonSerializerOptions SerializerOptions = new() { WriteIndented = true };
 
@@ -69,6 +70,8 @@ public sealed class ProfileExportService(KeyWarsDbContext db, TimeProvider timeP
         var attempts = await queries.Attempts.CountAsync(cancellationToken);
         var activityRecords = await queries.AttemptErrors.CountAsync(cancellationToken)
             + await queries.RewardLedger.CountAsync(cancellationToken)
+            + await queries.Seasons.CountAsync(cancellationToken)
+            + await queries.SeasonScores.CountAsync(cancellationToken)
             + await queries.Missions.CountAsync(cancellationToken)
             + await queries.Achievements.CountAsync(cancellationToken)
             + await queries.GamificationEvents.CountAsync(cancellationToken)
@@ -97,11 +100,14 @@ public sealed class ProfileExportService(KeyWarsDbContext db, TimeProvider timeP
             1 + attempts + activityRecords + ownedContentRecords + challengeRecords + arenaRecords);
     }
 
-    public IActionResult CreateDownload(Guid profileId, ProfileExportRange range)
+    public IActionResult CreateDownload(
+        Guid profileId,
+        ProfileExportRange range,
+        IOperationLease? exportLease = null)
     {
         var generatedAt = timeProvider.GetUtcNow();
         var fileName = $"keywars-profile-export-{generatedAt:yyyyMMdd-HHmmss}.json";
-        return new ProfileExportDownloadResult(this, profileId, range, generatedAt, fileName);
+        return new ProfileExportDownloadResult(this, profileId, range, generatedAt, fileName, exportLease);
     }
 
     public async Task WriteAsync(
@@ -116,38 +122,49 @@ public sealed class ProfileExportService(KeyWarsDbContext db, TimeProvider timeP
             .SingleAsync(item => item.Id == profileId && !item.Deleted, cancellationToken);
         var queries = BuildQueries(profileId, range);
 
-        await using var writer = new Utf8JsonWriter(destination, new JsonWriterOptions { Indented = true });
-        writer.WriteStartObject();
-        writer.WriteNumber("Version", SchemaVersion);
-        writer.WriteString("GeneratedAt", generatedAt);
-        writer.WritePropertyName("Range");
-        JsonSerializer.Serialize(
-            writer,
-            new ProfileExportRangeMetadata(range.IsFiltered, range.From, range.To, "UTC"),
-            SerializerOptions);
-        writer.WritePropertyName("Profile");
-        JsonSerializer.Serialize(writer, profile, SerializerOptions);
+        var pipe = PipeWriter.Create(destination, new StreamPipeWriterOptions(leaveOpen: true));
+        var writer = new Utf8JsonWriter(pipe, new JsonWriterOptions { Indented = true });
+        try
+        {
+            writer.WriteStartObject();
+            writer.WriteNumber("Version", SchemaVersion);
+            writer.WriteString("GeneratedAt", generatedAt);
+            writer.WritePropertyName("Range");
+            JsonSerializer.Serialize(
+                writer,
+                new ProfileExportRangeMetadata(range.IsFiltered, range.From, range.To, "UTC"),
+                SerializerOptions);
+            writer.WritePropertyName("Profile");
+            JsonSerializer.Serialize(writer, profile, SerializerOptions);
 
-        await WriteArrayAsync(writer, "Attempts", queries.Attempts, cancellationToken);
-        await WriteArrayAsync(writer, "AttemptErrors", queries.AttemptErrors, cancellationToken);
-        await WriteArrayAsync(writer, "RewardLedger", queries.RewardLedger, cancellationToken);
-        await WriteArrayAsync(writer, "Missions", queries.Missions, cancellationToken);
-        await WriteArrayAsync(writer, "Achievements", queries.Achievements, cancellationToken);
-        await WriteArrayAsync(writer, "GamificationEvents", queries.GamificationEvents, cancellationToken);
-        await WriteArrayAsync(writer, "WeaknessObservations", queries.WeaknessObservations, cancellationToken);
-        await WriteArrayAsync(writer, "OwnedTexts", queries.OwnedTexts, cancellationToken);
-        await WriteArrayAsync(writer, "OwnedCollections", queries.OwnedCollections, cancellationToken);
-        await WriteArrayAsync(writer, "OwnedCollectionItems", queries.OwnedCollectionItems, cancellationToken);
-        await WriteArrayAsync(writer, "ContentModerationAuditEntries", queries.ContentModerationAuditEntries, cancellationToken);
-        await WriteArrayAsync(writer, "CreatedChallenges", queries.CreatedChallenges, cancellationToken);
-        await WriteArrayAsync(writer, "ChallengeRounds", queries.ChallengeRounds, cancellationToken);
-        await WriteArrayAsync(writer, "ChallengeParticipations", queries.ChallengeParticipations, cancellationToken);
-        await WriteArrayAsync(writer, "ChallengeRoundResults", queries.ChallengeRoundResults, cancellationToken);
-        await WriteArrayAsync(writer, "ChallengeAttemptBindings", queries.ChallengeAttemptBindings, cancellationToken);
-        await WriteArrayAsync(writer, "CreatedLiveRooms", queries.CreatedLiveRooms, cancellationToken);
-        await WriteArrayAsync(writer, "LiveRoomResults", queries.LiveRoomResults, cancellationToken);
-        writer.WriteEndObject();
-        await writer.FlushAsync(cancellationToken);
+            await WriteArrayAsync(writer, pipe, "Attempts", queries.Attempts, cancellationToken);
+            await WriteArrayAsync(writer, pipe, "AttemptErrors", queries.AttemptErrors, cancellationToken);
+            await WriteArrayAsync(writer, pipe, "RewardLedger", queries.RewardLedger, cancellationToken);
+            await WriteArrayAsync(writer, pipe, "Seasons", queries.Seasons, cancellationToken);
+            await WriteArrayAsync(writer, pipe, "SeasonScores", queries.SeasonScores, cancellationToken);
+            await WriteArrayAsync(writer, pipe, "Missions", queries.Missions, cancellationToken);
+            await WriteArrayAsync(writer, pipe, "Achievements", queries.Achievements, cancellationToken);
+            await WriteArrayAsync(writer, pipe, "GamificationEvents", queries.GamificationEvents, cancellationToken);
+            await WriteArrayAsync(writer, pipe, "WeaknessObservations", queries.WeaknessObservations, cancellationToken);
+            await WriteArrayAsync(writer, pipe, "OwnedTexts", queries.OwnedTexts, cancellationToken);
+            await WriteArrayAsync(writer, pipe, "OwnedCollections", queries.OwnedCollections, cancellationToken);
+            await WriteArrayAsync(writer, pipe, "OwnedCollectionItems", queries.OwnedCollectionItems, cancellationToken);
+            await WriteArrayAsync(writer, pipe, "ContentModerationAuditEntries", queries.ContentModerationAuditEntries, cancellationToken);
+            await WriteArrayAsync(writer, pipe, "CreatedChallenges", queries.CreatedChallenges, cancellationToken);
+            await WriteArrayAsync(writer, pipe, "ChallengeRounds", queries.ChallengeRounds, cancellationToken);
+            await WriteArrayAsync(writer, pipe, "ChallengeParticipations", queries.ChallengeParticipations, cancellationToken);
+            await WriteArrayAsync(writer, pipe, "ChallengeRoundResults", queries.ChallengeRoundResults, cancellationToken);
+            await WriteArrayAsync(writer, pipe, "ChallengeAttemptBindings", queries.ChallengeAttemptBindings, cancellationToken);
+            await WriteArrayAsync(writer, pipe, "CreatedLiveRooms", queries.CreatedLiveRooms, cancellationToken);
+            await WriteArrayAsync(writer, pipe, "LiveRoomResults", queries.LiveRoomResults, cancellationToken);
+            writer.WriteEndObject();
+            writer.Flush();
+            await pipe.FlushAsync(cancellationToken);
+        }
+        finally
+        {
+            await pipe.CompleteAsync();
+        }
     }
 
     private async Task EnsureProfileExistsAsync(Guid profileId, CancellationToken cancellationToken)
@@ -201,6 +218,7 @@ public sealed class ProfileExportService(KeyWarsDbContext db, TimeProvider timeP
                 item.WordTimingVariation,
                 item.Completed,
                 item.Official,
+                item.CompetitionIntegrityEligible,
                 item.LeaderboardEligible,
                 item.ExperienceAwarded,
                 item.CreatedAt));
@@ -224,6 +242,12 @@ public sealed class ProfileExportService(KeyWarsDbContext db, TimeProvider timeP
                 result => result.LiveRoomSummaryId,
                 room => room.Id,
                 (result, room) => new DatedLiveRoomResult(result, room.CreatedAt));
+        var seasonScores = db.SeasonScores.AsNoTracking()
+            .Where(item => item.UserProfileId == profileId);
+        var relatedSeasonIds = seasonScores.Select(item => item.SeasonId)
+            .Union(db.RewardLedgerEntries.AsNoTracking()
+                .Where(item => item.UserProfileId == profileId && item.SeasonId != null)
+                .Select(item => item.SeasonId!.Value));
 
         return new ExportQueries(
             ExportSequence<TypingAttemptExport>.FromQuery(attempts, item => IncludesTimestamp(item.CreatedAt), includeAll),
@@ -238,6 +262,14 @@ public sealed class ProfileExportService(KeyWarsDbContext db, TimeProvider timeP
                     .Where(item => item.UserProfileId == profileId)
                     .OrderBy(item => item.Id),
                 item => IncludesTimestamp(item.AwardedAt),
+                includeAll),
+            ExportSequence<Season>.FromQuery(
+                db.Seasons.AsNoTracking()
+                    .Where(item => relatedSeasonIds.Contains(item.Id))
+                    .OrderBy(item => item.Key).ThenBy(item => item.Id)),
+            ExportSequence<SeasonScore>.FromQuery(
+                seasonScores.OrderBy(item => item.SeasonId),
+                item => IncludesTimestamp(item.UpdatedAt),
                 includeAll),
             ExportSequence<Mission>.FromQuery(
                 db.Missions.AsNoTracking()
@@ -282,8 +314,23 @@ public sealed class ProfileExportService(KeyWarsDbContext db, TimeProvider timeP
                     .OrderBy(item => item.Id),
                 item => IncludesTimestamp(item.CreatedAt),
                 includeAll),
-            ExportSequence<Challenge>.FromQuery(
-                createdChallenges.OrderBy(item => item.Id),
+            ExportSequence<ChallengeExport>.FromQuery(
+                createdChallenges
+                    .OrderBy(item => item.Id)
+                    .Select(item => new ChallengeExport(
+                        item.Id,
+                        item.RematchOfChallengeId,
+                        item.CreatorProfileId,
+                        item.TrainingTextId,
+                        item.TargetTextHash,
+                        item.Title,
+                        item.Mode,
+                        item.Status,
+                        item.RoundCount,
+                        item.RatingEligible,
+                        item.CreatedAt,
+                        item.ExpiresAt,
+                        item.FinishedAt)),
                 item => IncludesTimestamp(item.CreatedAt),
                 includeAll),
             ExportSequence<ChallengeRound>.FromQuery(
@@ -326,6 +373,7 @@ public sealed class ProfileExportService(KeyWarsDbContext db, TimeProvider timeP
                         item.RoundVersion,
                         item.CreatorProfileId,
                         item.RoomCode,
+                        item.TargetTextHash,
                         item.Mode,
                         item.Visibility,
                         item.RoundCount,
@@ -344,6 +392,7 @@ public sealed class ProfileExportService(KeyWarsDbContext db, TimeProvider timeP
 
     private static async Task WriteArrayAsync<T>(
         Utf8JsonWriter writer,
+        PipeWriter pipe,
         string propertyName,
         ExportSequence<T> sequence,
         CancellationToken cancellationToken)
@@ -356,19 +405,23 @@ public sealed class ProfileExportService(KeyWarsDbContext db, TimeProvider timeP
             JsonSerializer.Serialize(writer, item, SerializerOptions);
             if (++pendingSinceFlush >= FlushInterval)
             {
-                await writer.FlushAsync(cancellationToken);
+                writer.Flush();
+                await pipe.FlushAsync(cancellationToken);
                 pendingSinceFlush = 0;
             }
         }
 
         writer.WriteEndArray();
-        await writer.FlushAsync(cancellationToken);
+        writer.Flush();
+        await pipe.FlushAsync(cancellationToken);
     }
 
     private sealed record ExportQueries(
         ExportSequence<TypingAttemptExport> Attempts,
         ExportSequence<TypingAttemptError> AttemptErrors,
         ExportSequence<RewardLedgerEntry> RewardLedger,
+        ExportSequence<Season> Seasons,
+        ExportSequence<SeasonScore> SeasonScores,
         ExportSequence<Mission> Missions,
         ExportSequence<Achievement> Achievements,
         ExportSequence<GamificationEvent> GamificationEvents,
@@ -377,7 +430,7 @@ public sealed class ProfileExportService(KeyWarsDbContext db, TimeProvider timeP
         ExportSequence<TextCollection> OwnedCollections,
         ExportSequence<TextCollectionItem> OwnedCollectionItems,
         ExportSequence<ContentModerationAuditEntry> ContentModerationAuditEntries,
-        ExportSequence<Challenge> CreatedChallenges,
+        ExportSequence<ChallengeExport> CreatedChallenges,
         ExportSequence<ChallengeRound> ChallengeRounds,
         ExportSequence<ChallengeParticipant> ChallengeParticipations,
         ExportSequence<ChallengeRoundResult> ChallengeRoundResults,
@@ -470,17 +523,30 @@ internal sealed class ProfileExportDownloadResult(
     Guid profileId,
     ProfileExportRange range,
     DateTimeOffset generatedAt,
-    string fileName) : IActionResult
+    string fileName,
+    IOperationLease? exportLease) : IActionResult
 {
     public async Task ExecuteResultAsync(ActionContext context)
     {
-        var response = context.HttpContext.Response;
-        response.ContentType = "application/json; charset=utf-8";
-        response.Headers.ContentDisposition = $"attachment; filename=\"{fileName}\"";
-        response.Headers.CacheControl = "no-store";
-        response.Headers.Pragma = "no-cache";
-        response.Headers.XContentTypeOptions = "nosniff";
-        await response.StartAsync(context.HttpContext.RequestAborted);
-        await service.WriteAsync(profileId, range, generatedAt, response.Body, context.HttpContext.RequestAborted);
+        try
+        {
+            exportLease?.ThrowIfLost();
+            var response = context.HttpContext.Response;
+            response.ContentType = "application/json; charset=utf-8";
+            response.Headers.ContentDisposition = $"attachment; filename=\"{fileName}\"";
+            response.Headers.CacheControl = "no-store";
+            response.Headers.Pragma = "no-cache";
+            response.Headers.XContentTypeOptions = "nosniff";
+            await response.StartAsync(context.HttpContext.RequestAborted);
+            await service.WriteAsync(profileId, range, generatedAt, response.Body, context.HttpContext.RequestAborted);
+            exportLease?.ThrowIfLost();
+        }
+        finally
+        {
+            if (exportLease is not null)
+            {
+                await exportLease.DisposeAsync();
+            }
+        }
     }
 }

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Reflection;
 using KeyWars.Infrastructure.Cluster;
 using StackExchange.Redis;
@@ -11,7 +12,7 @@ public sealed class RedisDistributedLeaseTests
     public async Task SlowAcquisitionRenewsBeforeItsOriginalDeadline()
     {
         var acquisition = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var renewal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var renewal = new TaskCompletionSource<long>(TaskCreationOptions.RunContinuationsAsynchronously);
         var scriptCalls = 0;
         var database = CreateDatabase((method, _) => method.Name switch
         {
@@ -19,18 +20,23 @@ public sealed class RedisDistributedLeaseTests
             nameof(IDatabase.ScriptEvaluateAsync) => CompleteLeaseScript(ref scriptCalls, renewal),
             _ => throw new NotSupportedException(method.Name)
         });
+        var leaseDuration = TimeSpan.FromSeconds(10);
+        var originalDeadline = Stopwatch.GetTimestamp() + (long)(leaseDuration.TotalSeconds * Stopwatch.Frequency);
         var leaseTask = RedisDistributedLease.TryAcquireAsync(
             database,
             "test:lease:slow-acquisition",
-            TimeSpan.FromSeconds(2),
+            leaseDuration,
             CancellationToken.None).AsTask();
 
-        await Task.Delay(1_200);
+        await Task.Delay(4_000);
         acquisition.TrySetResult(true);
         var lease = await leaseTask;
 
         Assert.NotNull(lease);
-        await renewal.Task.WaitAsync(TimeSpan.FromMilliseconds(900));
+        var renewedAt = await renewal.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.True(
+            renewedAt < originalDeadline,
+            "Die erste Erneuerung muss vor der ursprünglichen Redis-Ablaufgrenze beginnen.");
         await lease.DisposeAsync();
     }
 
@@ -189,12 +195,12 @@ public sealed class RedisDistributedLeaseTests
         return Task.FromResult(RedisResult.Create((RedisValue)1));
     }
 
-    private static Task<RedisResult> CompleteLeaseScript(ref int scriptCalls, TaskCompletionSource renewed)
+    private static Task<RedisResult> CompleteLeaseScript(ref int scriptCalls, TaskCompletionSource<long> renewed)
     {
         scriptCalls++;
         if (scriptCalls == 1)
         {
-            renewed.TrySetResult();
+            renewed.TrySetResult(Stopwatch.GetTimestamp());
         }
 
         return Task.FromResult(RedisResult.Create((RedisValue)1));

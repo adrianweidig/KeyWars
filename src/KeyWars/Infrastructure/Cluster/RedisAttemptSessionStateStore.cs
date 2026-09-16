@@ -7,7 +7,10 @@ namespace KeyWars.Infrastructure.Cluster;
 
 public sealed class RedisAttemptSessionStateStore(IConnectionMultiplexer redis) : IAttemptSessionStateStore
 {
-    private const string Prefix = "keywars:{attempt}";
+    private const string Subsystem = "attempt";
+    private const int BatchSize = 100;
+    private const int ExpiryBucketsPerRead = 8;
+    private const int ExpiryEntriesPerBucket = 13;
     private static readonly TimeSpan ExpiryGrace = TimeSpan.FromMinutes(5);
     private static readonly JsonSerializerOptions SerializerOptions = CreateSerializerOptions();
     private static readonly LuaScript AddScript = LuaScript.Prepare(
@@ -39,10 +42,16 @@ public sealed class RedisAttemptSessionStateStore(IConnectionMultiplexer redis) 
         "if redis.call('exists', @sessionKey) == 1 then return 0 end; " +
         "redis.call('srem', @profileKey, @id); " +
         "redis.call('zrem', @expiryKey, @id); return 1");
+    private static readonly LuaScript RemoveForeignProfileIndexEntryScript = LuaScript.Prepare(
+        "if redis.call('get', @sessionKey) == @current then " +
+        "return redis.call('srem', @profileKey, @id) else return 0 end");
+    private static readonly LuaScript RemoveProfileMemberScript = LuaScript.Prepare(
+        "return redis.call('srem', @profileKey, @id)");
     private static readonly LuaScript RemoveExpiryIndexEntryScript = LuaScript.Prepare(
         "if redis.call('exists', @sessionKey) == 1 then return 0 end; " +
         "redis.call('zrem', @expiryKey, @id); return 1");
     private readonly IDatabase database = redis.GetDatabase();
+    private int expirySweepCursor = -ExpiryBucketsPerRead;
 
     public async ValueTask AddAsync(
         AttemptSession session,
@@ -52,13 +61,14 @@ public sealed class RedisAttemptSessionStateStore(IConnectionMultiplexer redis) 
         cancellationToken.ThrowIfCancellationRequested();
         var expiresAt = GetExpiresAt(session, lifetime);
         var ttlMilliseconds = GetTtlMilliseconds(expiresAt);
+        var bucket = RedisClusterKeyspace.GetBucket(session.Id);
         await database.ScriptEvaluateAsync(
             AddScript,
             new
             {
                 sessionKey = SessionKey(session.Id),
-                profileKey = ProfileKey(session.UserProfileId),
-                expiryKey = ExpiryKey,
+                profileKey = ProfileKey(session.UserProfileId, bucket),
+                expiryKey = ExpiryKey(bucket),
                 value = Serialize(session),
                 id = session.Id.ToString("N"),
                 expiresAt = expiresAt.ToUnixTimeMilliseconds(),
@@ -81,15 +91,21 @@ public sealed class RedisAttemptSessionStateStore(IConnectionMultiplexer redis) 
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        if (updated.Id != current.Id || updated.UserProfileId != current.UserProfileId)
+        {
+            throw new ArgumentException("Eine Versuchssitzung darf beim Aktualisieren weder ID noch Profil wechseln.", nameof(updated));
+        }
+
         var expiresAt = GetExpiresAt(updated, lifetime);
         var ttlMilliseconds = GetTtlMilliseconds(expiresAt);
+        var bucket = RedisClusterKeyspace.GetBucket(current.Id);
         var result = await database.ScriptEvaluateAsync(
             CompareExchangeScript,
             new
             {
                 sessionKey = SessionKey(current.Id),
-                profileKey = ProfileKey(current.UserProfileId),
-                expiryKey = ExpiryKey,
+                profileKey = ProfileKey(current.UserProfileId, bucket),
+                expiryKey = ExpiryKey(bucket),
                 current = Serialize(current),
                 updated = Serialize(updated),
                 id = current.Id.ToString("N"),
@@ -110,17 +126,24 @@ public sealed class RedisAttemptSessionStateStore(IConnectionMultiplexer redis) 
             return null;
         }
 
+        return await TryRemoveAsync(current) ? current : null;
+    }
+
+    private async ValueTask<bool> TryRemoveAsync(AttemptSession current)
+    {
+        var id = current.Id;
+        var bucket = RedisClusterKeyspace.GetBucket(id);
         var result = await database.ScriptEvaluateAsync(
             RemoveScript,
             new
             {
                 sessionKey = SessionKey(id),
-                profileKey = ProfileKey(current.UserProfileId),
-                expiryKey = ExpiryKey,
+                profileKey = ProfileKey(current.UserProfileId, bucket),
+                expiryKey = ExpiryKey(bucket),
                 current = Serialize(current),
                 id = id.ToString("N")
             });
-        return (int)result == 1 ? current : null;
+        return (int)result == 1;
     }
 
     public async ValueTask<IReadOnlyList<AttemptSession>> RemoveProfileAsync(
@@ -128,45 +151,81 @@ public sealed class RedisAttemptSessionStateStore(IConnectionMultiplexer redis) 
         CancellationToken cancellationToken = default)
     {
         var removed = new List<AttemptSession>();
-        var profileKey = ProfileKey(profileId);
-        for (var pass = 0; pass < 3; pass++)
+        for (var bucketIndex = 0; bucketIndex < RedisClusterKeyspace.BucketCount; bucketIndex++)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var ids = await database.SetMembersAsync(profileKey);
-            if (ids.Length == 0)
-            {
-                break;
-            }
-
-            foreach (var value in ids)
+            var bucket = checked((byte)bucketIndex);
+            var profileKey = ProfileKey(profileId, bucket);
+            while (true)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (!Guid.TryParseExact(value.ToString(), "N", out var id))
+                var ids = new List<RedisValue>(BatchSize);
+                await foreach (var value in database
+                    .SetScanAsync(profileKey, pageSize: BatchSize)
+                    .WithCancellation(cancellationToken))
                 {
-                    await database.SetRemoveAsync(profileKey, value);
-                    continue;
-                }
-
-                if (await RemoveAsync(id, cancellationToken) is { } session)
-                {
-                    removed.Add(session);
-                    continue;
-                }
-
-                await database.ScriptEvaluateAsync(
-                    RemoveProfileIndexEntryScript,
-                    new
+                    ids.Add(value);
+                    if (ids.Count == BatchSize)
                     {
-                        sessionKey = SessionKey(id),
-                        profileKey,
-                        expiryKey = ExpiryKey,
-                        id = id.ToString("N")
-                    });
+                        break;
+                    }
+                }
+
+                if (ids.Count == 0)
+                {
+                    break;
+                }
+
+                foreach (var value in ids)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (!Guid.TryParseExact(value.ToString(), "N", out var id) ||
+                        RedisClusterKeyspace.GetBucket(id) != bucket)
+                    {
+                        await RemoveProfileMembershipAsync(profileKey, value);
+                        continue;
+                    }
+
+                    var session = await GetAsync(id, cancellationToken);
+                    if (session is not null && session.UserProfileId != profileId)
+                    {
+                        await database.ScriptEvaluateAsync(
+                            RemoveForeignProfileIndexEntryScript,
+                            new
+                            {
+                                sessionKey = SessionKey(id),
+                                profileKey,
+                                current = Serialize(session),
+                                id = value
+                            });
+                        continue;
+                    }
+
+                    if (session is not null && await TryRemoveAsync(session))
+                    {
+                        removed.Add(session);
+                        continue;
+                    }
+
+                    await database.ScriptEvaluateAsync(
+                        RemoveProfileIndexEntryScript,
+                        new
+                        {
+                            sessionKey = SessionKey(id),
+                            profileKey,
+                            expiryKey = ExpiryKey(bucket),
+                            id = id.ToString("N")
+                        });
+                }
             }
         }
 
         return removed;
     }
+
+    private async ValueTask RemoveProfileMembershipAsync(RedisKey profileKey, RedisValue id) =>
+        _ = await database.ScriptEvaluateAsync(
+            RemoveProfileMemberScript,
+            new { profileKey, id });
 
     public async ValueTask<IOperationLease> AcquireLifecycleLockAsync(
         Guid id,
@@ -179,15 +238,78 @@ public sealed class RedisAttemptSessionStateStore(IConnectionMultiplexer redis) 
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var values = await database.SortedSetRangeByScoreAsync(
-            ExpiryKey,
-            stop: now.ToUnixTimeMilliseconds(),
-            order: Order.Ascending,
-            take: 100);
-        return values
-            .Select(value => Guid.TryParseExact(value.ToString(), "N", out var id) ? id : Guid.Empty)
-            .Where(id => id != Guid.Empty)
+        var firstBucket = unchecked((uint)Interlocked.Add(ref expirySweepCursor, ExpiryBucketsPerRead));
+        var buckets = Enumerable.Range(0, ExpiryBucketsPerRead)
+            .Select(offset => unchecked((byte)(firstBucket + (uint)offset)))
             .ToArray();
+        var reads = buckets
+            .Select(bucket => database.SortedSetRangeByScoreWithScoresAsync(
+                ExpiryKey(bucket),
+                stop: now.ToUnixTimeMilliseconds(),
+                order: Order.Ascending,
+                take: ExpiryEntriesPerBucket))
+            .ToArray();
+        var entries = await Task.WhenAll(reads);
+        cancellationToken.ThrowIfCancellationRequested();
+        var repairedEntries = await Task.WhenAll(entries.Select((bucketEntries, index) =>
+            ReadValidExpiryEntriesAsync(
+                buckets[index],
+                bucketEntries,
+                now.ToUnixTimeMilliseconds(),
+                cancellationToken)));
+        return repairedEntries
+            .SelectMany(bucketEntries => bucketEntries)
+            .OrderBy(entry => entry.Score)
+            .ThenBy(entry => entry.Id)
+            .Take(BatchSize)
+            .Select(entry => entry.Id)
+            .ToArray();
+    }
+
+    private async Task<IReadOnlyList<ExpiryCandidate>> ReadValidExpiryEntriesAsync(
+        byte bucket,
+        SortedSetEntry[] entries,
+        long stop,
+        CancellationToken cancellationToken)
+    {
+        for (var pass = 0; pass < 2; pass++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var valid = new List<ExpiryCandidate>(entries.Length);
+            var corrupt = new List<RedisValue>();
+            foreach (var entry in entries)
+            {
+                if (Guid.TryParseExact(entry.Element.ToString(), "N", out var id) &&
+                    RedisClusterKeyspace.GetBucket(id) == bucket)
+                {
+                    valid.Add(new ExpiryCandidate(id, entry.Score));
+                }
+                else
+                {
+                    corrupt.Add(entry.Element);
+                }
+            }
+
+            if (corrupt.Count == 0)
+            {
+                return valid;
+            }
+
+            await database.SortedSetRemoveAsync(ExpiryKey(bucket), corrupt.ToArray());
+            if (pass == 1)
+            {
+                return valid;
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            entries = await database.SortedSetRangeByScoreWithScoresAsync(
+                ExpiryKey(bucket),
+                stop: stop,
+                order: Order.Ascending,
+                take: ExpiryEntriesPerBucket);
+        }
+
+        return [];
     }
 
     public async ValueTask<AttemptSession?> TryRemoveExpiredAsync(
@@ -197,6 +319,7 @@ public sealed class RedisAttemptSessionStateStore(IConnectionMultiplexer redis) 
         CancellationToken cancellationToken = default)
     {
         var session = await GetAsync(id, cancellationToken);
+        var bucket = RedisClusterKeyspace.GetBucket(id);
         if (session is null)
         {
             await database.ScriptEvaluateAsync(
@@ -204,7 +327,7 @@ public sealed class RedisAttemptSessionStateStore(IConnectionMultiplexer redis) 
                 new
                 {
                     sessionKey = SessionKey(id),
-                    expiryKey = ExpiryKey,
+                    expiryKey = ExpiryKey(bucket),
                     id = id.ToString("N")
                 });
             return null;
@@ -215,13 +338,20 @@ public sealed class RedisAttemptSessionStateStore(IConnectionMultiplexer redis) 
             return null;
         }
 
-        return await RemoveAsync(id, cancellationToken);
+        return await TryRemoveAsync(session) ? session : null;
     }
 
-    private static RedisKey SessionKey(Guid id) => $"{Prefix}:session:{id:N}";
-    private static RedisKey ProfileKey(Guid profileId) => $"{Prefix}:profile:{profileId:N}";
-    private static RedisKey LockKey(Guid id) => $"{Prefix}:lock:{id:N}";
-    private static RedisKey ExpiryKey => $"{Prefix}:expiry";
+    internal static RedisKey SessionKey(Guid id) =>
+        $"keywars:{RedisClusterKeyspace.GetHashTag(Subsystem, id)}:session:{id:N}";
+
+    internal static RedisKey ProfileKey(Guid profileId, byte bucket) =>
+        $"keywars:{{{Subsystem}-b{bucket:x2}}}:profile:{profileId:N}";
+
+    internal static RedisKey LockKey(Guid id) =>
+        $"keywars:{RedisClusterKeyspace.GetHashTag(Subsystem, id)}:lock:{id:N}";
+
+    internal static RedisKey ExpiryKey(byte bucket) =>
+        $"keywars:{{{Subsystem}-b{bucket:x2}}}:expiry";
 
     private static DateTimeOffset GetExpiresAt(AttemptSession session, TimeSpan lifetime) =>
         (session.StartedAt ?? session.PreparedAt).Add(lifetime);
@@ -248,4 +378,6 @@ public sealed class RedisAttemptSessionStateStore(IConnectionMultiplexer redis) 
         options.Converters.Add(new JsonStringEnumConverter());
         return options;
     }
+
+    private readonly record struct ExpiryCandidate(Guid Id, double Score);
 }

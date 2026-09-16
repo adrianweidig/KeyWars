@@ -8,12 +8,59 @@
 <section class="page-header">
     <div>
         <h1>Geisterrennen</h1>
-        <p class="lead">Du trittst gegen eine gespeicherte Leistung auf demselben Text an.</p>
+        <p class="lead">Du trittst auf demselben Text gegen deinen Bestwert oder einen freigegebenen Rivalenwert an.</p>
     </div>
 </section>
 
-<section class="card typing-session-card typing-focus-primary" data-typing-app data-mode="Ghost" data-text-id="@Model.TextId" data-hide-start-when-prepared="true">
-    <p class="muted">Geist: @Model.ReferenceWpm WPM · @Model.ReferenceAccuracy % Genauigkeit</p>
+<section class="card filter-panel" aria-labelledby="ghost-selection-title" data-rival-ghost-selection>
+    <div>
+        <h2 id="ghost-selection-title">Vergleich wählen</h2>
+        <p class="muted">Rivalen teilen nur Name, WPM und Genauigkeit ihrer offiziellen Bestleistung. Eingaben und Tastenfolgen bleiben privat.</p>
+    </div>
+    @if (Model.Rivals.Count > 0)
+    {
+        <form method="get" class="filter-form" asp-page="/Spielen/Geist" asp-route-attemptId="@Model.SourceAttemptId">
+            <label>
+                Geist
+                <select name="rivalProfileId" data-rival-ghost-select>
+                    @if (Model.SelectedRival is null)
+                    {
+                        <option value="" selected>Eigener Geist · @Model.ReferenceWpm.ToString("0.0") WPM</option>
+                    }
+                    else
+                    {
+                        <option value="">Eigener Geist</option>
+                    }
+                    @foreach (var rival in Model.Rivals)
+                    {
+                        if (Model.SelectedRival?.RivalProfileId == rival.RivalProfileId)
+                        {
+                            <option value="@rival.RivalProfileId" selected>@rival.DisplayName · @rival.Wpm.ToString("0.0") WPM · @rival.Accuracy.ToString("0.0") %</option>
+                        }
+                        else
+                        {
+                            <option value="@rival.RivalProfileId">@rival.DisplayName · @rival.Wpm.ToString("0.0") WPM · @rival.Accuracy.ToString("0.0") %</option>
+                        }
+                    }
+                </select>
+            </label>
+            <div class="form-actions">
+                <button type="submit">Auswählen</button>
+            </div>
+        </form>
+    }
+    else
+    {
+        <p class="muted" role="status">Für diesen Text ist noch kein freigegebener Rivalenwert verfügbar. Dein eigener Geist bleibt aktiv.</p>
+    }
+    @if (Model.FallbackApplied)
+    {
+        <p class="alert" role="status">Der gewählte Rivale ist nicht mehr verfügbar. KeyWars nutzt den nächstliegenden freigegebenen Wert oder deinen eigenen Geist.</p>
+    }
+</section>
+
+<section class="card typing-session-card typing-focus-primary" data-typing-app data-mode="@Model.Mode" data-text-id="@Model.TextId" data-auto-prepare="false" data-hide-start-when-prepared="true">
+    <p class="muted" data-rival-ghost-reference>@Model.ReferenceName: @Model.ReferenceWpm.ToString("0.0") WPM · @Model.ReferenceAccuracy.ToString("0.0") % Genauigkeit</p>
     <div class="typing-target" data-target tabindex="0" role="region" aria-label="Zieltext des Geistrennens"></div>
     <label>
         Eingabe

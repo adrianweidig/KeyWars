@@ -5,19 +5,42 @@ using StackExchange.Redis;
 
 namespace KeyWars.Infrastructure.Cluster;
 
-public sealed class RedisProfileAccessGate(IConnectionMultiplexer redis) : IProfileAccessGate
+internal interface IAuthoritativeProfileDeletionMarker
 {
-    private const string Prefix = "keywars:{profile-access}";
+    ValueTask MarkDeletedAuthoritativelyAsync(
+        Guid profileId,
+        CancellationToken cancellationToken = default);
+}
+
+internal interface IAuthoritativeProfileValidationLease : IOperationLease
+{
+    bool RequiresAuthoritativeValidation { get; }
+
+    ValueTask MarkAuthoritativelyValidatedAsync(
+        CancellationToken cancellationToken = default);
+}
+
+public sealed class RedisProfileAccessGate(IConnectionMultiplexer redis) :
+    IProfileAccessGate,
+    IAuthoritativeProfileDeletionMarker
+{
+    private const string Subsystem = "profile-access";
     private static readonly TimeSpan LeaseDuration = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan OperationDuration = TimeSpan.FromSeconds(60);
-    private static readonly TimeSpan DeletedMarkerLifetime = TimeSpan.FromHours(24);
     private static readonly LuaScript AcquireScript = LuaScript.Prepare(
         "local state = redis.call('get', @stateKey); " +
         "if state == 'deleted' then return -1 end; " +
-        "if state then return 0 end; " +
+        "if state and state ~= 'active' then return 0 end; " +
         "redis.call('zremrangebyscore', @activeKey, '-inf', @now); " +
         "redis.call('zadd', @activeKey, @expiresAt, @token); " +
-        "redis.call('pexpire', @activeKey, @setLifetime); return 1");
+        "redis.call('pexpire', @activeKey, @setLifetime); " +
+        "if state == 'active' then return 1 else return 2 end");
+    private static readonly LuaScript MarkValidatedScript = LuaScript.Prepare(
+        "if not redis.call('zscore', @activeKey, @token) then return -2 end; " +
+        "local state = redis.call('get', @stateKey); " +
+        "if state == 'deleted' then return -1 end; " +
+        "if not state then redis.call('set', @stateKey, 'active'); return 1 end; " +
+        "if state == 'active' then return 1 else return 0 end");
     private static readonly LuaScript RenewLeaseScript = LuaScript.Prepare(
         "if redis.call('zscore', @activeKey, @token) then " +
         "redis.call('zadd', @activeKey, @expiresAt, @token); " +
@@ -27,7 +50,7 @@ public sealed class RedisProfileAccessGate(IConnectionMultiplexer redis) : IProf
     private static readonly LuaScript BeginOperationScript = LuaScript.Prepare(
         "local state = redis.call('get', @stateKey); " +
         "if state == 'deleted' then return -1 end; " +
-        "if state then return 0 end; " +
+        "if state and state ~= 'active' then return 0 end; " +
         "redis.call('zremrangebyscore', @activeKey, '-inf', @now); " +
         "redis.call('set', @stateKey, @operationToken, 'PX', @operationLifetime); return 1");
     private static readonly LuaScript RenewOperationScript = LuaScript.Prepare(
@@ -43,7 +66,7 @@ public sealed class RedisProfileAccessGate(IConnectionMultiplexer redis) : IProf
         "if redis.call('get', @stateKey) ~= @operationToken then return 0 end; " +
         "redis.call('zremrangebyscore', @activeKey, '-inf', @now); " +
         "if redis.call('zcard', @activeKey) ~= 0 then return -1 end; " +
-        "redis.call('set', @stateKey, 'deleted', 'PX', @deletedLifetime); return 1");
+        "redis.call('set', @stateKey, 'deleted'); return 1");
 
     private readonly IDatabase database = redis.GetDatabase();
     private readonly ConcurrentDictionary<Guid, OperationLease> operations = new();
@@ -55,6 +78,11 @@ public sealed class RedisProfileAccessGate(IConnectionMultiplexer redis) : IProf
         cancellationToken.ThrowIfCancellationRequested();
         var state = await database.StringGetAsync(StateKey(profileId));
         if (state.IsNull)
+        {
+            return ProfileAccessState.Available;
+        }
+
+        if (state == "active")
         {
             return ProfileAccessState.Available;
         }
@@ -85,10 +113,12 @@ public sealed class RedisProfileAccessGate(IConnectionMultiplexer redis) : IProf
             });
         return result switch
         {
-            1 => await AccessLease.CreateAsync(
+            1 or 2 => await AccessLease.CreateAsync(
                 database,
+                StateKey(profileId),
                 ActiveKey(profileId),
                 token,
+                requiresAuthoritativeValidation: result == 2,
                 acquisitionStartedAt,
                 cancellationToken),
             -1 => throw new ProfileOperationException("profile_deleted", "Dieses Profil wurde bereits gelöscht."),
@@ -209,8 +239,20 @@ public sealed class RedisProfileAccessGate(IConnectionMultiplexer redis) : IProf
         await operation.MarkDeletedAsync(cancellationToken);
     }
 
-    private static RedisKey StateKey(Guid profileId) => $"{Prefix}:{profileId:N}:state";
-    private static RedisKey ActiveKey(Guid profileId) => $"{Prefix}:{profileId:N}:active";
+    async ValueTask IAuthoritativeProfileDeletionMarker.MarkDeletedAuthoritativelyAsync(
+        Guid profileId,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        await database.StringSetAsync(StateKey(profileId), "deleted");
+        cancellationToken.ThrowIfCancellationRequested();
+    }
+
+    internal static RedisKey StateKey(Guid profileId) =>
+        $"keywars:{RedisClusterKeyspace.GetHashTag(Subsystem, profileId)}:state:{profileId:N}";
+
+    internal static RedisKey ActiveKey(Guid profileId) =>
+        $"keywars:{RedisClusterKeyspace.GetHashTag(Subsystem, profileId)}:active:{profileId:N}";
 
     private static async ValueTask DisposeReverseAsync(IReadOnlyList<IOperationLease> leases)
     {
@@ -220,9 +262,10 @@ public sealed class RedisProfileAccessGate(IConnectionMultiplexer redis) : IProf
         }
     }
 
-    private sealed class AccessLease : IOperationLease
+    private sealed class AccessLease : IAuthoritativeProfileValidationLease
     {
         private readonly IDatabase database;
+        private readonly RedisKey stateKey;
         private readonly RedisKey activeKey;
         private readonly RedisValue token;
         private readonly CancellationTokenSource renewalCancellation = new();
@@ -233,34 +276,45 @@ public sealed class RedisProfileAccessGate(IConnectionMultiplexer redis) : IProf
         private long validUntilTimestamp;
         private Exception? renewalFailure;
         private Task? disposeTask;
+        private int requiresAuthoritativeValidation;
 
         private AccessLease(
             IDatabase database,
+            RedisKey stateKey,
             RedisKey activeKey,
             RedisValue token,
+            bool requiresAuthoritativeValidation,
             long validUntilTimestamp)
         {
             this.database = database;
+            this.stateKey = stateKey;
             this.activeKey = activeKey;
             this.token = token;
+            this.requiresAuthoritativeValidation = requiresAuthoritativeValidation ? 1 : 0;
             this.validUntilTimestamp = validUntilTimestamp;
             leaseLostToken = leaseLostCancellation.Token;
             renewalTask = RenewAsync();
         }
 
         public CancellationToken LeaseLost => leaseLostToken;
+        public bool RequiresAuthoritativeValidation =>
+            Volatile.Read(ref requiresAuthoritativeValidation) != 0;
 
         public static async ValueTask<AccessLease> CreateAsync(
             IDatabase database,
+            RedisKey stateKey,
             RedisKey activeKey,
             RedisValue token,
+            bool requiresAuthoritativeValidation,
             long acquisitionStartedAt,
             CancellationToken cancellationToken)
         {
             var lease = new AccessLease(
                 database,
+                stateKey,
                 activeKey,
                 token,
+                requiresAuthoritativeValidation,
                 acquisitionStartedAt + ToStopwatchTicks(LeaseDuration));
             if (!cancellationToken.IsCancellationRequested && lease.RemainingLeaseTime() > TimeSpan.Zero)
             {
@@ -284,6 +338,38 @@ public sealed class RedisProfileAccessGate(IConnectionMultiplexer redis) : IProf
                 throw new InvalidOperationException(
                     "Der verteilte Profilzugriffs-Lease wurde verloren.",
                     Volatile.Read(ref renewalFailure));
+            }
+        }
+
+        public async ValueTask MarkAuthoritativelyValidatedAsync(
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            ThrowIfLost();
+            if (!RequiresAuthoritativeValidation)
+            {
+                return;
+            }
+
+            var result = (int)await database.ScriptEvaluateAsync(
+                MarkValidatedScript,
+                new { stateKey, activeKey, token });
+            switch (result)
+            {
+                case 1:
+                    Interlocked.Exchange(ref requiresAuthoritativeValidation, 0);
+                    return;
+                case 0:
+                    return;
+                case -1:
+                    throw new ProfileOperationException(
+                        "profile_deleted",
+                        "Dieses Profil wurde bereits gelöscht.");
+                default:
+                    MarkLost(new InvalidOperationException(
+                        "Der Profilzugriffs-Lease war vor der autoritativen Validierung nicht mehr aktiv."));
+                    ThrowIfLost();
+                    return;
             }
         }
 
@@ -556,8 +642,7 @@ public sealed class RedisProfileAccessGate(IConnectionMultiplexer redis) : IProf
                     stateKey = StateKey(profileId),
                     activeKey = ActiveKey(profileId),
                     operationToken,
-                    now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                    deletedLifetime = (long)DeletedMarkerLifetime.TotalMilliseconds
+                    now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
                 });
             if (result != 1)
             {

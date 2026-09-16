@@ -4,9 +4,12 @@ public sealed class LiveOptions
 {
     public const int MaximumSafeArenaTargetGraphemes = 2800;
     public const int MaximumSafeArenaTargetUtf8Bytes = 12 * 1024;
+    public const int MaximumSafeRoundDeadlineSeconds = 3600;
+    public const int MaximumSafeRoundResultsIdleSeconds = 600;
 
     public int MaxParticipantsPerRoom { get; set; } = 64;
     public int MaxConcurrentRooms { get; set; } = 200;
+    public int MaxActiveRoomsPerCreator { get; set; } = 5;
     public int MaxConnectionsPerUser { get; set; } = 3;
     public int ProgressBroadcastHz { get; set; } = 10;
     public int CountdownSeconds { get; set; } = 3;
@@ -17,6 +20,10 @@ public sealed class LiveOptions
     public int CompletedRoomRetentionMinutes { get; set; } = 60;
     public int LobbyRoomRetentionMinutes { get; set; } = 720;
     public int MaxArenaTargetGraphemes { get; set; } = MaximumSafeArenaTargetGraphemes;
+    public int RoundDeadlineBaseSeconds { get; set; } = 60;
+    public int RoundDeadlineMillisecondsPerGrapheme { get; set; } = 1000;
+    public int RoundDeadlineMaxSeconds { get; set; } = MaximumSafeRoundDeadlineSeconds;
+    public int RoundResultsIdleSeconds { get; set; } = 120;
 }
 
 public sealed class ChallengeOptions

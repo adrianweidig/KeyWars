@@ -23,7 +23,7 @@ verwendet `compose.scale.yaml` und diese internen Variablen:
 | `KEYWARS__DATABASE__PROVIDER` | `sqlite`, `postgresql` | Datenbankanbieter |
 | `ConnectionStrings__KeyWars` | Verbindungszeichenfolge | PostgreSQL-Verbindung im Scale-Modus |
 | `KEYWARS__REDIS__CONNECTION_STRING` | Verbindungszeichenfolge | SignalR, Data Protection und verteilter Zustand |
-| `KEYWARS__CLUSTER__PROTOCOL_VERSION` | Releasewert, aktuell `1` | verhindert gemischte Redis-Laufzeitprotokolle |
+| `KEYWARS__CLUSTER__PROTOCOL_VERSION` | Releasewert, aktuell `3` | verhindert gemischte Redis-Laufzeitprotokolle |
 
 Für Administratoren bleibt Compose die Referenz. Reihenfolge, Wartung und
 Health-Prüfungen stehen unter [Skalierter Betrieb](scale-operations.md).
@@ -50,12 +50,13 @@ LDAP-Gruppenwerten:
 
 | `.env`-Variable | Inhalt |
 | --- | --- |
-| `KEYWARS_MODERATOR_GROUP_DNS` | Semikolonliste vollständiger `memberOf`-DNs |
-| `KEYWARS_MODERATOR_GROUP_VALUES` | Semikolonliste exakter Werte oder erster RDN-Werte, etwa Gruppenname aus `CN=` |
+| `KEYWARS_MODERATOR_GROUP_DNS` | Semikolonliste vollständiger `memberOf`-DNs; außerhalb von Development der einzige erlaubte Weg |
+| `KEYWARS_MODERATOR_GROUP_VALUES` | Nur Development: Kurzwerte beziehungsweise erste RDN-Werte |
 
-Beide Werte dürfen kombiniert werden. Leer bedeutet: keine Moderatoren. Nach
-einer Gruppenänderung muss sich die betroffene Person neu anmelden; es gibt
-keine lokale Rollenzuweisung.
+Leer bedeutet: keine Moderatoren. Vor einem produktiven Start Kurzwerte auf die
+vollständigen DNs derselben Gruppen migrieren und `MODERATOR_GROUP_VALUES`
+leeren. Nach einer Gruppenänderung muss sich die betroffene Person neu
+anmelden; es gibt keine lokale Rollenzuweisung.
 
 ## Reverse Proxy
 
@@ -77,6 +78,7 @@ konservativ. Erst nach Messung ändern:
 | --- | ---: | --- |
 | `KEYWARS_MAX_LIVE_PARTICIPANTS` | 64 | maximale Personen pro Raum |
 | `KEYWARS_MAX_LIVE_ROOMS` | 200 | gleichzeitig im Speicher gehaltene Räume |
+| `KEYWARS_MAX_ACTIVE_ROOMS_PER_CREATOR` | 5 | aktive Räume je erstellendem Profil; gilt auch für Revanchen |
 | `KEYWARS_MAX_CONNECTIONS_PER_USER` | 3 | parallele Arena-Verbindungen pro Profil; wirksam 1 bis 20 |
 | `KEYWARS_LIVE_BROADCAST_HZ` | 10 | maximale Progress-Broadcasts pro Sekunde und Raum |
 | `KEYWARS_LIVE_COUNTDOWN_SECONDS` | 3 | Countdown; wirksam 1 bis 10 Sekunden |
@@ -87,6 +89,15 @@ konservativ. Erst nach Messung ändern:
 | `KEYWARS_LIVE_COMPLETED_ROOM_RETENTION_MINUTES` | 60 | Aufbewahrung abgeschlossener Räume im Speicher |
 | `KEYWARS_LIVE_LOBBY_ROOM_RETENTION_MINUTES` | 720 | Aufbewahrung inaktiver Lobbys im Speicher |
 | `KEYWARS_MAX_ARENA_TARGET_GRAPHEMES` | 2800 | maximale Länge eines Arena-Zieltexts; wirksam 1 bis 2800 |
+| `KEYWARS_LIVE_ROUND_DEADLINE_BASE_SECONDS` | 60 | Grundzeit jeder Runde; wirksam 15 bis 300 Sekunden |
+| `KEYWARS_LIVE_ROUND_DEADLINE_MILLISECONDS_PER_GRAPHEME` | 1000 | zusätzliche Zeit je Zielgraphem; wirksam 100 bis 5000 Millisekunden |
+| `KEYWARS_LIVE_ROUND_DEADLINE_MAX_SECONDS` | 3600 | harte Obergrenze einer Runde; wirksam 60 bis 3600 Sekunden |
+| `KEYWARS_LIVE_ROUND_RESULTS_IDLE_SECONDS` | 120 | maximale Pause bis zur nächsten Serienrunde; wirksam 30 bis 600 Sekunden |
+
+Ein gewerteter Zieleinlauf braucht mindestens zwei zeitlich getrennte,
+monoton steigende Teilfortschritte, die der Server vor dem Ziel gesehen hat.
+Ein vollständiger Direktsprung oder nur ein Vollabgleich bleibt sichtbar, aber
+ungewertet.
 
 Es gibt keine produktive Zuschauerrolle und deshalb kein Zuschauerlimit. Details:
 [Live-Arena](live-arena.md).
@@ -103,6 +114,9 @@ Diese Werte werden bei Bedarf direkt unter `environment:` ergänzt:
 | `KEYWARS__CONTENT__MAX_TEXT_GRAPHEMES` | 20000 | Grapheme nach Normalisierung |
 | `KEYWARS__CONTENT__MAX_TEXT_LINES` | 400 | Zeilen je importiertem Text |
 | `KEYWARS_MAX_CHALLENGE_PARTICIPANTS` | 64 | mindestens 2; durch Compose übersetzt |
+| `KEYWARS_SEASONS_ENABLED` | true | Saisonwertung und Rollover aktivieren |
+| `KEYWARS_SEASONS_MONTHS_PER_SEASON` | 1 | 1, 2, 3, 4, 6 oder 12 Monate |
+| `KEYWARS_SEASONS_ROLLOVER_CHECK_MINUTES` | 60 | Prüfung durch einen geleasten Worker; 5 bis 1440 Minuten |
 
 `KEYWARS__AUTH__DEVELOPMENT_LOGIN=true` ist in Production gesperrt.
 `KEYWARS__DATA__DIRECTORY` bleibt in der Einzelinstanz `/data`; dort liegen

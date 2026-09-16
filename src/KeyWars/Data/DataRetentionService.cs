@@ -20,6 +20,8 @@ public sealed class DataRetentionService(
     private static readonly string[] ProtectedDataSets =
     [
         nameof(KeyWarsDbContext.RewardLedgerEntries),
+        nameof(KeyWarsDbContext.Seasons),
+        nameof(KeyWarsDbContext.SeasonScores),
         "abgeschlossene TypingAttempts",
         nameof(KeyWarsDbContext.LiveRoomSummaries),
         nameof(KeyWarsDbContext.LiveRoomParticipantSummaries),
@@ -288,10 +290,17 @@ public sealed class DataRetentionService(
                 return false;
             }
 
-            challenge.Status = ChallengeStatus.Expired;
-            challenge.FinishedAt ??= now;
-            await challengeTransaction.AbortBoundAttemptsAsync(challengeId, challenge.FinishedAt.Value, operationToken);
-            await db.SaveChangesAsync(operationToken);
+            var outcome = await ChallengeFinalizer.FinalizeExpiredAsync(
+                db,
+                challenge,
+                challengeTransaction,
+                now,
+                operationToken);
+            if (outcome == ChallengeExpiryOutcome.NotDue)
+            {
+                await transaction.CommitAsync(operationToken);
+                return false;
+            }
             challengeLock.ThrowIfLost();
             challengeTransaction.ThrowIfLost();
             await transaction.CommitAsync(operationToken);

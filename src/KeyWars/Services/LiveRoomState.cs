@@ -12,10 +12,13 @@ internal sealed class LiveRoomState(
     LiveRoomVisibility visibility,
     int roundCount,
     int maxParticipants,
-    DateTimeOffset createdAt)
+    DateTimeOffset createdAt,
+    bool targetCompetitionEligible,
+    Guid? quotaOwnerProfileId = null)
 {
     public Guid Id { get; } = id;
     public Guid CreatorProfileId { get; set; } = creatorProfileId;
+    public Guid QuotaOwnerProfileId { get; set; } = quotaOwnerProfileId ?? creatorProfileId;
     public string Code { get; } = code;
     public string Title { get; } = title;
     public string Text { get; } = text;
@@ -39,10 +42,13 @@ internal sealed class LiveRoomState(
     public DateTimeOffset PhaseChangedAt { get; set; } = createdAt;
     public DateTimeOffset? CountdownStartsAt { get; set; }
     public DateTimeOffset? RaceStartsAt { get; set; }
+    public DateTimeOffset? RoundDeadlineAt { get; set; }
     public DateTimeOffset? RoundEndsAt { get; set; }
     public string? CloseReason { get; set; }
     public bool Started { get; set; }
     public bool Finished { get; set; }
+    public bool TargetCompetitionEligible { get; } = targetCompetitionEligible;
+    public bool RatingEligible { get; set; } = targetCompetitionEligible;
     public CompletionReceipt? CompletionReceipt { get; set; }
     public CompletionState? PersistenceState { get; set; }
     public DateTimeOffset? StartedAt { get; set; }
@@ -65,7 +71,16 @@ internal sealed class LiveParticipantState(
     public int Sequence { get; set; }
     public int CorrectCharacters { get; set; }
     public string TypedTextPreview { get; set; } = "";
+    public int TypedStateOffset { get; set; }
+    public int TypedCharacters { get; set; }
     public double Wpm { get; set; }
+    public bool CompetitionEligible { get; set; } = true;
+    public int ProgressEvidenceRoundVersion { get; set; }
+    public int ProgressEvidenceRevision { get; set; }
+    public int ProgressEvidenceCorrectCharacters { get; set; }
+    public int ProgressEvidenceCount { get; set; }
+    public DateTimeOffset? ProgressEvidenceObservedAt { get; set; }
+    public bool ProgressEvidenceInvalid { get; set; }
     public int? Placement { get; set; }
     public DateTimeOffset? FinishedAt { get; set; }
     public DateTimeOffset? DisconnectedAt { get; set; }

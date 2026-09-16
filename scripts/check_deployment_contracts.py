@@ -29,6 +29,8 @@ def require(relative_path: str, fragments: list[str]) -> None:
 
 required_files = [
     ".github/workflows/performance.yml",
+    ".dockerignore",
+    "Dockerfile",
     "compose.yaml",
     "compose.scale.yaml",
     "deploy/swarm/stack.yaml",
@@ -44,21 +46,67 @@ required_files = [
     "deploy/images.txt",
     "docs/scale-operations.md",
     "tests/cluster/compose.ci.yaml",
+    "compose.test-cluster.yaml",
+    "tests/cluster/Invoke-ClusterHarness.ps1",
 ]
 for required_file in required_files:
     load(required_file)
 
+dockerfile = load("Dockerfile")
+dockerignore = load(".dockerignore")
+if "COPY . ." in dockerfile:
+    for excluded_path in ("secrets/", "**/secrets/", "/.tmp-*/"):
+        if excluded_path not in dockerignore.splitlines():
+            ERRORS.append(
+                f".dockerignore: {excluded_path} muss bei `COPY . .` aus dem Build-Kontext ausgeschlossen sein"
+            )
+
 performance_workflow = load(".github/workflows/performance.yml")
-cutover_step = 'run --rm keywars-protocol-cutover'
-migration_step = 'run --rm keywars-migrate'
+cluster_harness = load("tests/cluster/Invoke-ClusterHarness.ps1")
+if "./tests/cluster/Invoke-ClusterHarness.ps1" not in performance_workflow:
+    ERRORS.append(
+        ".github/workflows/performance.yml: der echte Redis-Cluster-Harness fehlt"
+    )
+if "tests/KeyWars.IntegrationTests/KeyWars.IntegrationTests.csproj" not in performance_workflow:
+    ERRORS.append(
+        ".github/workflows/performance.yml: der PostgreSQL-Integrationstest wird nicht gebaut"
+    )
+require(
+    "tests/cluster/Invoke-ClusterHarness.ps1",
+    [
+        "tests/cluster/compose.ci.yaml",
+        "'run', '--rm', 'postgres-tests'",
+        "'run', '--rm', 'keywars-standalone-protocol-cutover'",
+        "Invoke-StandaloneRedis",
+        "redis-standalone-info.txt",
+        "keywars:{completion-admission}:active",
+        "keywars:cluster:protocol-version', '1'",
+        "keywars:cluster:protocol-version', '2'",
+        "frische Standalone-Installation",
+        "v1->v2-Vorcutover",
+        "legacy-payload",
+        "run', '--rm', 'keywars-protocol-cutover'",
+        "GET', 'keywars:cluster:protocol-version'",
+        "run', '--rm', 'keywars-migrate'",
+    ],
+)
+require(
+    "tests/cluster/compose.ci.yaml",
+    [
+        "redis-standalone:",
+        "keywars-standalone-protocol-cutover:",
+        "KEYWARS__REDIS__CONNECTION_STRING: redis-standalone:6379",
+        'command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory-policy", "noeviction"]',
+    ],
+)
+require("compose.test-cluster.yaml", ['KEYWARS__CLUSTER__PROTOCOL_VERSION: "3"'])
 if (
-    performance_workflow.count(cutover_step) < 4
-    or migration_step not in performance_workflow
-    or performance_workflow.index(cutover_step) > performance_workflow.index(migration_step)
-    or "redis-cli --raw GET keywars:cluster:protocol-version" not in performance_workflow
+    cluster_harness.count("run', '--rm', 'keywars-protocol-cutover'") < 3
+    or cluster_harness.index("run', '--rm', 'keywars-protocol-cutover'")
+    > cluster_harness.index("run', '--rm', 'keywars-migrate'")
 ):
     ERRORS.append(
-        ".github/workflows/performance.yml: Cluster-Cutover braucht Idempotenz-, Mismatch- und Reihenfolgetest"
+        "tests/cluster/Invoke-ClusterHarness.ps1: Cluster-Cutover braucht Sperr-, Idempotenz- und Reihenfolgetest"
     )
 
 require("compose.yaml", ["${KEYWARS_BIND_ADDRESS:-127.0.0.1}"])
@@ -75,6 +123,7 @@ require(
         "postgres:",
         "redis:",
         "KEYWARS__DATABASE__PROVIDER",
+        'KEYWARS__CLUSTER__PROTOCOL_VERSION: "3"',
         "ConnectionStrings__KeyWars",
         "KEYWARS__REDIS__CONNECTION_STRING",
         "maintenance cluster-protocol cutover --confirm-apps-stopped",
@@ -82,6 +131,7 @@ require(
         "caddy:2.11.4-alpine@sha256:",
         "postgres:18.4-alpine@sha256:",
         "redis:8.6.5-alpine@sha256:",
+        'command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--maxmemory-policy", "noeviction"]',
     ],
 )
 require(
@@ -100,6 +150,7 @@ require(
         "stop_grace_period:",
         "nofile:",
         "mode: replicated-job",
+        'KEYWARS__CLUSTER__PROTOCOL_VERSION: "3"',
         "KEYWARS_CUTOVER_REPLICAS:-0",
         "KEYWARS_MIGRATE_REPLICAS:-0",
         "maintenance cluster-protocol cutover --confirm-apps-stopped",
@@ -125,6 +176,12 @@ require("deploy/k8s/migration/job.yaml", ["value: migrate", "ttlSecondsAfterFini
 require(
     "docs/scale-operations.md",
     [
+        "KEYWARS__CLUSTER__PROTOCOL_VERSION=3",
+        "migriert den Marker von Version `2`",
+        "Marker `1` müssen zuerst",
+        "Stillstand aller Anwendungsreplikate sind verpflichtend",
+        "PostgreSQL-Backup und der zum alten Release gehörende Redis-Zustand",
+        "Redis-Protokollzustand zwingend gemeinsam",
         "delete hpa keywars-web keywars-arena keywars-worker",
         "run --rm keywars-protocol-cutover",
         "apply -f deploy/k8s/runtime-config.yaml",
@@ -132,6 +189,7 @@ require(
         "KEYWARS_CUTOVER_REPLICAS=1",
     ],
 )
+require("deploy/k8s/runtime-config.yaml", ['KEYWARS__CLUSTER__PROTOCOL_VERSION: "3"'])
 require(
     "deploy/k8s/hpa.yaml",
     ["apiVersion: autoscaling/v2", "kind: HorizontalPodAutoscaler", "name: keywars-arena"],
@@ -165,6 +223,8 @@ require(
         "postgres-tests:",
         "KEYWARS_TEST_POSTGRES_CONNECTION_STRING",
         "PostgreSqlPathUsesNativeRangesAndSkipsSqliteBackupRetention",
+        "PostgreSqlScaleReadPathsAndSeasonRolloverUseNativeWindowQueries",
+        "KEYWARS_TEST_POSTGRES_PASSWORD",
         "KEYWARS__AUTH__DEVELOPMENT_LOGIN",
     ],
 )

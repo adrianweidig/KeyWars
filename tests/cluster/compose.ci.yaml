@@ -1,20 +1,63 @@
 ---
 services:
+  redis-standalone:
+    image: redis:8.6.5-alpine@sha256:cd218f4b106a332c5c992e38a9480bfb9d7e9f8f7b0ec9a0023bfa36d9a408f9
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory-policy", "noeviction"]
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+      start_period: 3s
+
+  keywars-standalone-protocol-cutover:
+    image: ${KEYWARS_TEST_CLUSTER_IMAGE:-keywars:cluster-test}
+    command: ["maintenance", "cluster-protocol", "cutover", "--confirm-apps-stopped"]
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      KEYWARS__DATABASE__PROVIDER: postgresql
+      KEYWARS__CLUSTER__PROTOCOL_VERSION: "3"
+      KEYWARS__RUNTIME__ROLE: migrate
+      ConnectionStrings__KeyWars: >-
+        Host=postgres;Port=5432;Database=keywars;Username=keywars;
+        Password=${KEYWARS_TEST_POSTGRES_PASSWORD:?set by tests/cluster/Invoke-ClusterHarness.ps1}
+      KEYWARS__REDIS__CONNECTION_STRING: redis-standalone:6379,abortConnect=true,connectTimeout=10000,syncTimeout=15000
+    networks:
+      - backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-standalone:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777,noexec,nosuid,nodev
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: "no"
+
   postgres-tests:
     image: mcr.microsoft.com/dotnet/sdk:10.0@sha256:e1fc6e423f543119c406d24e2e687d67c569f18f04a37a8b0005d80ad0dcee80
     entrypoint: ["/bin/sh", "-ec"]
     command:
       - |
-        export KEYWARS_TEST_POSTGRES_CONNECTION_STRING="$$(cat /run/secrets/database-connection)"
+        filter='FullyQualifiedName~PostgreSqlPathUsesNativeRangesAndSkipsSqliteBackupRetention|FullyQualifiedName~PostgreSqlScaleReadPathsAndSeasonRolloverUseNativeWindowQueries'
+        dotnet restore tests/KeyWars.IntegrationTests/KeyWars.IntegrationTests.csproj --locked-mode
         exec dotnet test tests/KeyWars.IntegrationTests/KeyWars.IntegrationTests.csproj \
-          -c Release --no-build --no-restore \
-          --filter FullyQualifiedName~PostgreSqlPathUsesNativeRangesAndSkipsSqliteBackupRetention
+          -c Release --no-restore \
+          --results-directory /tmp/keywars-test-results \
+          --filter "$${filter}"
+    environment:
+      KEYWARS_TEST_POSTGRES_CONNECTION_STRING: >-
+        Host=postgres;Port=5432;Database=keywars;Username=keywars;
+        Password=${KEYWARS_TEST_POSTGRES_PASSWORD:?set by tests/cluster/Invoke-ClusterHarness.ps1}
     working_dir: /src
     volumes:
-      - .:/src:ro
-    secrets:
-      - database-connection
+      - .:/src
     networks:
+      - frontend
       - backend
     depends_on:
       postgres:

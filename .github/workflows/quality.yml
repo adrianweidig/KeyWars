@@ -34,7 +34,9 @@ jobs:
       - name: YAML lint
         uses: ibiqlik/action-yamllint@2576378a8e339169678f9939646ee3ee325e845c # v3
         with:
-          file_or_dir: .github .github/workflows deploy compose.yaml compose.scale.yaml
+          file_or_dir: >-
+            .github .github/workflows deploy compose.yaml compose.scale.yaml
+            compose.test-cluster.yaml tests/cluster/compose.ci.yaml
           config_data: |
             extends: default
             rules:

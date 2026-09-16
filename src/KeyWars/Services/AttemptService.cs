@@ -38,6 +38,38 @@ public sealed class AttemptService(
     {
         ValidateStartRequest(request);
         var resolvedText = await ResolveTextAsync(profileId, request, cancellationToken);
+        return await StartResolvedTextAsync(profileId, request, resolvedText, cancellationToken);
+    }
+
+    internal async Task<AttemptSession> StartSnapshotWithoutExpirationSweepAsync(
+        Guid profileId,
+        Guid trainingTextId,
+        string textSnapshot,
+        bool ratingEligible,
+        CancellationToken cancellationToken = default)
+    {
+        var request = new StartAttemptRequest(TrainingMode.Text, trainingTextId, null, null);
+        ValidateStartRequest(request);
+        var text = await db.TrainingTexts.AsNoTracking().SingleOrDefaultAsync(item =>
+            item.Id == trainingTextId &&
+            !item.IsQuarantined &&
+            (item.IsStandard || item.Visibility == TrainingTextVisibility.Organization || item.OwnerProfileId == profileId),
+            cancellationToken)
+            ?? throw AttemptError(AttemptErrorCodes.InvalidRequest, BadRequestStatus, "Der Trainingstext ist ungültig.");
+        var normalizedSnapshot = TypingEngine.NormalizeText(textSnapshot);
+        return await StartResolvedTextAsync(
+            profileId,
+            request,
+            new ResolvedAttemptText(normalizedSnapshot, trainingTextId, ratingEligible && text.RatingEligible),
+            cancellationToken);
+    }
+
+    private async Task<AttemptSession> StartResolvedTextAsync(
+        Guid profileId,
+        StartAttemptRequest request,
+        ResolvedAttemptText resolvedText,
+        CancellationToken cancellationToken)
+    {
         var start = typingEngine.Start(resolvedText.Body);
         var session = new AttemptSession(start.AttemptId, profileId, start.Text, request.Mode, start.StartedAt, null, start.Nonce, AttemptPhase.Prepared);
         await using var lifecycleLock = await sessionStore.AcquireLifecycleLockAsync(session.Id, cancellationToken);
@@ -47,7 +79,7 @@ public sealed class AttemptService(
         {
             Id = session.Id,
             UserProfileId = profileId,
-            TrainingTextId = resolvedText.Text?.Id,
+            TrainingTextId = resolvedText.TrainingTextId,
             Mode = request.Mode,
             Phase = AttemptPhase.Prepared,
             Nonce = session.Nonce,
@@ -55,7 +87,9 @@ public sealed class AttemptService(
             PreparedAt = session.PreparedAt,
             StartedAt = session.PreparedAt,
             Official = request.Mode != TrainingMode.Endless,
-            LeaderboardEligible = CompetitionEligibility.CanEnterLeaderboardAtStart(request.Mode, resolvedText.Text)
+            CompetitionIntegrityEligible = false,
+            LeaderboardEligible = CompetitionEligibility.IsStandardizedMode(request.Mode) ||
+                (request.Mode == TrainingMode.Text && resolvedText.RatingEligible)
         };
         db.TypingAttempts.Add(attempt);
         try
@@ -149,14 +183,14 @@ public sealed class AttemptService(
             ?? throw AttemptError(AttemptErrorCodes.NotFound, NotFoundStatus, "Dieser Versuch wurde nicht gefunden.");
         ValidateNonce(attempt.Nonce, request.Nonce);
 
-        if (attempt.FinishedAt is not null)
-        {
-            return BuildBeginResponse(attempt.Id, attempt.StartedAt, attempt.Mode, now);
-        }
-
         if (attempt.Phase is AttemptPhase.Expired or AttemptPhase.Aborted)
         {
             throw AttemptError(AttemptErrorCodes.Expired, GoneStatus, "Dieser Versuch ist abgelaufen.");
+        }
+
+        if (attempt.FinishedAt is not null || attempt.Phase == AttemptPhase.Finished)
+        {
+            return BuildBeginResponse(attempt.Id, attempt.StartedAt, attempt.Mode, now);
         }
 
         var session = await sessionStore.GetAsync(request.AttemptId, cancellationToken);
@@ -168,12 +202,62 @@ public sealed class AttemptService(
         ValidateSession(profileId, request.Nonce, session);
         if (session.Phase == AttemptPhase.Started && session.StartedAt is { } existingStartedAt)
         {
+            if (attempt.Phase == AttemptPhase.Started)
+            {
+                if (existingStartedAt != attempt.StartedAt)
+                {
+                    var repairedSession = session with { StartedAt = attempt.StartedAt };
+                    if (!await sessionStore.TryUpdateAsync(session, repairedSession, SessionLifetime, cancellationToken))
+                    {
+                        throw AttemptError(AttemptErrorCodes.Expired, GoneStatus, "Dieser Versuch ist nicht mehr aktiv.");
+                    }
+
+                    lifecycleLock.ThrowIfLost();
+                }
+
+                return BuildBeginResponse(attempt.Id, attempt.StartedAt, attempt.Mode, now);
+            }
+
+            if (attempt.Phase != AttemptPhase.Prepared)
+            {
+                throw AttemptError(AttemptErrorCodes.Expired, GoneStatus, "Dieser Versuch kann nicht mehr gestartet werden.");
+            }
+
+            var repairPreviousPhase = attempt.Phase;
+            var repairPreviousStartedAt = attempt.StartedAt;
+            attempt.Phase = AttemptPhase.Started;
+            attempt.StartedAt = existingStartedAt;
+            try
+            {
+                await db.SaveChangesAsync(cancellationToken);
+                lifecycleLock.ThrowIfLost();
+                await transaction.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                attempt.Phase = repairPreviousPhase;
+                attempt.StartedAt = repairPreviousStartedAt;
+                throw;
+            }
+
             return BuildBeginResponse(session.Id, existingStartedAt, session.Mode, now);
         }
 
         if (session.Phase != AttemptPhase.Prepared)
         {
             throw AttemptError(AttemptErrorCodes.Expired, GoneStatus, "Dieser Versuch kann nicht mehr gestartet werden.");
+        }
+
+        if (attempt.Phase == AttemptPhase.Started)
+        {
+            var repaired = session with { Phase = AttemptPhase.Started, StartedAt = attempt.StartedAt };
+            if (!await sessionStore.TryUpdateAsync(session, repaired, SessionLifetime, cancellationToken))
+            {
+                throw AttemptError(AttemptErrorCodes.Expired, GoneStatus, "Dieser Versuch ist nicht mehr aktiv.");
+            }
+
+            lifecycleLock.ThrowIfLost();
+            return BuildBeginResponse(attempt.Id, attempt.StartedAt, attempt.Mode, now);
         }
 
         var started = session with { Phase = AttemptPhase.Started, StartedAt = now };
@@ -196,6 +280,7 @@ public sealed class AttemptService(
             attempt.Phase = previousPhase;
             attempt.StartedAt = previousStartedAt;
             await sessionStore.TryUpdateAsync(started, session, SessionLifetime, CancellationToken.None);
+            db.Entry(attempt).State = EntityState.Detached;
             throw;
         }
 
@@ -205,7 +290,13 @@ public sealed class AttemptService(
     public async Task<AttemptCompletion> FinishAsync(Guid profileId, FinishAttemptRequest request, CancellationToken cancellationToken = default)
     {
         await SweepExpiredSessionsAsync(cancellationToken);
+        await using var sqliteSeasonWriteFence = db.Database.IsSqlite()
+            ? await SeasonWriteFence.AcquireAsync(db, cancellationToken)
+            : null;
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var postgresSeasonWriteFence = db.Database.IsNpgsql()
+            ? await SeasonWriteFence.AcquireAsync(db, cancellationToken)
+            : null;
         return await FinishAndCommitAsync(
             profileId,
             request,
@@ -329,6 +420,10 @@ public sealed class AttemptService(
             throw AttemptError(AttemptErrorCodes.StillRunning, ConflictStatus, "Der Zieltext ist noch nicht fehlerfrei abgeschlossen.");
         }
 
+        var competitionIntegrityEligible = CompetitionEligibility.HasPlausibleServerPace(
+            metrics.CorrectCharacters,
+            serverDuration);
+
         try
         {
             attempt.Phase = AttemptPhase.Finished;
@@ -350,6 +445,8 @@ public sealed class AttemptService(
             attempt.MeanWordMilliseconds = metrics.MeanWordMilliseconds;
             attempt.WordTimingVariation = metrics.WordTimingVariation;
             attempt.Completed = metrics.Completed;
+            attempt.CompetitionIntegrityEligible = competitionIntegrityEligible;
+            attempt.LeaderboardEligible &= competitionIntegrityEligible;
 
             PersistErrors(profileId, attempt.Id, metrics.Errors);
             await ProfileWriteFence.AcquireAsync(db, profileLockIds, cancellationToken);
@@ -357,7 +454,12 @@ public sealed class AttemptService(
             {
                 throw AttemptError(AttemptErrorCodes.NotFound, NotFoundStatus, "Dieses Profil ist nicht mehr verfügbar.");
             }
-            await motivationService.ApplyAttemptAsync(profileId, attempt, metrics.Errors, cancellationToken);
+            await motivationService.ApplyAttemptAsync(
+                profileId,
+                attempt,
+                metrics.Errors,
+                competitionIntegrityEligible,
+                cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
             await beforeCommit(attempt, cancellationToken);
             lifecycleLock.ThrowIfLost();
@@ -389,12 +491,12 @@ public sealed class AttemptService(
     {
         if (GetFixedWordCount(request.Mode) is { } fixedWordCount)
         {
-            return new ResolvedAttemptText(TypingEngine.BuildWordTest(fixedWordCount), null);
+            return new ResolvedAttemptText(TypingEngine.BuildWordTest(fixedWordCount), null, false);
         }
 
         if (GetSprintDuration(request.Mode) is not null)
         {
-            return new ResolvedAttemptText(TypingEngine.BuildWordTest(SprintTargetWordCount), null);
+            return new ResolvedAttemptText(TypingEngine.BuildWordTest(SprintTargetWordCount), null, false);
         }
 
         if (IsStoredTextMode(request.Mode) && request.TrainingTextId is { } textId)
@@ -403,7 +505,7 @@ public sealed class AttemptService(
                 item.Id == textId && !item.IsQuarantined &&
                 (item.IsStandard || item.Visibility == TrainingTextVisibility.Organization || item.OwnerProfileId == profileId), cancellationToken)
                 ?? throw AttemptError(AttemptErrorCodes.InvalidRequest, BadRequestStatus, "Der Trainingstext ist ungültig.");
-            return new ResolvedAttemptText(text.Body, text);
+            return new ResolvedAttemptText(text.Body, text.Id, text.RatingEligible);
         }
 
         if (request.Mode == TrainingMode.WeaknessFocus)
@@ -411,13 +513,13 @@ public sealed class AttemptService(
             var observations = await db.WeaknessObservations
                 .Where(item => item.UserProfileId == profileId)
                 .ToListAsync(cancellationToken);
-            return new ResolvedAttemptText(typingEngine.BuildWeaknessText(observations), null);
+            return new ResolvedAttemptText(typingEngine.BuildWeaknessText(observations), null, false);
         }
 
-        return new ResolvedAttemptText(TypingEngine.BuildWordTest(DefaultGeneratedWordCount), null);
+        return new ResolvedAttemptText(TypingEngine.BuildWordTest(DefaultGeneratedWordCount), null, false);
     }
 
-    private sealed record ResolvedAttemptText(string Body, TrainingText? Text);
+    private sealed record ResolvedAttemptText(string Body, Guid? TrainingTextId, bool RatingEligible);
 
     private static TimeSpan NormalizeServerDuration(TimeSpan serverDuration, TrainingMode mode)
     {

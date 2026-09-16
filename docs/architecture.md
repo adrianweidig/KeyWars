@@ -14,12 +14,12 @@ durch zusätzliche Replikate desselben Compose-Dienstes skaliert.
 
 ## Scale-Modus
 
-`compose.scale.yaml` trennt Laufzeitrollen:
+`compose.scale.yaml` trennt Laufzeit- und Routingrollen:
 
 | Rolle | Verantwortung |
 | --- | --- |
-| `web` | Razor Pages, HTTP-Endpunkte und Anmeldung |
-| `arena` | SignalR und Live-Arena |
+| `web` | öffentliches Standardziel für Razor Pages, HTTP-Endpunkte und Anmeldung |
+| `arena` | öffentliches Ziel für Arena-, Hub- und profil-löschende Routen; hostet dafür ebenfalls Razor Pages und APIs |
 | `worker` | asynchrone Abschluss- und Hintergrundarbeit |
 | `migrate` | einmalige PostgreSQL-Migration vor dem Start |
 | `all` | kombinierte Rolle der Einzelinstanz |
@@ -29,6 +29,17 @@ SignalR-Backplane und verteilten Laufzeitzustand bereit. `web`, `arena` und
 `worker` starten im Scale-Modus ohne diese Abhängigkeiten nicht. Swarm und
 Kubernetes verwenden dieselben Rollen; die Referenz für Betrieb und Wartung ist
 weiterhin Compose. Details: [Skalierter Betrieb](scale-operations.md).
+
+Die Trennung von `web` und `arena` ist im aktuellen Code eine Verantwortung des
+Edge-Routings, keine harte Endpoint-Isolation im Prozess. Beide Rollen hosten
+die Anwendung; nur `arena` mappt zusätzlich den SignalR-Hub. Caddy leitet die
+Arena- und Datenschutzpfade gezielt dorthin.
+
+Im Scale-Modus liegt jeder Raumzustand unter einem eigenen Redis-Hash-Tag.
+Attempt-, Presence-, Progress-, Completion- und Profilzugriffszustand wird unter
+Protokoll v2 auf 256 Buckets verteilt; Verzeichnisse und Admission-Zähler bilden
+eine globale Kontrollebene. Der Protokoll-Cutover läuft bei gestoppten
+Anwendungsrollen vor der Datenbankmigration.
 
 ## Fachliche Grenzen
 

@@ -7,8 +7,13 @@ using Microsoft.AspNetCore.Mvc.RazorPages;
 
 namespace KeyWars.Pages.Texte;
 
-public sealed class NeuModel(CurrentUser currentUser, TextLibraryService texts) : PageModel
+public sealed class NeuModel(
+    CurrentUser currentUser,
+    TextLibraryService texts,
+    ISharedRateLimiter rateLimiter) : PageModel
 {
+    private const int UploadPermitLimit = 10;
+
     [BindProperty]
     public TextInput Input { get; set; } = new();
 
@@ -44,6 +49,18 @@ public sealed class NeuModel(CurrentUser currentUser, TextLibraryService texts) 
 
     public async Task<IActionResult> OnPostUploadAsync(CancellationToken cancellationToken)
     {
+        var profile = await currentUser.RequireProfileAsync(User, cancellationToken);
+        if (!await rateLimiter.TryAcquireAsync(
+                "text-upload",
+                profile.Id.ToString("N"),
+                UploadPermitLimit,
+                TimeSpan.FromMinutes(1),
+                cancellationToken))
+        {
+            Response.Headers.RetryAfter = "60";
+            return StatusCode(StatusCodes.Status429TooManyRequests);
+        }
+
         if (Upload is null)
         {
             ModelState.AddModelError(string.Empty, "Bitte wähle eine .txt-Datei aus.");
