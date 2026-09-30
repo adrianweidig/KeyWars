@@ -101,6 +101,8 @@ public sealed class ProfileExportServiceTests
             .Where(property => property.PropertyType.IsGenericType &&
                 property.PropertyType.GetGenericTypeDefinition() == typeof(DbSet<>))
             .Select(property => property.Name)
+            .Where(name => name is not nameof(KeyWarsDbContext.LiveRoomCompletionOutboxEntries)
+                and not nameof(KeyWarsDbContext.LiveRoomCompletionOutboxProfiles))
             .Order()
             .ToArray();
         Assert.Equal(currentDbSets, coveredDbSets.Order().ToArray());

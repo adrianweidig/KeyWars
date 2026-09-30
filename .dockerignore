@@ -1,6 +1,10 @@
 .git
 .dotnet
 .dotnet-install
+artifacts/
+output/
+.codex/
+.agents/
 node_modules
 .vs
 .vscode

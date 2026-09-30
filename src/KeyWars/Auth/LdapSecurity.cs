@@ -15,6 +15,24 @@ public enum LdapFailureKind
 
 public static class LdapSecurity
 {
+    public static bool RequiresStartTls(Uri url, LdapOptions options)
+    {
+        if (url.Scheme.Equals("ldaps", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (url.Scheme.Equals("ldap", StringComparison.OrdinalIgnoreCase) &&
+            (options.AllowStartTls || options.AllowPlaintext))
+        {
+            return options.AllowStartTls;
+        }
+
+        throw new InvalidOperationException(
+            "KeyWars erlaubt nur ldaps:// oder ldap:// mit KEYWARS__LDAP__ALLOW_STARTTLS=true " +
+            "beziehungsweise ausdrücklich KEYWARS__LDAP__ALLOW_PLAINTEXT=true.");
+    }
+
     public static string NormalizeBindName(string username, LdapOptions options)
     {
         var trimmed = username.Trim();

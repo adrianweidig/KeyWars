@@ -928,6 +928,7 @@ public sealed class ProfileAndPersistenceTests
                 ["KEYWARS:LDAP:BASE_DN"] = "DC=example,DC=local",
                 ["KEYWARS:LDAP:UPN_SUFFIX"] = "example.local",
                 ["KEYWARS:LDAP:ALLOW_STARTTLS"] = "true",
+                ["KEYWARS:LDAP:ALLOW_PLAINTEXT"] = "true",
                 ["KEYWARS:AUTH:COOKIE_LIFETIME_HOURS"] = "6",
                 ["KEYWARS:LIVE:MAX_PARTICIPANTS_PER_ROOM"] = "12",
                 ["KEYWARS:LIVE:COUNTDOWN_SECONDS"] = "4",
@@ -959,6 +960,7 @@ public sealed class ProfileAndPersistenceTests
         Assert.Equal("DC=example,DC=local", ldap.BaseDn);
         Assert.Equal("example.local", ldap.UpnSuffix);
         Assert.True(ldap.AllowStartTls);
+        Assert.True(ldap.AllowPlaintext);
         Assert.Equal(6, auth.CookieLifetimeHours);
         Assert.Equal(12, live.MaxParticipantsPerRoom);
         Assert.Equal(4, live.CountdownSeconds);
@@ -1036,6 +1038,30 @@ public sealed class ProfileAndPersistenceTests
         });
 
         StartupValidator.Validate(configuration, new TestEnvironment("Staging"), NullLogger.Instance);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void StartupValidationRequiresExplicitPlaintextLdapOptIn(bool allowPlaintext)
+    {
+        var configuration = StartupConfiguration("Production", new Dictionary<string, string?>
+        {
+            ["KEYWARS:LDAP:URLS"] = "ldap://dc.example.local:389",
+            ["KEYWARS:LDAP:BASE_DN"] = "DC=example,DC=local",
+            ["KEYWARS:LDAP:UPN_SUFFIX"] = "example.local",
+            ["KEYWARS:LDAP:ALLOW_PLAINTEXT"] = allowPlaintext.ToString()
+        });
+
+        if (allowPlaintext)
+        {
+            StartupValidator.Validate(configuration, new TestEnvironment("Production"), NullLogger.Instance);
+        }
+        else
+        {
+            Assert.Throws<InvalidOperationException>(() =>
+                StartupValidator.Validate(configuration, new TestEnvironment("Production"), NullLogger.Instance));
+        }
     }
 
     [Fact]

@@ -34,6 +34,7 @@ public sealed class ProfilePrivacyServiceTests
         var completion = CreateCompletionRecord(profile.Id);
         context.Completions.Enqueue(completion);
         await context.Completions.FlushAsync();
+        Assert.Equal(CompletionState.Persisted, context.Completions.GetStatus(completion.Id).State);
         var room = context.LiveRooms.CreateRoom(new CreateLiveRoomRequest(profile.Id, profile.DisplayName, "Reset", "Text", LiveRoomMode.Classic, LiveRoomVisibility.InternalOpen, 1, 8));
         context.Presence.EnterRoom(profile.Id, "reset-tab", room.RoomId);
         var service = context.CreatePrivacyService();
@@ -548,6 +549,8 @@ public sealed class ProfilePrivacyServiceTests
             .Where(item => item.PropertyType.IsGenericType &&
                 item.PropertyType.GetGenericTypeDefinition() == typeof(DbSet<>))
             .Select(item => item.Name)
+            .Where(name => name is not nameof(KeyWarsDbContext.LiveRoomCompletionOutboxEntries)
+                and not nameof(KeyWarsDbContext.LiveRoomCompletionOutboxProfiles))
             .Order()
             .ToArray();
         Assert.Equal(currentDbSets, coveredDbSets.Order().ToArray());
@@ -662,14 +665,16 @@ public sealed class ProfilePrivacyServiceTests
                 CompletionQueueCapacity = 16,
                 CompletionDrainTimeoutSeconds = 1
             };
-            ILiveRoomCompletionWriter completionWriter = failCompletionWrites
-                ? new FailingCompletionWriter()
-                : new NoopCompletionWriter();
             var outboxServices = new ServiceCollection()
                 .AddScoped(_ => new KeyWarsDbContext(options))
+                .AddScoped<MotivationService>()
                 .AddSingleton<TimeProvider>(time)
                 .AddSingleton<LiveRoomCompletionOutbox>()
+                .AddSingleton<RelationalLiveRoomCompletionWriter>()
                 .BuildServiceProvider();
+            ILiveRoomCompletionWriter completionWriter = failCompletionWrites
+                ? new FailingCompletionWriter()
+                : outboxServices.GetRequiredService<RelationalLiveRoomCompletionWriter>();
             var completions = new LiveRoomCompletionQueue(
                 Options.Create(liveOptions),
                 completionWriter,
@@ -938,11 +943,6 @@ public sealed class ProfilePrivacyServiceTests
     private sealed class ManualTimeProvider(DateTimeOffset utcNow) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => utcNow;
-    }
-
-    private sealed class NoopCompletionWriter : ILiveRoomCompletionWriter
-    {
-        public Task PersistAsync(CompletedRoomRecord record, CancellationToken cancellationToken) => Task.CompletedTask;
     }
 
     private sealed class FailingCompletionWriter : ILiveRoomCompletionWriter

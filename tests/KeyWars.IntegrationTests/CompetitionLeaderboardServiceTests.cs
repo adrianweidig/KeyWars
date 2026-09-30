@@ -67,7 +67,7 @@ public sealed class CompetitionLeaderboardServiceTests
         var entry = Assert.Single(result.Board.Entries);
         Assert.Equal(alice.Id, entry.UserProfileId);
         Assert.Equal(80, entry.Wpm);
-        Assert.Equal("80.0 WPM", result.PersonalBest);
+        Assert.Equal($"{80:F1} WPM", result.PersonalBest);
         Assert.DoesNotContain(result.Board.Entries, item => item.UserProfileId == legacyOnly.Id);
     }
 

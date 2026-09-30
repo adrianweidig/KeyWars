@@ -43,7 +43,8 @@ public sealed class RedisProfileHubConnectionStateStoreContractTests
         Assert.Contains("generation ~= tonumber(@expectedGeneration)", update, StringComparison.Ordinal);
         Assert.Contains("exists', @connectionKey", update, StringComparison.Ordinal);
         Assert.Contains("redis.call('incr', @generationKey)", revoke, StringComparison.Ordinal);
-        Assert.Contains("@maximumConnections", revoke, StringComparison.Ordinal);
+        Assert.Contains("@maximumConnections", register, StringComparison.Ordinal);
+        Assert.Contains("@maximumDirectoryEntries", revoke, StringComparison.Ordinal);
         Assert.DoesNotContain("expire', @generationKey", revoke, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("@generationKey", unregister, StringComparison.Ordinal);
     }

@@ -35,7 +35,7 @@ Health-Prüfungen stehen unter [Skalierter Betrieb](scale-operations.md).
 | `KEYWARS_IMAGE`, `KEYWARS_VERSION` | Image und exakter Release-Tag; in Produktion nicht `latest` verwenden |
 | `KEYWARS_BIND_ADDRESS` | standardmäßig `127.0.0.1` für einen Proxy auf demselben Host |
 | `KEYWARS_PORT` | Host-Port, standardmäßig `8080` |
-| `KEYWARS_LDAP_URLS` | Semikolonliste der `ldaps://`-Domain-Controller |
+| `KEYWARS_LDAP_URLS` | Semikolonliste der Verzeichnisserver; standardmäßig `ldaps://` |
 | `KEYWARS_LDAP_BASE_DN` | Suchwurzel des Verzeichnisses |
 | `KEYWARS_LDAP_UPN_SUFFIX` | ergänzt kurze Anmeldenamen zu einem UPN |
 | `KEYWARS_TIME_ZONE` | IANA-Zeitzone des Containers, standardmäßig `Europe/Berlin` |

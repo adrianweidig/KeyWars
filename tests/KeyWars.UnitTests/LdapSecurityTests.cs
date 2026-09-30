@@ -12,6 +12,29 @@ public sealed class LdapSecurityTests
     private static readonly LdapOptions Options = new() { UpnSuffix = "top.secret" };
 
     [Theory]
+    [InlineData("ldaps://dc.top.secret:636", false, false, false)]
+    [InlineData("ldap://dc.top.secret:389", true, false, true)]
+    [InlineData("ldap://dc.top.secret:389", false, true, false)]
+    [InlineData("ldap://dc.top.secret:389", true, true, true)]
+    [InlineData("ldaps://dc.top.secret:636", false, true, false)]
+    public void TransportRequiresExplicitOptInAndPrefersStartTls(
+        string url, bool allowStartTls, bool allowPlaintext, bool expectedStartTls)
+    {
+        var options = new LdapOptions { AllowStartTls = allowStartTls, AllowPlaintext = allowPlaintext };
+
+        Assert.Equal(expectedStartTls, LdapSecurity.RequiresStartTls(new Uri(url), options));
+    }
+
+    [Theory]
+    [InlineData("ldap://dc.top.secret:389", false)]
+    [InlineData("https://dc.top.secret", true)]
+    public void TransportRejectsPlaintextByDefaultAndUnsupportedSchemes(string url, bool allowPlaintext)
+    {
+        Assert.Throws<InvalidOperationException>(() =>
+            LdapSecurity.RequiresStartTls(new Uri(url), new LdapOptions { AllowPlaintext = allowPlaintext }));
+    }
+
+    [Theory]
     [InlineData("max", "max@top.secret")]
     [InlineData(" max@top.secret ", "max@top.secret")]
     [InlineData("TOP\\max", "TOP\\max")]

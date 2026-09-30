@@ -32,7 +32,6 @@ public static class StartupValidator
         var baseDn = ldapOptions.BaseDn;
         var upnSuffix = ldapOptions.UpnSuffix;
         var developmentAuth = authOptions.DevelopmentLogin;
-        var allowStartTls = ldapOptions.AllowStartTls;
         var caCertificatePath = ldapOptions.CaCertificatePath;
 
         if (string.IsNullOrWhiteSpace(urls))
@@ -98,17 +97,11 @@ public static class StartupValidator
                 throw new InvalidOperationException($"Ungültige LDAP-URL: {value}");
             }
 
-            if (uri.Scheme.Equals("ldaps", StringComparison.OrdinalIgnoreCase))
+            var useStartTls = LdapSecurity.RequiresStartTls(uri, ldapOptions);
+            if (uri.Scheme.Equals("ldap", StringComparison.OrdinalIgnoreCase) && !useStartTls)
             {
-                continue;
+                logger.LogWarning("LDAP ohne TLS wurde ausdrücklich aktiviert; Benutzeranmeldedaten werden zum Verzeichnisserver unverschlüsselt übertragen.");
             }
-
-            if (uri.Scheme.Equals("ldap", StringComparison.OrdinalIgnoreCase) && allowStartTls)
-            {
-                continue;
-            }
-
-            throw new InvalidOperationException("KeyWars erlaubt außerhalb von Development nur ldaps:// oder ldap:// mit KEYWARS__LDAP__ALLOW_STARTTLS=true.");
         }
 
         logger.LogInformation("Startvalidierung für nicht-lokale Umgebung abgeschlossen.");

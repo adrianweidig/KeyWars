@@ -10,6 +10,7 @@ public sealed class LdapOptions
     public int ConnectTimeoutSeconds { get; set; } = 5;
     public int OperationTimeoutSeconds { get; set; } = 10;
     public bool AllowStartTls { get; set; }
+    public bool AllowPlaintext { get; set; }
 }
 
 public sealed class AuthOptions

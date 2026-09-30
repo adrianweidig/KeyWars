@@ -83,6 +83,7 @@ public sealed class LdapAuthenticator(IOptions<LdapOptions> options, ILogger<Lda
         LdapOptions ldapOptions,
         CancellationToken cancellationToken)
     {
+        var useStartTls = LdapSecurity.RequiresStartTls(url, ldapOptions);
         var port = url.Port > 0 ? url.Port : url.Scheme.Equals("ldaps", StringComparison.OrdinalIgnoreCase) ? 636 : 389;
         var identifier = new LdapDirectoryIdentifier(url.Host, port, fullyQualifiedDnsHostName: false, connectionless: false);
         using var caCertificate = ConfigureCertificateValidation(ldapOptions.CaCertificatePath);
@@ -102,13 +103,8 @@ public sealed class LdapAuthenticator(IOptions<LdapOptions> options, ILogger<Lda
                 VerifyServerCertificate(url.Host, certificate, caCertificate);
         }
 
-        if (url.Scheme.Equals("ldap", StringComparison.OrdinalIgnoreCase))
+        if (useStartTls)
         {
-            if (!ldapOptions.AllowStartTls)
-            {
-                throw new InvalidOperationException("LDAP ohne StartTLS ist nicht erlaubt.");
-            }
-
             connection.SessionOptions.StartTransportLayerSecurity(null);
         }
 

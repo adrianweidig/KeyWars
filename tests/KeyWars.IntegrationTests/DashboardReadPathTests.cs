@@ -52,6 +52,7 @@ public sealed class DashboardReadPathTests
             Consistency = 95,
             Completed = true,
             Official = true,
+            CompetitionIntegrityEligible = true,
             LeaderboardEligible = true,
             CreatedAt = now
         });

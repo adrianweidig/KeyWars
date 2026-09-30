@@ -20,6 +20,7 @@ public static class ConfigurationAliases
         SetInt(section, "CONNECT_TIMEOUT_SECONDS", value => options.ConnectTimeoutSeconds = value);
         SetInt(section, "OPERATION_TIMEOUT_SECONDS", value => options.OperationTimeoutSeconds = value);
         SetBool(section, "ALLOW_STARTTLS", value => options.AllowStartTls = value);
+        SetBool(section, "ALLOW_PLAINTEXT", value => options.AllowPlaintext = value);
     }
 
     public static void BindAuth(IConfiguration configuration, AuthOptions options)

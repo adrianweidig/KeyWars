@@ -20,7 +20,8 @@ Optional:
 | `KEYWARS_LDAP_CA_CERTIFICATE_PATH` | leer | CA-Datei im Container, üblicherweise `/data/certs/ad-root-ca.pem` |
 | `KEYWARS_LDAP_CONNECT_TIMEOUT_SECONDS` | 5 | Verbindungs-/Bind-Timeout, 1 bis 60 Sekunden |
 | `KEYWARS_LDAP_OPERATION_TIMEOUT_SECONDS` | 10 | Such-Timeout, 1 bis 120 Sekunden |
-| `KEYWARS_LDAP_ALLOW_STARTTLS` | `false` | muss für jedes `ldap://`-Ziel `true` sein |
+| `KEYWARS_LDAP_ALLOW_STARTTLS` | `false` | aktiviert StartTLS für `ldap://`-Ziele |
+| `KEYWARS_LDAP_ALLOW_PLAINTEXT` | `false` | erlaubt ausdrücklich `ldap://` ohne TLS, wenn StartTLS ausgeschaltet ist |
 
 Moderationsgruppen werden außerhalb von Development ausschließlich als
 vollständige `memberOf`-DNs über `KEYWARS_MODERATOR_GROUP_DNS` konfiguriert.
@@ -31,6 +32,18 @@ Leere Werte vergeben keine Rechte. Details:
 LDAPS ist der Standard. Bei einer eigenen CA müssen die LDAP-DNS-Namen zum
 Zertifikat passen. Ohne eigenen CA-Pfad gilt der Zertifikatsspeicher des
 Containers.
+
+## LDAP ohne TLS
+
+Für ein Verzeichnis ohne LDAPS und StartTLS `KEYWARS_LDAP_URLS` auf die echten
+`ldap://`-Server mit Port `389` setzen und `KEYWARS_LDAP_ALLOW_PLAINTEXT=true`
+sowie `KEYWARS_LDAP_ALLOW_STARTTLS=false` konfigurieren. Der direkte Bind
+überträgt Benutzername und Passwort dann unverschlüsselt. Beschränke die
+Verbindung auf das dafür vorgesehene interne Netz. Die AD-Richtlinien müssen
+diesen Bind zulassen; erzwungene LDAP-Signierung kann ihn ablehnen.
+
+Eine aktivierte StartTLS-Option hat Vorrang und fällt bei einem TLS-Fehler
+nicht auf Klartext zurück. Die Browseranmeldung bleibt hinter HTTPS.
 
 ## Eigene CA vor dem Start hinterlegen
 

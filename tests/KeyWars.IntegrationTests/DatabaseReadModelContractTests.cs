@@ -170,7 +170,8 @@ public sealed class DatabaseReadModelContractTests
             migration => Assert.EndsWith("_AddSeasonScoring", migration, StringComparison.Ordinal),
             migration => Assert.EndsWith("_AddArenaPersonalBestIndex", migration, StringComparison.Ordinal),
             migration => Assert.EndsWith("_AddCompetitionIntegrityEligibility", migration, StringComparison.Ordinal),
-            migration => Assert.EndsWith("_AddChallengeTargetSnapshot", migration, StringComparison.Ordinal));
+            migration => Assert.EndsWith("_AddChallengeTargetSnapshot", migration, StringComparison.Ordinal),
+            migration => Assert.EndsWith("_AddLocalCompletionOutbox", migration, StringComparison.Ordinal));
         Assert.Contains("CREATE TABLE \"UserProfiles\"", script, StringComparison.Ordinal);
         Assert.Contains("timestamp with time zone", script, StringComparison.Ordinal);
         Assert.Contains("uuid", script, StringComparison.Ordinal);

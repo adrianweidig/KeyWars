@@ -854,6 +854,7 @@ test("Challenge-Spiel bleibt nach vorbereiteter Runde und Reload spielbar", asyn
     await expect(page.locator(".person-picker-chip")).toContainText(displayName(`browser.challenge.partner.${suffix}`));
     await page.getByRole("button", { name: "Herausforderung senden" }).click();
     await expect(page).toHaveURL(/\/herausforderungen\/[0-9a-f-]{36}$/i);
+    const challengeUrl = page.url();
 
     await page.getByRole("link", { name: "Runde 1 spielen" }).click();
     await expect(page).toHaveURL(/\/herausforderungen\/[0-9a-f-]{36}\/spielen$/i);
@@ -905,10 +906,22 @@ test("Challenge-Spiel bleibt nach vorbereiteter Runde und Reload spielbar", asyn
     expect(challengeLayout.motivationColumns).toBeLessThanOrEqual(2);
 
     await page.goto("/ranglisten?board=challenge&period=day");
+    await expect(page.locator(".competition-table tbody tr")).toHaveCount(0);
+
+    await partner.goto(challengeUrl);
+    await partner.getByRole("button", { name: "Annehmen", exact: true }).click();
+    await partner.getByRole("link", { name: "Runde 1 spielen" }).click();
+    const partnerInput = partner.locator("[data-input]");
+    await expect(partnerInput).toBeEnabled({ timeout: 15_000 });
+    const partnerTarget = (await partner.locator("[data-target]").textContent()).trim();
+    await partnerInput.fill(partnerTarget);
+    await expect(partner.locator(".finish-panel")).toBeVisible({ timeout: 15_000 });
+    await page.goto("/ranglisten?board=challenge&period=day");
     await expect(page.getByRole("heading", { name: "Challenge-Bestleistungen" })).toBeVisible();
     await expect(page.locator(".podium-card")).toHaveCount(1);
     await expect(page.locator(".competition-table tbody tr")).toHaveCount(1);
-    await expect(page.locator(".competition-table")).toContainText("Platz offen");
+    await expect(page.locator(".competition-table")).toContainText(displayName(`browser.challenge.owner.${suffix}`));
+    await expect(page.locator(".competition-table")).toContainText(`Browser Challenge ${suffix}`);
     await expect(page.locator(".competition-side")).toContainText("Top halten");
     await expect(page.locator(".competition-side")).toContainText("Du führst dieses Board");
     await expect(page.locator(".competition-side")).not.toContainText("Bestwert setzen");

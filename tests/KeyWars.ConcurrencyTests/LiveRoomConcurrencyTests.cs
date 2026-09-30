@@ -252,7 +252,13 @@ public sealed class LiveRoomConcurrencyTests
         manager.SetReady(room.RoomId, first, true);
         manager.SetReady(room.RoomId, second, true);
         manager.Start(room.RoomId, first);
-        time.Advance(TimeSpan.FromSeconds(4));
+        time.Advance(TimeSpan.FromSeconds(2));
+        manager.SubmitProgress(room.RoomId, first, new LiveProgressInputDelta(0, 1, 0, target[..20], null));
+        manager.SubmitProgress(room.RoomId, second, new LiveProgressInputDelta(0, 1, 0, target[..20], null));
+        time.Advance(TimeSpan.FromSeconds(1));
+        manager.SubmitProgress(room.RoomId, first, new LiveProgressInputDelta(1, 2, 0, target[20..40], null));
+        manager.SubmitProgress(room.RoomId, second, new LiveProgressInputDelta(1, 2, 0, target[20..40], null));
+        time.Advance(TimeSpan.FromSeconds(1));
 
         manager.Finish(room.RoomId, first, target, 0, 0);
         manager.Finish(room.RoomId, second, target, 0, 0);
@@ -275,12 +281,16 @@ public sealed class LiveRoomConcurrencyTests
         source.Start(room.RoomId, first);
         time.Advance(TimeSpan.FromSeconds(1));
         source.Finish(room.RoomId, first, target, 0, 0);
+        time.Advance(TimeSpan.FromSeconds(1));
+        source.SubmitProgress(room.RoomId, second, new LiveProgressInputDelta(0, 1, 0, target[..20], null));
+        time.Advance(TimeSpan.FromSeconds(1));
+        source.SubmitProgress(room.RoomId, second, new LiveProgressInputDelta(1, 2, 0, target[20..40], null));
 
         var memento = source.ExportRoomState(room.RoomId);
         var sink = new RecordingCompletionSink();
         var replica = CreateManager(new LiveOptions { CountdownSeconds = 1 }, time, sink);
         Assert.True(replica.ImportRoomState(memento));
-        time.Advance(TimeSpan.FromSeconds(3));
+        time.Advance(TimeSpan.FromSeconds(1));
         replica.Finish(room.RoomId, second, target, 0, 0);
 
         var participants = Assert.Single(sink.Records).Participants.ToDictionary(item => item.UserProfileId);

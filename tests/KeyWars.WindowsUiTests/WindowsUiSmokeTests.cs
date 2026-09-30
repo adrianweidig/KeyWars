@@ -52,9 +52,9 @@ public sealed class WindowsUiSmokeTests
     public void Uia3ExposesTheLoginControls()
     {
         var window = RequiredEnvironment.MainWindow!;
-        var document = window.FindFirstDescendant(factory => factory.ByControlType(ControlType.Document));
         var inputFields = WaitForLoginInputs(window);
         var loginButton = WaitForVisibleElement(window, ControlType.Button, "Anmelden");
+        var document = window.FindFirstDescendant(factory => factory.ByControlType(ControlType.Document));
 
         Assert.Multiple(() =>
         {

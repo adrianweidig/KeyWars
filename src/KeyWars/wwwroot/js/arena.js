@@ -163,7 +163,6 @@ export function attachArenaPages() {
     let disposed = false;
     let persistenceState = normalizePersistenceState(root.dataset.persistenceState) || "Inactive";
     let restoreInputFocusAfterReconnect = false;
-    let ignoreNextInputBlur = false;
 
     const clearConnectionError = () => {
       document.querySelector("[data-arena-error]")?.remove();
@@ -203,16 +202,7 @@ export function attachArenaPages() {
         return;
       }
 
-      if (disabled && !input.disabled && document.activeElement === input) {
-        ignoreNextInputBlur = true;
-      }
-
       input.disabled = disabled;
-      if (ignoreNextInputBlur) {
-        window.queueMicrotask(() => {
-          ignoreNextInputBlur = false;
-        });
-      }
     };
 
     const renderTarget = () => {
@@ -1742,8 +1732,7 @@ export function attachArenaPages() {
       }
     });
     input?.addEventListener("blur", () => {
-      if (ignoreNextInputBlur) {
-        ignoreNextInputBlur = false;
+      if (input.disabled) {
         return;
       }
 

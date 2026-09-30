@@ -795,7 +795,7 @@ public sealed class LiveRoomCompletionQueueTests
     }
 
     [Fact]
-    public async Task StopAsyncFlushesQueuedCompletions()
+    public async Task StopAsyncKeepsQueuedCompletionsDurableForRestart()
     {
         await using var context = await CompletionTestContext.CreateAsync();
         var record = CreateRecord(Guid.CreateVersion7(), context.FirstProfileId, context.SecondProfileId);
@@ -805,6 +805,16 @@ public sealed class LiveRoomCompletionQueueTests
 
         await using var scope = context.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<KeyWarsDbContext>();
+        Assert.Equal(record.Id, (await db.LiveRoomCompletionOutboxEntries.SingleAsync()).RoomId);
+        Assert.Equal(1, context.Queue.PendingCount);
+        using var restartedQueue = new LiveRoomCompletionQueue(
+            Options.Create(new LiveOptions { MaxConcurrentRooms = 16, CompletionQueueCapacity = 16 }),
+            context.Services.GetRequiredService<RelationalLiveRoomCompletionWriter>(),
+            context.Services.GetRequiredService<LiveRoomCompletionOutbox>(),
+            TimeProvider.System,
+            NullLogger<LiveRoomCompletionQueue>.Instance);
+        await restartedQueue.FlushAsync(CancellationToken.None);
+
         Assert.Equal(1, await db.LiveRoomSummaries.CountAsync());
         Assert.Equal(2, await db.LiveRoomParticipantSummaries.CountAsync());
         Assert.Equal(0, context.Queue.PendingCount);
@@ -888,7 +898,7 @@ public sealed class LiveRoomCompletionQueueTests
         Assert.Equal(CompletionDrainStatus.Failed, drain.Status);
         Assert.Equal(1, context.Queue.FailedRecordCount);
         Assert.Equal(1, context.Queue.GetMetrics().FailedCompletions);
-        Assert.Equal(3, context.WriterAttempts);
+        Assert.Equal(1, context.WriterAttempts);
 
         await using var scope = context.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<KeyWarsDbContext>();
@@ -924,12 +934,12 @@ public sealed class LiveRoomCompletionQueueTests
         await using var context = await CompletionTestContext.CreateAsync();
         var queue = new LiveRoomCompletionQueue(
             Options.Create(new LiveOptions { MaxConcurrentRooms = 1, CompletionQueueCapacity = 1 }),
-            new NoopCompletionWriter(),
+            context.Services.GetRequiredService<RelationalLiveRoomCompletionWriter>(),
             context.Services.GetRequiredService<LiveRoomCompletionOutbox>(),
             TimeProvider.System,
             NullLogger<LiveRoomCompletionQueue>.Instance);
-        var first = Guid.CreateVersion7();
-        var second = Guid.CreateVersion7();
+        var first = context.FirstProfileId;
+        var second = context.SecondProfileId;
         var roomId = Guid.CreateVersion7();
         var record = CreateRecord(roomId, first, second);
         await queue.StartAsync(CancellationToken.None);
@@ -1352,9 +1362,11 @@ public sealed class LiveRoomCompletionQueueTests
         public Task PersistAsync(CompletedRoomRecord record, CancellationToken cancellationToken)
         {
             Attempts++;
-            return permanentFailure || Attempts == 1
-                ? Task.FromException(new SqliteException("database is locked", 5))
-                : inner.PersistAsync(record, cancellationToken);
+            return permanentFailure
+                ? Task.FromException(new SqliteException("constraint failed", 19))
+                : Attempts == 1
+                    ? Task.FromException(new SqliteException("database is locked", 5))
+                    : inner.PersistAsync(record, cancellationToken);
         }
     }
 
