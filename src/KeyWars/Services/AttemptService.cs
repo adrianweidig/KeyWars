@@ -43,6 +43,7 @@ public sealed class AttemptService(
 
     internal async Task<AttemptSession> StartSnapshotWithoutExpirationSweepAsync(
         Guid profileId,
+        Guid textAccessProfileId,
         Guid trainingTextId,
         string textSnapshot,
         bool ratingEligible,
@@ -53,7 +54,7 @@ public sealed class AttemptService(
         var text = await db.TrainingTexts.AsNoTracking().SingleOrDefaultAsync(item =>
             item.Id == trainingTextId &&
             !item.IsQuarantined &&
-            (item.IsStandard || item.Visibility == TrainingTextVisibility.Organization || item.OwnerProfileId == profileId),
+            (item.IsStandard || item.Visibility == TrainingTextVisibility.Organization || item.OwnerProfileId == textAccessProfileId),
             cancellationToken)
             ?? throw AttemptError(AttemptErrorCodes.InvalidRequest, BadRequestStatus, "Der Trainingstext ist ungültig.");
         var normalizedSnapshot = TypingEngine.NormalizeText(textSnapshot);

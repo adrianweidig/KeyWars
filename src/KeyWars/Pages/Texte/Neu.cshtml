@@ -7,13 +7,13 @@
 <section class="page-header">
     <div>
         <h1>Neuer Text</h1>
-        <p class="lead">Füge einen Text per Eingabe ein oder lade eine `.txt`-Datei hoch. Nutzertexte sind nicht global ratingfähig.</p>
+        <p class="lead">Schreibe einen Trainingstext oder lade eine Textdatei (.txt) hoch. Eigene Texte zählen nicht für das globale Rating.</p>
     </div>
 </section>
 
 <section class="card">
     <form method="post" class="form-grid">
-        <div asp-validation-summary="ModelOnly"></div>
+        <div asp-validation-summary="All"></div>
         <label>
             Titel
             <input asp-for="Input.Title" />
@@ -36,7 +36,7 @@
 <section class="card stack-spaced">
     <form method="post" enctype="multipart/form-data" asp-page-handler="Upload" class="form-grid">
         <label>
-            `.txt`-Datei
+            Textdatei (.txt)
             <input type="file" asp-for="Upload" accept=".txt,text/plain" />
         </label>
         <label>

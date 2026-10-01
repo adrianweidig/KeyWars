@@ -10,7 +10,7 @@
         <div class="section-header">
             <div>
                 <h1>Sofortrunde</h1>
-                <p>Ein sauberer 60-Sekunden-Lauf mit großer Textbahn, direkter Eingabe und Reward-Moment.</p>
+                <p>60 Sekunden üben. Die Zeit startet mit deiner ersten Eingabe.</p>
             </div>
             <a class="mode-select-link" asp-page="/Spielen/Sprint">Sprint 60</a>
         </div>
@@ -71,7 +71,7 @@
     </div>
 
     <div class="play-text-grid">
-        @foreach (var text in Model.Texts)
+        @foreach (var text in Model.Texts.Take(6))
         {
             <article class="text-card play-text-card">
                 <div>

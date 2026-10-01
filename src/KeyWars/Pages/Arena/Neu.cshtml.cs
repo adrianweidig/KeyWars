@@ -109,7 +109,12 @@ public sealed class NeuModel(
             return Page();
         }
 
-        var text = await texts.GetVisibleAsync(profile.Id, Input.TrainingTextId, cancellationToken);
+        var text = await texts.FindVisibleAsync(profile.Id, Input.TrainingTextId, cancellationToken);
+        if (text is null)
+        {
+            ModelState.AddModelError($"{nameof(Input)}.{nameof(Input.TrainingTextId)}", "Der ausgewählte Text ist nicht verfügbar.");
+            return Page();
+        }
         var normalizedTarget = TypingEngine.NormalizeText(text.Body);
         if (!IsArenaSafeTarget(normalizedTarget))
         {

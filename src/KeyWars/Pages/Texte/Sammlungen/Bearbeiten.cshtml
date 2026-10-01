@@ -13,7 +13,7 @@
 
 <section class="card">
     <form method="post" class="form-grid">
-        <div asp-validation-summary="ModelOnly"></div>
+        <div asp-validation-summary="All"></div>
         <label>
             Name
             <input asp-for="Input.Name" />
@@ -29,8 +29,9 @@
                 <option value="Organization">Organisationsweit freigeben</option>
             </select>
         </label>
-        <fieldset>
+        <fieldset class="settings-group">
             <legend>Texte</legend>
+            <div class="collection-text-options" tabindex="0" role="group" aria-label="Verfügbare Trainingstexte">
             @foreach (var text in Model.Texts)
             {
                 <label class="checkbox-label">
@@ -45,6 +46,7 @@
                     @text.Title
                 </label>
             }
+            </div>
         </fieldset>
         <div class="form-actions">
             <button type="submit">Änderungen speichern</button>

@@ -13,13 +13,16 @@ public sealed class KopierenModel(CurrentUser currentUser, TextLibraryService te
     public async Task<IActionResult> OnGetAsync(Guid id, CancellationToken cancellationToken)
     {
         var profile = await currentUser.RequireProfileAsync(User, cancellationToken);
-        Original = await texts.GetVisibleAsync(profile.Id, id, cancellationToken);
+        var original = await texts.FindVisibleAsync(profile.Id, id, cancellationToken);
+        if (original is null) return NotFound();
+        Original = original;
         return Page();
     }
 
     public async Task<IActionResult> OnPostAsync(Guid id, CancellationToken cancellationToken)
     {
         var profile = await currentUser.RequireProfileAsync(User, cancellationToken);
+        if (await texts.FindVisibleAsync(profile.Id, id, cancellationToken) is null) return NotFound();
         var copy = await texts.CopyAsync(profile.Id, id, cancellationToken);
         return RedirectToPage("/Texte/Details", new { id = copy.Id });
     }

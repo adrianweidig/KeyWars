@@ -14,12 +14,12 @@ public sealed class DetailsModel(CurrentUser currentUser, TextLibraryService tex
 
     public async Task<IActionResult> OnGetAsync(Guid id, CancellationToken cancellationToken)
     {
-        await LoadAsync(id, cancellationToken);
-        return Page();
+        return await LoadAsync(id, cancellationToken) ? Page() : NotFound();
     }
 
     public async Task<IActionResult> OnPostCopyAsync(Guid id, CancellationToken cancellationToken)
     {
+        if (!await LoadAsync(id, cancellationToken)) return NotFound();
         var profile = await currentUser.RequireProfileAsync(User, cancellationToken);
         var copy = await texts.CopyAsync(profile.Id, id, cancellationToken);
         return RedirectToPage("/Texte/Details", new { id = copy.Id });
@@ -36,16 +36,18 @@ public sealed class DetailsModel(CurrentUser currentUser, TextLibraryService tex
         catch (InvalidOperationException ex)
         {
             ModelState.AddModelError(string.Empty, ex.Message);
-            await LoadAsync(id, cancellationToken);
-            return Page();
+            return await LoadAsync(id, cancellationToken) ? Page() : NotFound();
         }
     }
 
-    private async Task LoadAsync(Guid id, CancellationToken cancellationToken)
+    private async Task<bool> LoadAsync(Guid id, CancellationToken cancellationToken)
     {
         var profile = await currentUser.RequireProfileAsync(User, cancellationToken);
-        Text = await texts.GetVisibleAsync(profile.Id, id, cancellationToken);
+        var text = await texts.FindVisibleAsync(profile.Id, id, cancellationToken);
+        if (text is null) return false;
+        Text = text;
         CanManage = Text.OwnerProfileId == profile.Id && !Text.IsStandard;
         Quality = texts.AnalyzeText(Text.Body);
+        return true;
     }
 }

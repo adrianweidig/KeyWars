@@ -69,8 +69,10 @@
             {
                 <tr>
                     <td data-label="Inhalt">
-                        <strong>@item.Title</strong><br />
-                        <span class="muted">@(item.TargetType == ContentModerationTargetType.TrainingText ? "Text" : "Sammlung")</span>
+                        <div>
+                            <strong>@item.Title</strong><br />
+                            <span class="muted">@(item.TargetType == ContentModerationTargetType.TrainingText ? "Text" : "Sammlung")</span>
+                        </div>
                     </td>
                     <td data-label="Eigentümer">@item.OwnerDisplayName</td>
                     <td data-label="Status">

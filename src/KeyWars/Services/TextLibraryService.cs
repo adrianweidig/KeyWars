@@ -78,10 +78,14 @@ public sealed class TextLibraryService(
 
     public async Task<TrainingText> GetVisibleAsync(Guid ownerProfileId, Guid textId, CancellationToken cancellationToken = default)
     {
-        return await db.TrainingTexts
-            .SingleAsync(text => text.Id == textId && !text.IsQuarantined &&
-                (text.IsStandard || text.Visibility == TrainingTextVisibility.Organization || text.OwnerProfileId == ownerProfileId), cancellationToken);
+        return await FindVisibleAsync(ownerProfileId, textId, cancellationToken)
+            ?? throw new InvalidOperationException("Der Trainingstext ist nicht verfügbar.");
     }
+
+    public Task<TrainingText?> FindVisibleAsync(Guid ownerProfileId, Guid textId, CancellationToken cancellationToken = default) =>
+        db.TrainingTexts
+            .SingleOrDefaultAsync(text => text.Id == textId && !text.IsQuarantined &&
+                (text.IsStandard || text.Visibility == TrainingTextVisibility.Organization || text.OwnerProfileId == ownerProfileId), cancellationToken);
 
     public async Task<TrainingText> GetOwnedEditableAsync(Guid ownerProfileId, Guid textId, CancellationToken cancellationToken = default)
     {

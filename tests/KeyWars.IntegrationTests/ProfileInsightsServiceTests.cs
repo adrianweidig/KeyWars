@@ -189,7 +189,7 @@ public sealed class ProfileInsightsServiceTests
             Assert.Equal(attempt.IncorrectCharacters, historyRow.IncorrectCharacters);
             Assert.Equal(attempt.ConsistencySampleCount, historyRow.ConsistencySampleCount);
             Assert.Equal(attempt.TrainingTextId, historyRow.TrainingTextId);
-            Assert.Equal(attempt.Official && attempt.FinishedAt is not null && attempt.TrainingTextId is not null, historyRow.CanStartGhost);
+            Assert.Equal(attempt.Official && attempt.CompetitionIntegrityEligible && attempt.FinishedAt is not null && attempt.TrainingTextId is not null, historyRow.CanStartGhost);
         }
         Assert.Single(insights.FeaturedAchievements);
         Assert.Single(insights.CurrentGoals);
@@ -311,7 +311,9 @@ public sealed class ProfileInsightsServiceTests
         var unofficial = Attempt(available.Id, official: false, createdAt: now.AddMinutes(-2));
         var blocked = Attempt(quarantined.Id, official: true, createdAt: now.AddMinutes(-3));
         var inaccessible = Attempt(foreignPrivate.Id, official: true, createdAt: now.AddMinutes(-4));
-        db.TypingAttempts.AddRange(eligible, unofficial, blocked, inaccessible);
+        var invalidIntegrity = Attempt(available.Id, official: true, createdAt: now.AddMinutes(-5));
+        invalidIntegrity.CompetitionIntegrityEligible = false;
+        db.TypingAttempts.AddRange(eligible, unofficial, blocked, inaccessible, invalidIntegrity);
         await db.SaveChangesAsync();
 
         var insights = await new ProfileInsightsService(db, new ManualTimeProvider(now))
@@ -321,6 +323,7 @@ public sealed class ProfileInsightsServiceTests
         Assert.False(insights.History.Single(item => item.Id == unofficial.Id).CanStartGhost);
         Assert.False(insights.History.Single(item => item.Id == blocked.Id).CanStartGhost);
         Assert.False(insights.History.Single(item => item.Id == inaccessible.Id).CanStartGhost);
+        Assert.False(insights.History.Single(item => item.Id == invalidIntegrity.Id).CanStartGhost);
 
         TrainingText Text(
             string title,
@@ -348,6 +351,7 @@ public sealed class ProfileInsightsServiceTests
             Phase = AttemptPhase.Finished,
             Completed = true,
             Official = official,
+            CompetitionIntegrityEligible = true,
             LeaderboardEligible = true,
             PreparedAt = createdAt.AddMinutes(-1),
             StartedAt = createdAt.AddSeconds(-30),

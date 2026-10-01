@@ -128,7 +128,8 @@ function attachValidationFeedback() {
   const fieldErrors = [...document.querySelectorAll(".field-validation-error[data-valmsg-for]")];
   const invalidFields = [];
 
-  summaries.forEach((summary) => {
+  summaries.forEach((summary, index) => {
+    summary.id ||= `validation-summary-${index + 1}`;
     summary.setAttribute("role", "alert");
     summary.setAttribute("aria-live", "assertive");
     summary.setAttribute("aria-atomic", "true");
@@ -153,11 +154,21 @@ function attachValidationFeedback() {
     invalidFields.push(field);
   });
 
+  document.querySelectorAll(".input-validation-error").forEach((field) => {
+    field.setAttribute("aria-invalid", "true");
+    const summary = field.form?.querySelector(".validation-summary-errors");
+    if (summary && !invalidFields.includes(field)) {
+      const describedBy = new Set((field.getAttribute("aria-describedby") || "").split(/\s+/).filter(Boolean));
+      describedBy.add(summary.id);
+      field.setAttribute("aria-describedby", [...describedBy].join(" "));
+      invalidFields.push(field);
+    }
+  });
+
   const focusTarget = summaries.find((summary) => summary.textContent.trim()) ||
     invalidFields[0];
   if (focusTarget) {
-    focusTarget.tabIndex = -1;
-    requestAnimationFrame(() => focusTarget.focus({ preventScroll: true }));
+    requestAnimationFrame(() => focusTarget.focus());
   }
 }
 

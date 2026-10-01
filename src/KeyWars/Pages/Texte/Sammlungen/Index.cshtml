@@ -13,6 +13,17 @@
 </section>
 
 <section class="grid">
+@if (Model.Collections.Count == 0)
+{
+    <article class="empty-state featured-empty illustrated-empty">
+        <img src="~/vendor/keywars-assets/illustrations/motivator-texts.svg" alt="" width="280" height="210" />
+        <div>
+            <h2>Noch keine Sammlungen</h2>
+            <p>Bündle Trainingstexte in einer Sammlung. Du entscheidest, ob sie privat bleibt oder für andere sichtbar wird.</p>
+            <a class="button" asp-page="/Texte/Sammlungen/Neu">Erste Sammlung anlegen</a>
+        </div>
+    </article>
+}
 @foreach (var collection in Model.Collections)
 {
     <article class="card">

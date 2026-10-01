@@ -43,8 +43,10 @@
                     <td data-label="Zeitpunkt">@entry.CreatedAt.LocalDateTime.ToString("g")</td>
                     <td data-label="Akteur">@entry.ActorDisplayName</td>
                     <td data-label="Ziel">
-                        @entry.TargetTitle<br />
-                        <span class="muted">@(entry.TargetType == ContentModerationTargetType.TrainingText ? "Text" : "Sammlung")</span>
+                        <div>
+                            @entry.TargetTitle<br />
+                            <span class="muted">@(entry.TargetType == ContentModerationTargetType.TrainingText ? "Text" : "Sammlung")</span>
+                        </div>
                     </td>
                     <td data-label="Aktion">
                         @(entry.Action == ContentModerationAction.Quarantine ? "Quarantänisiert" : "Nicht mehr organisationsweit")

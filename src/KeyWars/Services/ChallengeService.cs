@@ -360,8 +360,10 @@ public sealed class ChallengeService(
         AttemptSession? session = null;
         try
         {
+            // Only accepted participants receive the creator's frozen challenge text.
             session = await attempts.StartSnapshotWithoutExpirationSweepAsync(
                 profileId,
+                challenge.CreatorProfileId,
                 challenge.TrainingTextId,
                 targetTextSnapshot,
                 challenge.RatingEligible,

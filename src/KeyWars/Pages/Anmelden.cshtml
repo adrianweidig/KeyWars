@@ -2,17 +2,23 @@
 @model KeyWars.Pages.AnmeldenModel
 @{
     ViewData["Title"] = "Anmelden";
+    ViewData["BodyClass"] = "auth-entry-page";
 }
+
+<div class="auth-entry-brand">
+    <span class="brand"><span class="brand-mark" aria-hidden="true">KW</span>KeyWars</span>
+    <button type="button" class="icon-button" data-theme-toggle aria-label="Helles Design aktivieren" aria-pressed="false"><span data-theme-icon="light">@UiIcons.Svg("sun")</span><span data-theme-icon="dark">@UiIcons.Svg("moon")</span></button>
+</div>
 
 <section class="page-header">
     <div>
         <h1>Anmelden</h1>
-        <p class="lead">Melde dich mit deinem Active-Directory-Benutzernamen und Passwort an. Dein lokales KeyWars-Profil entsteht automatisch beim ersten erfolgreichen Login.</p>
+        <p class="lead">Melde dich mit deinem Active-Directory-Konto an. Dein Trainingsprofil wird beim ersten Anmelden angelegt.</p>
     </div>
 </section>
 
 <section class="card">
-    <form method="post" class="form-grid" autocomplete="off">
+    <form method="post" class="form-grid" autocomplete="off" data-submit-guard data-submit-busy-text="Anmeldung läuft …">
         <div asp-validation-summary="ModelOnly" role="alert" aria-live="assertive" aria-atomic="true" tabindex="-1"></div>
         <label>
             Benutzername

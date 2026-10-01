@@ -242,7 +242,14 @@ async function expectArenaConnected(page) {
 }
 
 async function expectMobilePageEndClearOfBottomNav(page) {
-  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await page.evaluate(() => {
+    for (const element of document.querySelectorAll(".app-main *")) {
+      if (["auto", "scroll"].includes(getComputedStyle(element).overflowY)) {
+        element.scrollTop = element.scrollHeight;
+      }
+    }
+    window.scrollTo(0, document.documentElement.scrollHeight);
+  });
   await page.waitForTimeout(100);
   const clearance = await page.evaluate(() => {
     const nav = document.querySelector(".mobile-bottom-nav");
@@ -1397,7 +1404,7 @@ test("Texttraining zeigt Absatzwechsel als Enter-Stelle", async ({ page }, testI
   const secondLine = "Der zweite Absatz beginnt sichtbar in einer neuen Zeile, damit niemand versehentlich ein Leerzeichen tippt.";
   await page.goto("/texte/neu");
   await page.getByLabel("Titel").fill(title);
-  await page.getByLabel("Text").fill(`${firstLine}\n${secondLine}`);
+  await page.getByLabel("Text", { exact: true }).fill(`${firstLine}\n${secondLine}`);
   await page.getByRole("button", { name: "Text speichern" }).click();
   await expect(page.getByRole("heading", { name: title })).toBeVisible();
 

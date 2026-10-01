@@ -13,7 +13,9 @@ public sealed class TextModel(CurrentUser currentUser, TextLibraryService texts)
     public async Task<IActionResult> OnGetAsync(Guid id, CancellationToken cancellationToken)
     {
         var profile = await currentUser.RequireProfileAsync(User, cancellationToken);
-        Text = await texts.GetVisibleAsync(profile.Id, id, cancellationToken);
+        var text = await texts.FindVisibleAsync(profile.Id, id, cancellationToken);
+        if (text is null) return NotFound();
+        Text = text;
         return Page();
     }
 }

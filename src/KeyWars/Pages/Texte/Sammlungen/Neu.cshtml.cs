@@ -44,7 +44,7 @@ public sealed class NeuModel(CurrentUser currentUser, TextLibraryService texts) 
 
     public sealed class CollectionInput
     {
-        [Required]
+        [Required(ErrorMessage = "Der Name ist erforderlich.")]
         [MaxLength(160)]
         public string Name { get; set; } = "";
         [MaxLength(400)]

@@ -581,6 +581,7 @@ public sealed class ProfileInsightsService(KeyWarsDbContext db, TimeProvider tim
                     attempt.IncorrectCharacters,
                     attempt.TrainingTextId,
                     attempt.Official &&
+                    attempt.CompetitionIntegrityEligible &&
                     attempt.FinishedAt != null &&
                     attempt.TrainingTextId != null &&
                     db.TrainingTexts.Any(text =>
@@ -607,7 +608,7 @@ public sealed class ProfileInsightsService(KeyWarsDbContext db, TimeProvider tim
                     SELECT Id, CreatedAt, Mode, Wpm, Accuracy, Consistency, ConsistencySampleCount,
                            DurationMilliseconds, CorrectCharacters, IncorrectCharacters,
                            TrainingTextId, Official, FinishedAt,
-                           CASE WHEN TrainingTextId IS NOT NULL AND EXISTS (
+                           CASE WHEN CompetitionIntegrityEligible = 1 AND TrainingTextId IS NOT NULL AND EXISTS (
                                SELECT 1
                                FROM TrainingTexts text
                                WHERE text.Id = TypingAttempts.TrainingTextId
@@ -625,7 +626,7 @@ public sealed class ProfileInsightsService(KeyWarsDbContext db, TimeProvider tim
                     SELECT Id, CreatedAt, Mode, Wpm, Accuracy, Consistency, ConsistencySampleCount,
                            DurationMilliseconds, CorrectCharacters, IncorrectCharacters,
                            TrainingTextId, Official, FinishedAt,
-                           CASE WHEN TrainingTextId IS NOT NULL AND EXISTS (
+                           CASE WHEN CompetitionIntegrityEligible = 1 AND TrainingTextId IS NOT NULL AND EXISTS (
                                SELECT 1
                                FROM TrainingTexts text
                                WHERE text.Id = TypingAttempts.TrainingTextId

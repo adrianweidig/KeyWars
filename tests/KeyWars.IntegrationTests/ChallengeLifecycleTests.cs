@@ -379,6 +379,32 @@ public sealed class ChallengeLifecycleTests
     }
 
     [Fact]
+    public async Task InvitedParticipantCanPlayPrivateChallengeSnapshotWithoutLibraryAccess()
+    {
+        await using var context = await ChallengeTestContext.CreateAsync();
+        context.Text.Visibility = TrainingTextVisibility.Private;
+        context.Text.RatingEligible = false;
+        await context.Db.SaveChangesAsync();
+        var challenge = await context.Service.CreateAsync(
+            context.Creator.Id,
+            new CreateChallengeRequest("Privates Training", context.Text.Id, ChallengeMode.Classic, [context.Invitee.Id], 1, 1));
+        await context.Service.JoinAsync(challenge.Id, context.Invitee.Id);
+
+        await Assert.ThrowsAsync<AttemptLifecycleException>(() => context.Attempts.StartAsync(
+            context.Invitee.Id, new StartAttemptRequest(TrainingMode.Text, context.Text.Id, null, null)));
+        await Assert.ThrowsAsync<ChallengeLifecycleException>(() => context.Service.StartAttemptAsync(
+            challenge.Id, Guid.CreateVersion7(), context.Attempts));
+
+        var session = await context.Service.StartAttemptAsync(challenge.Id, context.Invitee.Id, context.Attempts);
+
+        Assert.Equal(challenge.TargetTextSnapshot, session.Text);
+        Assert.Equal(TrainingTextVisibility.Private, context.Text.Visibility);
+        Assert.False(challenge.RatingEligible);
+        Assert.Single(await context.Db.ChallengeAttemptBindings.AsNoTracking()
+            .Where(item => item.ChallengeId == challenge.Id && item.UserProfileId == context.Invitee.Id).ToListAsync());
+    }
+
+    [Fact]
     public async Task NonRatedChallengeResultNeverEntersPublicChallengeBoard()
     {
         await using var context = await ChallengeTestContext.CreateAsync();

@@ -80,6 +80,10 @@ test("Formfehler werden beschrieben und fokussieren das fehlerhafte Feld", async
   await expect(username).toHaveAttribute("aria-invalid", "true");
   await expect(username).toHaveAttribute("aria-describedby", /login-username-error/);
   await expect(username).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(page.getByLabel("Passwort")).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(username).toBeFocused();
   await expectNoSeriousViolations(page, "Login mit Validierungsfehlern");
 });
 
