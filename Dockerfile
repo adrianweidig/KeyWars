@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/dotnet/sdk:10.0@sha256:e1ffd2a92ae84c1291bc1b6887501f8af98e6331e7af6d4c8d37168c5e87a64c AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0@sha256:e70cdb7f80b0348f5cb85f19a8f670fca061f033d57eed12fa003d58b0e06317 AS build
 ARG VERSION=0.1.0
 ARG REVISION=local
 ARG CREATED=unknown
@@ -28,7 +28,7 @@ RUN dotnet publish src/KeyWars/KeyWars.csproj -c Release -o /app/publish --no-re
     -p:IncludeSourceRevisionInInformationalVersion=false \
     -p:ContinuousIntegrationBuild=true
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:a4556ed033fa96f984bb7a8d348851cb2d36b1281dd2420070045f664fbb5f94 AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:222759b391a1aaf241166672c8f99b2d4ada452e7b5319f3c6e8f265a37b5ad4 AS runtime
 ARG VERSION=0.1.0
 ARG REVISION=local
 ARG CREATED=unknown
